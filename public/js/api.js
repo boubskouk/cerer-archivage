@@ -5,9 +5,15 @@
 // Configuration de l'URL de l'API
 const API_URL = (() => {
     const h = window.location.hostname;
-    return (h === 'localhost' || h === '127.0.0.1') 
-        ? 'http://localhost:4000/api' 
-        : `http://${h}:4000/api`;
+    const protocol = window.location.protocol;
+    
+    // Si localhost, utiliser http://localhost:4000
+    if (h === 'localhost' || h === '127.0.0.1') {
+        return 'http://localhost:4000/api';
+    }
+    
+    // En production, utiliser le même protocole et host que la page actuelle
+    return `${protocol}//${h}/api`;
 })();
 
 console.log('🌐 API URL:', API_URL);
