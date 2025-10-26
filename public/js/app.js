@@ -633,6 +633,13 @@ function render() {
                                     class="w-full text-sm text-gray-600 hover:text-gray-800 py-2">
                                 Créer un nouveau compte
                             </button>
+                            
+                            <!-- Message développé par -->
+                            <div class="mt-6 pt-4 border-t border-gray-200">
+                                <p class="text-center text-xs text-gray-500">
+                                    Logiciel d'archivage développé par le service informatique du C.E.R.E.R
+                                </p>
+                            </div>
                         </div>
                     `}
                 </div>
@@ -913,7 +920,7 @@ function render() {
                                    oninput="updateFormData('tags', this.value)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
                             <label class="block w-full px-6 py-4 btn-primary text-white rounded-xl text-center cursor-pointer hover:shadow-lg font-semibold transition">
-                                📎 Choisir un fichier
+                                🔎 Choisir un fichier
                                 <input type="file" onchange="handleFileUpload(event)" class="hidden">
                             </label>
                             <button onclick="toggleUploadForm()" 
@@ -989,7 +996,7 @@ function render() {
                             ` : ''}
                             <p class="flex items-center gap-2"><strong class="text-gray-700">📝 Description:</strong> ${state.selectedDoc.description || 'Aucune'}</p>
                             <p class="flex items-center gap-2"><strong class="text-gray-700">🏷️ Tags:</strong> ${state.selectedDoc.tags || 'Aucun'}</p>
-                            <p class="flex items-center gap-2"><strong class="text-gray-700">📎 Fichier:</strong> ${state.selectedDoc.nomFichier}</p>
+                            <p class="flex items-center gap-2"><strong class="text-gray-700">🔎 Fichier:</strong> ${state.selectedDoc.nomFichier}</p>
                             <p class="flex items-center gap-2"><strong class="text-gray-700">📦 Taille:</strong> ${formatSize(state.selectedDoc.taille)}</p>
                         </div>
                         <div class="flex gap-3">
