@@ -1,0 +1,99 @@
+// ============================================
+// GESTION AUTHENTIFICATION - ARCHIVAGE C.E.R.E.R
+// ============================================
+
+// Connexion
+async function login(username, password) {
+    try {
+        const result = await loginUser(username, password);
+        
+        if (result.success) {
+            state.currentUser = username;
+            state.isAuthenticated = true;
+            await loadData();
+            showNotification(`✅ Bienvenue ${username}!`);
+            return true;
+        }
+    } catch (error) {
+        return false;
+    }
+}
+
+// Inscription
+async function register(username, password, adminPassword) {
+    if (adminPassword !== '0811') {
+        showNotification('Mot de passe admin incorrect', 'error');
+        return false;
+    }
+
+    try {
+        const result = await registerUser(username, password);
+        
+        if (result.success) {
+            showNotification('✅ Compte créé avec succès!');
+            return true;
+        }
+    } catch (error) {
+        return false;
+    }
+}
+
+// Déconnexion
+function logout() {
+    if (confirm('Voulez-vous vraiment vous déconnecter?')) {
+        state.currentUser = null;
+        state.isAuthenticated = false;
+        state.documents = [];
+        state.categories = [];
+        showNotification('Déconnexion réussie');
+        render();
+    }
+}
+
+// Gestion du formulaire de connexion
+async function handleLogin() {
+    const username = document.getElementById('login_username').value.trim();
+    const password = document.getElementById('login_password').value;
+
+    if (!username || !password) {
+        showNotification('Veuillez remplir tous les champs', 'error');
+        return;
+    }
+
+    await login(username, password);
+}
+
+// Gestion du formulaire d'inscription
+async function handleRegister() {
+    const username = document.getElementById('reg_username').value.trim();
+    const password = document.getElementById('reg_password').value;
+    const passwordConfirm = document.getElementById('reg_password_confirm').value;
+    const adminPassword = document.getElementById('reg_admin_password').value;
+
+    if (!username || !password || !passwordConfirm || !adminPassword) {
+        showNotification('Veuillez remplir tous les champs', 'error');
+        return;
+    }
+
+    if (username.length < 3 || password.length < 4) {
+        showNotification('Username: 3+ caractères, Password: 4+ caractères', 'error');
+        return;
+    }
+
+    if (password !== passwordConfirm) {
+        showNotification('Les mots de passe ne correspondent pas', 'error');
+        return;
+    }
+
+    const success = await register(username, password, adminPassword);
+    if (success) {
+        state.showRegister = false;
+        render();
+    }
+}
+
+// Basculer vers le formulaire d'inscription
+function toggleRegister() {
+    state.showRegister = !state.showRegister;
+    render();
+}
