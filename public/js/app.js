@@ -24,7 +24,8 @@ const state = {
     showRegister: false,
     storageInfo: { usedMB: 0, totalMB: 1000, percentUsed: 0 },
     loading: false, 
-    importProgress: { show: false, current: 0, total: 0, message: '' }
+    importProgress: { show: false, current: 0, total: 0, message: '' },
+    sortBy: 'dateAjout_desc' // NOUVEAU : Tri par défaut
 };
 
 // Données du formulaire
@@ -205,15 +206,13 @@ function calculateStorageUsage() {
 function formatDate(dateStr) {
     if (!dateStr) return 'N/A';
     try {
-        // Gérer le format YYYY-MM-DD correctement
         const parts = dateStr.split('T')[0].split('-');
         if (parts.length === 3) {
             const [year, month, day] = parts;
             return `${day}/${month}/${year}`;
         }
-        // Fallback si le format est différent
         const date = new Date(dateStr + 'T00:00:00');
-        if (isNaN(date.getTime())) return dateStr; // Si invalide, retourner tel quel
+        if (isNaN(date.getTime())) return dateStr;
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = date.getFullYear();
@@ -408,19 +407,42 @@ function getCategoryIcon(id) {
     return state.categories.find(c => c.id === id)?.icon || '📁'; 
 }
 
+// ===== NOUVEAU : TRI DES DOCUMENTS =====
+function sortDocuments(docs) {
+    const sorted = [...docs];
+    
+    switch(state.sortBy) {
+        case 'dateAjout_desc':
+            return sorted.sort((a, b) => new Date(b.dateAjout) - new Date(a.dateAjout));
+        case 'dateAjout_asc':
+            return sorted.sort((a, b) => new Date(a.dateAjout) - new Date(b.dateAjout));
+        case 'date_desc':
+            return sorted.sort((a, b) => new Date(b.date) - new Date(a.date));
+        case 'date_asc':
+            return sorted.sort((a, b) => new Date(a.date) - new Date(b.date));
+        case 'titre_asc':
+            return sorted.sort((a, b) => a.titre.localeCompare(b.titre));
+        case 'titre_desc':
+            return sorted.sort((a, b) => b.titre.localeCompare(a.titre));
+        case 'taille_desc':
+            return sorted.sort((a, b) => (b.taille || 0) - (a.taille || 0));
+        case 'taille_asc':
+            return sorted.sort((a, b) => (a.taille || 0) - (b.taille || 0));
+        default:
+            return sorted;
+    }
+}
+
 function getFilteredDocs() {
-    return state.documents.filter(doc => {
-        // Filtre par recherche textuelle
+    let filtered = state.documents.filter(doc => {
         const matchSearch = !state.searchTerm || 
             doc.titre.toLowerCase().includes(state.searchTerm.toLowerCase()) ||
             (doc.description && doc.description.toLowerCase().includes(state.searchTerm.toLowerCase())) ||
             (doc.tags && doc.tags.toLowerCase().includes(state.searchTerm.toLowerCase()));
         
-        // Filtre par catégorie
         const matchCategory = state.selectedCategory === 'tous' || 
             doc.categorie === state.selectedCategory;
         
-        // Filtre par plage de dates
         let matchDate = true;
         if (state.dateFrom || state.dateTo) {
             const dateToCheck = state.dateType === 'ajout' ? doc.dateAjout : doc.date;
@@ -435,14 +457,23 @@ function getFilteredDocs() {
         
         return matchSearch && matchCategory && matchDate;
     });
+    
+    // NOUVEAU : Appliquer le tri
+    return sortDocuments(filtered);
+}
+
+// ===== NOUVEAU : PRÉVISUALISATION DOCUMENT =====
+async function showDocDetail(id) {
+    const doc = state.documents.find(d => d._id === id);
+    if (!doc) return;
+    
+    // Charger le contenu complet du document
+    const fullDoc = await apiCall(`/documents/${state.currentUser}/${id}`);
+    state.selectedDoc = fullDoc;
+    render();
 }
 
 // ===== ACTIONS UI =====
-function showDocDetail(id) { 
-    state.selectedDoc = state.documents.find(d => d._id === id); 
-    render(); 
-}
-
 function closeDocDetail() { 
     state.selectedDoc = null; 
     render(); 
@@ -494,8 +525,13 @@ function updateTempDateType(value) {
     state.tempDateType = value;
 }
 
+// NOUVEAU : Changer le tri
+function changeSortBy(value) {
+    state.sortBy = value;
+    render();
+}
+
 function applyFilters() {
-    // Validation des dates
     if (state.tempDateFrom && state.tempDateTo) {
         const dateDebut = new Date(state.tempDateFrom);
         const dateFin = new Date(state.tempDateTo);
@@ -566,7 +602,6 @@ function getStorageColorClass() {
 
 // ===== RENDU =====
 function render() {
-    // Options de couleurs pour les catégories
     const colorOptions = [
         { value: 'bg-blue-100 text-blue-800', label: '🔵 Bleu' },
         { value: 'bg-green-100 text-green-800', label: '🟢 Vert' },
@@ -580,7 +615,6 @@ function render() {
     
     const app = document.getElementById('app');
     
-    // Page de connexion avec logo
     if (!state.isAuthenticated) {
         app.innerHTML = `
             <div class="min-h-screen flex items-center justify-center gradient-bg">
@@ -590,9 +624,7 @@ function render() {
                             <img src="/logo_white.png" alt="Logo C.E.R.E.R" class="w-20 h-20 animate-float" style="filter: drop-shadow(0 4px 6px rgba(59, 130, 246, 0.3));" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
                             <div class="logo-icon" style="display: none;">🗄️</div>
                         </div>
-                        <h1 class="logo-text mb-2">
-                            Archivage C.E.R.E.R
-                        </h1>
+                        <h1 class="logo-text mb-2">Archivage C.E.R.E.R</h1>
                         <p class="text-gray-600 font-medium">Système de gestion documentaire</p>
                     </div>
                     
@@ -634,7 +666,6 @@ function render() {
                                 Créer un nouveau compte
                             </button>
                             
-                            <!-- Message développé par -->
                             <div class="mt-6 pt-4 border-t border-gray-200">
                                 <p class="text-center text-xs text-gray-500">
                                     Logiciel d'archivage développé par le service informatique du C.E.R.E.R
@@ -648,13 +679,11 @@ function render() {
         return;
     }
     
-    // Application principale avec design bleu/vert
     const filteredDocs = getFilteredDocs();
     const activeFilters = state.searchTerm || state.selectedCategory !== 'tous' || state.dateFrom || state.dateTo;
     
     app.innerHTML = `
         <div class="min-h-screen" style="background: linear-gradient(135deg, #e0f2fe 0%, #d1fae5 100%);">
-            <!-- Header avec logo et dégradé -->
             <header class="header-glass sticky top-0 z-40 shadow-lg">
                 <div class="max-w-7xl mx-auto px-4 py-4">
                     <div class="flex justify-between items-center mb-4">
@@ -677,7 +706,6 @@ function render() {
                         </div>
                     </div>
                     
-                    <!-- Filtres améliorés -->
                     <div class="flex flex-col gap-3">
                         <div class="flex gap-3 flex-wrap">
                             <div class="flex-1 min-w-[200px] search-bar">
@@ -688,16 +716,28 @@ function render() {
                             </div>
                             <select onchange="updateTempCategory(this.value)" 
                                     class="px-4 py-3 border-2 rounded-xl input-modern outline-none font-medium">
-                                <option value="tous" ${state.tempSelectedCategory === 'tous' ? 'selected' : ''}>📚 Toutes catégories</option>
+ value="tous" ${state.tempSelectedCategory === 'tous' ? 'selected' : ''}>📚 Toutes catégories</option>
                                 ${state.categories.map(cat => `
                                     <option value="${cat.id}" ${state.tempSelectedCategory === cat.id ? 'selected' : ''}>
                                         ${cat.icon} ${cat.nom}
                                     </option>
                                 `).join('')}
                             </select>
+                            
+                            <!-- NOUVEAU : Sélecteur de tri -->
+                            <select onchange="changeSortBy(this.value)" 
+                                    class="px-4 py-3 border-2 rounded-xl input-modern outline-none font-medium bg-white">
+                                <option value="dateAjout_desc" ${state.sortBy === 'dateAjout_desc' ? 'selected' : ''}>📅 Plus récent (ajout)</option>
+                                <option value="dateAjout_asc" ${state.sortBy === 'dateAjout_asc' ? 'selected' : ''}>📅 Plus ancien (ajout)</option>
+                                <option value="date_desc" ${state.sortBy === 'date_desc' ? 'selected' : ''}>📄 Plus récent (document)</option>
+                                <option value="date_asc" ${state.sortBy === 'date_asc' ? 'selected' : ''}>📄 Plus ancien (document)</option>
+                                <option value="titre_asc" ${state.sortBy === 'titre_asc' ? 'selected' : ''}>🔤 A → Z</option>
+                                <option value="titre_desc" ${state.sortBy === 'titre_desc' ? 'selected' : ''}>🔤 Z → A</option>
+                                <option value="taille_desc" ${state.sortBy === 'taille_desc' ? 'selected' : ''}>📦 Plus gros</option>
+                                <option value="taille_asc" ${state.sortBy === 'taille_asc' ? 'selected' : ''}>📦 Plus petit</option>
+                            </select>
                         </div>
                         
-                        <!-- Filtres de date -->
                         <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                             <div class="flex flex-col gap-3">
                                 <div class="flex items-center gap-4 flex-wrap">
@@ -766,9 +806,7 @@ function render() {
                 </div>
             </header>
             
-            <!-- Contenu principal -->
             <main class="max-w-7xl mx-auto px-4 py-8">
-                <!-- Stats bar -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     <div class="stat-card p-4 rounded-xl shadow-md border-blue-500">
                         <div class="flex items-center gap-3">
@@ -845,7 +883,6 @@ function render() {
                 ` : ''}
             </main>
             
-            <!-- Menu latéral amélioré -->
             ${state.showMenu ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 backdrop-blur-sm" onclick="toggleMenu()"></div>
                 <div class="fixed right-0 top-0 h-full w-80 sidebar-menu shadow-2xl z-50 p-6 overflow-y-auto animate-slide-in">
@@ -882,7 +919,6 @@ function render() {
                 </div>
             ` : ''}
             
-            <!-- Formulaire d'ajout amélioré -->
             ${state.showUploadForm ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" 
                      onclick="if(event.target === this) toggleUploadForm()">
@@ -932,7 +968,6 @@ function render() {
                 </div>
             ` : ''}
             
-            <!-- Gestion des catégories améliorée -->
             ${state.showCategories ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" 
                      onclick="if(event.target === this) toggleCategories()">
@@ -974,46 +1009,115 @@ function render() {
                 </div>
             ` : ''}
             
-            <!-- Détail du document amélioré -->
+            <!-- NOUVEAU : Détail du document AVEC PRÉVISUALISATION -->
             ${state.selectedDoc ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" 
                      onclick="if(event.target === this) closeDocDetail()">
-                    <div class="modal-glass rounded-2xl p-8 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                    <div class="modal-glass rounded-2xl p-8 max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
                         <div class="flex justify-between items-start mb-6">
                             <h2 class="text-3xl font-bold text-gray-800">${state.selectedDoc.titre}</h2>
-                            <button onclick="closeDocDetail()" class="text-2xl text-gray-600 hover:text-gray-800">✖</button>
+                            <button onclick="closeDocDetail()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
                         </div>
-                        <div class="space-y-4 mb-8">
-                            <div class="flex items-center gap-3">
-                                <strong class="text-gray-700">Catégorie:</strong> 
-                                <span class="category-badge inline-block px-3 py-1 text-sm rounded-full ${getCategoryColor(state.selectedDoc.categorie)} font-medium">
-                                    ${getCategoryIcon(state.selectedDoc.categorie)} ${getCategoryName(state.selectedDoc.categorie)}
+                        
+                        <!-- PRÉVISUALISATION -->
+                        <div class="mb-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6 border-2 border-gray-200">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="font-bold text-lg text-gray-700 flex items-center gap-2">
+                                    <span class="text-2xl">👁️</span> Aperçu du document
+                                </h3>
+                                <span class="text-sm text-gray-500 bg-white px-3 py-1 rounded-full">
+                                    ${state.selectedDoc.nomFichier}
                                 </span>
                             </div>
-                            <p class="flex items-center gap-2"><strong class="text-gray-700">📄 Date du document:</strong> ${formatDate(state.selectedDoc.date)}</p>
-                            ${state.selectedDoc.dateAjout ? `
-                            <p class="flex items-center gap-2"><strong class="text-gray-700">➕ Date d'ajout:</strong> ${formatDate(state.selectedDoc.dateAjout)}</p>
-                            ` : ''}
-                            <p class="flex items-center gap-2"><strong class="text-gray-700">📝 Description:</strong> ${state.selectedDoc.description || 'Aucune'}</p>
-                            <p class="flex items-center gap-2"><strong class="text-gray-700">🏷️ Tags:</strong> ${state.selectedDoc.tags || 'Aucun'}</p>
-                            <p class="flex items-center gap-2"><strong class="text-gray-700">🔎 Fichier:</strong> ${state.selectedDoc.nomFichier}</p>
-                            <p class="flex items-center gap-2"><strong class="text-gray-700">📦 Taille:</strong> ${formatSize(state.selectedDoc.taille)}</p>
+                            
+                            <div class="bg-white rounded-xl p-4 shadow-inner">
+                                ${state.selectedDoc.type.startsWith('image/') ? `
+                                    <img src="${state.selectedDoc.contenu}" 
+                                         alt="${state.selectedDoc.titre}" 
+                                         class="w-full h-auto max-h-[500px] object-contain rounded-lg cursor-zoom-in"
+                                         onclick="window.open(this.src, '_blank')"
+                                         title="Cliquer pour agrandir">
+                                ` : state.selectedDoc.type === 'application/pdf' ? `
+                                    <div class="relative" style="height: 600px;">
+                                        <iframe src="${state.selectedDoc.contenu}#toolbar=0" 
+                                                class="w-full h-full rounded-lg border-2 border-gray-200"
+                                                title="Aperçu PDF"></iframe>
+                                        <p class="text-center text-sm text-gray-600 mt-3">
+                                            💡 Faites défiler pour voir tout le document
+                                        </p>
+                                    </div>
+                                ` : `
+                                    <div class="text-center py-16">
+                                        <div class="text-6xl mb-4">📄</div>
+                                        <p class="text-gray-600 font-medium">
+                                            Aperçu non disponible pour ce type de fichier
+                                        </p>
+                                        <p class="text-sm text-gray-500 mt-2">
+                                            Type: ${state.selectedDoc.type}
+                                        </p>
+                                        <button onclick="downloadDoc(state.selectedDoc)" 
+                                                class="mt-4 px-6 py-3 btn-primary text-white rounded-xl hover:shadow-lg transition">
+                                            📥 Télécharger pour voir
+                                        </button>
+                                    </div>
+                                `}
+                            </div>
                         </div>
+                        
+                        <!-- INFORMATIONS -->
+                        <div class="space-y-4 mb-8 bg-white rounded-xl p-6 border border-gray-200">
+                            <h3 class="font-bold text-lg text-gray-800 mb-4">ℹ️ Informations</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="flex items-center gap-3">
+                                    <strong class="text-gray-700">Catégorie:</strong> 
+                                    <span class="category-badge inline-block px-3 py-1 text-sm rounded-full ${getCategoryColor(state.selectedDoc.categorie)} font-medium">
+                                        ${getCategoryIcon(state.selectedDoc.categorie)} ${getCategoryName(state.selectedDoc.categorie)}
+                                    </span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <strong class="text-gray-700">📄 Date document:</strong> 
+                                    <span class="text-gray-600">${formatDate(state.selectedDoc.date)}</span>
+                                </div>
+                                ${state.selectedDoc.dateAjout ? `
+                                <div class="flex items-center gap-2">
+                                    <strong class="text-gray-700">➕ Date d'ajout:</strong> 
+                                    <span class="text-gray-600">${formatDate(state.selectedDoc.dateAjout)}</span>
+                                </div>
+                                ` : ''}
+                                <div class="flex items-center gap-2">
+                                    <strong class="text-gray-700">📦 Taille:</strong> 
+                                    <span class="text-gray-600">${formatSize(state.selectedDoc.taille)}</span>
+                                </div>
+                            </div>
+                            ${state.selectedDoc.description ? `
+                                <div class="pt-4 border-t border-gray-200">
+                                    <strong class="text-gray-700">📝 Description:</strong>
+                                    <p class="text-gray-600 mt-2">${state.selectedDoc.description}</p>
+                                </div>
+                            ` : ''}
+                            ${state.selectedDoc.tags ? `
+                                <div class="pt-4 border-t border-gray-200">
+                                    <strong class="text-gray-700">🏷️ Tags:</strong>
+                                    <p class="text-gray-600 mt-2">${state.selectedDoc.tags}</p>
+                                </div>
+                            ` : ''}
+                        </div>
+                        
+                        <!-- ACTIONS -->
                         <div class="flex gap-3">
                             <button onclick="downloadDoc(state.selectedDoc)" 
-                                    class="flex-1 px-6 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold">
-                                📥 Télécharger
+                                    class="flex-1 px-6 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                <span class="text-xl">📥</span> Télécharger
                             </button>
                             <button onclick="deleteDoc('${state.selectedDoc._id}')" 
-                                    class="flex-1 px-6 py-4 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold">
-                                🗑️ Supprimer
+                                    class="flex-1 px-6 py-4 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                <span class="text-xl">🗑️</span> Supprimer
                             </button>
                         </div>
                     </div>
                 </div>
             ` : ''}
             
-            <!-- Modal de confirmation de suppression totale -->
             ${state.showDeleteConfirm ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div class="modal-glass rounded-2xl p-8 max-w-md w-full shadow-2xl animate-fade-in">

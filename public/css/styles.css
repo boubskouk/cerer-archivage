@@ -1,6 +1,7 @@
 /* ============================================
    STYLES PERSONNALISÉS - ARCHIVAGE C.E.R.E.R
    Design amélioré avec dégradés bleu/vert
+   + PRÉVISUALISATION DOCUMENTS
    ============================================ */
 
 /* Animations */
@@ -356,6 +357,252 @@ textarea:focus {
     }
 }
 
+/* ============================================
+   STYLES POUR PRÉVISUALISATION - NOUVEAU
+   ============================================ */
+
+/* Curseur zoom pour les images */
+.cursor-zoom-in {
+    cursor: zoom-in;
+    transition: all 0.3s ease;
+}
+
+.cursor-zoom-in:hover {
+    opacity: 0.95;
+    transform: scale(1.02);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* Animation pour l'iframe PDF */
+iframe {
+    border: none;
+    transition: all 0.3s ease;
+    background: #f9fafb;
+}
+
+iframe:hover {
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+/* Style pour la zone de prévisualisation */
+.preview-container {
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+    background: white;
+}
+
+.preview-container img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+}
+
+/* Badge du nom de fichier */
+.filename-badge {
+    background: linear-gradient(135deg, #3b82f6 0%, #10b981 100%);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+/* Animation d'agrandissement au survol des aperçus */
+.doc-preview {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.doc-preview:hover {
+    transform: scale(1.01);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* Style pour le message "Aperçu non disponible" */
+.no-preview {
+    background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+    border: 2px dashed #9ca3af;
+    border-radius: 12px;
+    padding: 3rem;
+    text-align: center;
+}
+
+.no-preview:hover {
+    border-color: #6b7280;
+    background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%);
+}
+
+/* Conteneur de prévisualisation avec ombre intérieure */
+.preview-wrapper {
+    background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* Style pour les PDF en plein écran */
+.pdf-viewer {
+    position: relative;
+    width: 100%;
+    height: 600px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.pdf-viewer iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Indicateur de type de fichier */
+.file-type-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #3b82f6;
+}
+
+/* Animation de chargement pour les images */
+@keyframes imageFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.preview-container img {
+    animation: imageFadeIn 0.5s ease-out;
+}
+
+/* Bouton de zoom plein écran */
+.zoom-button {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(10px);
+    padding: 0.75rem;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.zoom-button:hover {
+    background: white;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Message d'info pour PDF */
+.pdf-info {
+    background: linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%);
+    border-left: 4px solid #3b82f6;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+}
+
+.pdf-info p {
+    color: #1e40af;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin: 0;
+}
+
+/* Grille d'informations du document */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.info-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: #f9fafb;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.info-item:hover {
+    background: #f3f4f6;
+    transform: translateX(4px);
+}
+
+/* Style pour section d'informations */
+.info-section {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: all 0.3s ease;
+}
+
+.info-section:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border-color: #d1d5db;
+}
+
+.info-section h3 {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Séparateur stylisé */
+.divider {
+    height: 1px;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba(59, 130, 246, 0.3) 50%, 
+        transparent 100%
+    );
+    margin: 1.5rem 0;
+}
+
+/* Boutons d'action avec icônes */
+.action-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.action-button:hover {
+    gap: 0.75rem;
+}
+
+.action-button span {
+    font-size: 1.25rem;
+    transition: transform 0.3s ease;
+}
+
+.action-button:hover span {
+    transform: scale(1.2);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .logo-text {
@@ -364,5 +611,32 @@ textarea:focus {
     
     .logo-icon {
         font-size: 2rem;
+    }
+    
+    .pdf-viewer {
+        height: 400px;
+    }
+    
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .modal-glass {
+        max-width: 95vw !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .preview-wrapper {
+        padding: 1rem;
+    }
+    
+    .pdf-viewer {
+        height: 300px;
+    }
+    
+    .action-button {
+        font-size: 0.875rem;
+        padding: 0.75rem 1rem;
     }
 }
