@@ -3,6 +3,9 @@
 // Adapté au MCD avec ROLES et DEPARTEMENTS
 // ============================================
 
+// ✅ Charger les variables d'environnement depuis .env
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ObjectId } = require('mongodb');
@@ -14,8 +17,12 @@ const app = express();
 
 // Configuration
 const PORT = process.env.PORT || 4000;
-const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DB_NAME = 'cerer_archivage';
+
+// ✅ MEILLEURE PRATIQUE: URI MongoDB depuis variable d'environnement avec fallback local
+const MONGO_URI = process.env.MONGODB_URI ||
+    "mongodb://localhost:27017/cerer_archivage?retryWrites=true&w=majority";
+
+const DB_NAME = process.env.MONGODB_DB_NAME || 'cerer_archivage';
 
 let db;
 let usersCollection;
@@ -147,14 +154,30 @@ async function getAccessibleDocuments(userId) {
 // ============================================
 // CONNEXION À MONGODB
 // ============================================
-async function connectDB() {
+async function connectDB(retryCount = 0) {
+    const maxRetries = 2;
+    const retryDelay = 3000; // 3 secondes
+
     try {
         console.log('🔄 Connexion à MongoDB...');
-        
-        const client = await MongoClient.connect(MONGO_URI, {
-            serverSelectionTimeoutMS: 10000
-        });
-        
+        if (retryCount > 0) {
+            console.log(`🔄 Tentative ${retryCount + 1}/${maxRetries + 1}`);
+        }
+
+        // Masquer le mot de passe dans les logs
+        const safeUri = MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//***:***@');
+        console.log(`📍 URI: ${safeUri}`);
+
+        // Options compatibles avec MongoDB Driver v6.3.0
+        const connectionOptions = {
+            serverSelectionTimeoutMS: 10000,
+            connectTimeoutMS: 10000,
+            socketTimeoutMS: 45000
+        };
+
+        // Connexion simple et directe
+        const client = await MongoClient.connect(MONGO_URI, connectionOptions);
+
         db = client.db(DB_NAME);
         usersCollection = db.collection('users');
         documentsCollection = db.collection('documents');
@@ -162,18 +185,42 @@ async function connectDB() {
         rolesCollection = db.collection('roles');
         departementsCollection = db.collection('departements');
         deletionRequestsCollection = db.collection('deletionRequests');
-        
+
         // Créer des index
         await documentsCollection.createIndex({ idUtilisateur: 1, dateAjout: -1 });
         await documentsCollection.createIndex({ idDepartement: 1 });
         await usersCollection.createIndex({ username: 1 }, { unique: true });
-        
+
         console.log('✅ Connexion à MongoDB réussie');
-        
+        console.log(`📊 Base de données: ${DB_NAME}`);
+
         await initializeDefaultData();
-        
+
     } catch (error) {
         console.error('❌ Erreur connexion MongoDB:', error.message);
+
+        // Retry si on n'a pas atteint le max et que ce n'est pas une erreur DNS
+        const isDnsError = error.message.includes('querySrv') || error.message.includes('ENOTFOUND');
+
+        if (retryCount < maxRetries && !isDnsError) {
+            console.log(`⏳ Nouvelle tentative dans ${retryDelay/1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            return connectDB(retryCount + 1);
+        }
+
+        if (!isDnsError) {
+            console.error('\n' + '='.repeat(60));
+            console.error('❌ IMPOSSIBLE DE SE CONNECTER À MONGODB');
+            console.error('='.repeat(60));
+            console.error('💡 Vérifications à faire:');
+            console.error('   1. La variable MONGODB_URI est bien définie');
+            console.error('   2. Les identifiants sont corrects');
+            console.error('   3. L\'adresse IP du serveur est autorisée sur MongoDB Atlas');
+            console.error('      → Network Access → Add IP Address → Allow from Anywhere');
+            console.error('   4. Le réseau permet l\'accès à MongoDB (pas de firewall)');
+            console.error('='.repeat(60) + '\n');
+        }
+
         process.exit(1);
     }
 }
