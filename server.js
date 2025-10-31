@@ -332,7 +332,28 @@ app.post('/api/login', async (req, res) => {
         }
 
         // SÉCURITÉ: Comparer le mot de passe avec bcrypt
-        const isValidPassword = await bcrypt.compare(password, user.password);
+        let isValidPassword = false;
+
+        // Vérifier si c'est un hash bcrypt (commence par $2a$, $2b$, ou $2y$)
+        const isBcryptHash = /^\$2[aby]\$/.test(user.password);
+
+        if (isBcryptHash) {
+            // Nouveau format : utiliser bcrypt
+            isValidPassword = await bcrypt.compare(password, user.password);
+        } else {
+            // ⚠️ ANCIEN FORMAT : comparaison directe (TEMPORAIRE - À MIGRER)
+            isValidPassword = (password === user.password);
+
+            // Si connexion réussie, mettre à jour le mot de passe vers bcrypt
+            if (isValidPassword) {
+                console.log(`⚠️ Migration auto du mot de passe pour: ${username}`);
+                const hashedPassword = await bcrypt.hash(password, 10);
+                await usersCollection.updateOne(
+                    { _id: user._id },
+                    { $set: { password: hashedPassword } }
+                );
+            }
+        }
 
         if (!isValidPassword) {
             return res.status(401).json({
