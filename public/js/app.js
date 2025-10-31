@@ -1,31 +1,54 @@
 // ===== CONFIGURATION =====
 
+// Configuration de l'URL de l'API (si non définie par api.js)
+if (typeof API_URL === 'undefined') {
+    window.API_URL = (() => {
+        const h = window.location.hostname;
+        const protocol = window.location.protocol;
+
+        // Si localhost, utiliser http://localhost:4000
+        if (h === 'localhost' || h === '127.0.0.1') {
+            return 'http://localhost:4000/api';
+        }
+
+        // En production, utiliser le même protocole et host que la page actuelle
+        return `${protocol}//${h}/api`;
+    })();
+}
+
 // État de l'application
 const state = {
-    documents: [], 
-    categories: [], 
-    searchTerm: '', 
+    documents: [],
+    categories: [],
+    roles: [], // NOUVEAU : Liste des rôles
+    departements: [], // NOUVEAU : Liste des départements
+    searchTerm: '',
     selectedCategory: 'tous',
     dateFrom: '',
     dateTo: '',
     dateType: 'document',
-    tempSearchTerm: '', 
+    tempSearchTerm: '',
     tempSelectedCategory: 'tous',
     tempDateFrom: '',
     tempDateTo: '',
     tempDateType: 'document',
-    selectedDoc: null, 
-    showUploadForm: false, 
-    showMenu: false, 
+    selectedDoc: null,
+    showUploadForm: false,
+    showMenu: false,
     showCategories: false,
     showDeleteConfirm: false,
-    isAuthenticated: false, 
-    currentUser: null, 
+    isAuthenticated: false,
+    currentUser: null,
+    currentUserInfo: null, // Informations complètes de l'utilisateur (nom, rôle, niveau)
     showRegister: false,
     storageInfo: { usedMB: 0, totalMB: 1000, percentUsed: 0 },
-    loading: false, 
+    loading: false,
     importProgress: { show: false, current: 0, total: 0, message: '' },
-    sortBy: 'dateAjout_desc' // NOUVEAU : Tri par défaut
+    sortBy: 'dateAjout_desc', // NOUVEAU : Tri par défaut
+    showFilters: false, // NOUVEAU : Affichage du panneau de filtres
+    showShareModal: false, // NOUVEAU : Modal de partage
+    shareAvailableUsers: [], // NOUVEAU : Utilisateurs disponibles pour le partage
+    shareSelectedUsers: [] // NOUVEAU : Utilisateurs sélectionnés pour le partage
 };
 
 // Données du formulaire
@@ -67,35 +90,44 @@ async function login(username, password) {
         const result = await apiCall('/login', 'POST', { username, password });
         if (result.success) {
             state.currentUser = username;
+            state.currentUserInfo = result.user; // Stocker les infos complètes (nom, rôle, niveau)
             state.isAuthenticated = true;
             await loadData();
-            showNotification(`✅ Bienvenue ${username}!`);
+            showNotification(`✅ Bienvenue ${result.user.nom}!`);
             return true;
         }
-    } catch (error) { 
-        return false; 
+    } catch (error) {
+        return false;
     }
 }
 
-async function register(username, password, adminPassword) {
+async function register(username, password, nom, email, idRole, idDepartement, adminPassword) {
     if (adminPassword !== '0811') {
         showNotification('Mot de passe admin incorrect', 'error');
         return false;
     }
     try {
-        const result = await apiCall('/register', 'POST', { username, password });
+        const result = await apiCall('/register', 'POST', {
+            username,
+            password,
+            nom,
+            email,
+            idRole,
+            idDepartement
+        });
         if (result.success) {
             showNotification('✅ Compte créé!');
             return true;
         }
-    } catch (error) { 
-        return false; 
+    } catch (error) {
+        return false;
     }
 }
 
 function logout() {
     if (confirm('Se déconnecter?')) {
         state.currentUser = null;
+        state.currentUserInfo = null;
         state.isAuthenticated = false;
         state.documents = [];
         state.categories = [];
@@ -114,9 +146,22 @@ async function loadData() {
         state.categories = cats;
         calculateStorageUsage();
         render();
-    } catch (error) { 
-        state.loading = false; 
-        render(); 
+    } catch (error) {
+        state.loading = false;
+        render();
+    }
+}
+
+// NOUVEAU : Charger les rôles et départements
+async function loadRolesAndDepartements() {
+    try {
+        const roles = await apiCall('/roles');
+        state.roles = roles;
+        const departements = await apiCall('/departements');
+        state.departements = departements;
+        render();
+    } catch (error) {
+        console.error('Erreur chargement rôles/départements:', error);
     }
 }
 
@@ -148,14 +193,19 @@ async function deleteAllDocuments() {
 }
 
 async function confirmDeleteAll() {
-    const count = state.documents.length;
+    console.log('🗑️ Tentative de suppression pour:', state.currentUser);
+    console.log('📊 Documents actuels:', state.documents.length);
+
     try {
-        await apiCall(`/documents/${state.currentUser}/delete-all`, 'DELETE');
+        const result = await apiCall(`/documents/${state.currentUser}/delete-all`, 'DELETE');
+        console.log('✅ Réponse du serveur:', result);
+
         state.showMenu = false;
         state.showDeleteConfirm = false;
-        showNotification(`✅ ${count} documents supprimés!`);
+        showNotification(`✅ ${result.deletedCount} document(s) supprimé(s)!`);
         await loadData();
     } catch (error) {
+        console.error('❌ Erreur lors de la suppression:', error);
         showNotification('Erreur suppression', 'error');
         state.showDeleteConfirm = false;
         render();
@@ -288,6 +338,40 @@ async function handleFileUpload(e) {
         e.target.value = '';
         return;
     }
+
+    // Validation des extensions autorisées
+    const allowedExtensions = [
+        // Documents
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt',
+        '.odt', '.ods', '.odp', '.rtf', '.csv',
+        // Images
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp',
+        // Archives (optionnel)
+        '.zip', '.rar'
+    ];
+
+    const fileName = file.name.toLowerCase();
+    const isAllowed = allowedExtensions.some(ext => fileName.endsWith(ext));
+
+    if (!isAllowed) {
+        const ext = fileName.substring(fileName.lastIndexOf('.'));
+        showNotification(`❌ Extension "${ext}" non autorisée. Seuls les documents, images et archives sont acceptés.`, 'error');
+        e.target.value = '';
+        return;
+    }
+
+    // Bloquer explicitement les vidéos et audio
+    const blockedExtensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm',
+                               '.mp3', '.wav', '.ogg', '.m4a', '.exe', '.bat', '.sh', '.msi'];
+    const isBlocked = blockedExtensions.some(ext => fileName.endsWith(ext));
+
+    if (isBlocked) {
+        const ext = fileName.substring(fileName.lastIndexOf('.'));
+        showNotification(`🚫 Les fichiers ${ext} (vidéos, audio, exécutables) ne sont pas autorisés`, 'error');
+        e.target.value = '';
+        return;
+    }
+
     if (file.size > 50 * 1024 * 1024) {
         showNotification('Max 50 MB', 'error');
         e.target.value = '';
@@ -318,12 +402,27 @@ async function handleFileUpload(e) {
 }
 
 async function downloadDoc(doc) {
-    const fullDoc = await apiCall(`/documents/${state.currentUser}/${doc._id}`);
-    const link = document.createElement('a');
-    link.href = fullDoc.contenu;
-    link.download = fullDoc.nomFichier;
-    link.click();
-    showNotification('Téléchargement');
+    try {
+        // Récupérer le document complet
+        const fullDoc = await apiCall(`/documents/${state.currentUser}/${doc._id}`);
+
+        // Enregistrer le téléchargement dans l'historique
+        await apiCall(`/documents/${state.currentUser}/${doc._id}/download`, 'POST');
+
+        // Télécharger le fichier
+        const link = document.createElement('a');
+        link.href = fullDoc.contenu;
+        link.download = fullDoc.nomFichier;
+        link.click();
+
+        showNotification('📥 Téléchargement en cours...');
+
+        // Recharger les données pour mettre à jour les informations de téléchargement
+        await loadData();
+    } catch (error) {
+        console.error('Erreur téléchargement:', error);
+        showNotification('Erreur lors du téléchargement', 'error');
+    }
 }
 
 // ===== IMPORT/EXPORT =====
@@ -410,26 +509,47 @@ function getCategoryIcon(id) {
 // ===== NOUVEAU : TRI DES DOCUMENTS =====
 function sortDocuments(docs) {
     const sorted = [...docs];
-    
+
     switch(state.sortBy) {
         case 'dateAjout_desc':
-            return sorted.sort((a, b) => new Date(b.dateAjout) - new Date(a.dateAjout));
+            return sorted.sort((a, b) => {
+                const dateA = a.dateAjout ? new Date(a.dateAjout) : new Date(0);
+                const dateB = b.dateAjout ? new Date(b.dateAjout) : new Date(0);
+                return dateB - dateA; // Plus récent en premier
+            });
         case 'dateAjout_asc':
-            return sorted.sort((a, b) => new Date(a.dateAjout) - new Date(b.dateAjout));
+            return sorted.sort((a, b) => {
+                const dateA = a.dateAjout ? new Date(a.dateAjout) : new Date(0);
+                const dateB = b.dateAjout ? new Date(b.dateAjout) : new Date(0);
+                return dateA - dateB; // Plus ancien en premier
+            });
         case 'date_desc':
-            return sorted.sort((a, b) => new Date(b.date) - new Date(a.date));
+            return sorted.sort((a, b) => {
+                const dateA = a.date ? new Date(a.date) : new Date(0);
+                const dateB = b.date ? new Date(b.date) : new Date(0);
+                return dateB - dateA;
+            });
         case 'date_asc':
-            return sorted.sort((a, b) => new Date(a.date) - new Date(b.date));
+            return sorted.sort((a, b) => {
+                const dateA = a.date ? new Date(a.date) : new Date(0);
+                const dateB = b.date ? new Date(b.date) : new Date(0);
+                return dateA - dateB;
+            });
         case 'titre_asc':
-            return sorted.sort((a, b) => a.titre.localeCompare(b.titre));
+            return sorted.sort((a, b) => (a.titre || '').localeCompare(b.titre || ''));
         case 'titre_desc':
-            return sorted.sort((a, b) => b.titre.localeCompare(a.titre));
+            return sorted.sort((a, b) => (b.titre || '').localeCompare(a.titre || ''));
         case 'taille_desc':
             return sorted.sort((a, b) => (b.taille || 0) - (a.taille || 0));
         case 'taille_asc':
             return sorted.sort((a, b) => (a.taille || 0) - (b.taille || 0));
         default:
-            return sorted;
+            // Par défaut, tri par date d'ajout décroissant
+            return sorted.sort((a, b) => {
+                const dateA = a.dateAjout ? new Date(a.dateAjout) : new Date(0);
+                const dateB = b.dateAjout ? new Date(b.dateAjout) : new Date(0);
+                return dateB - dateA;
+            });
     }
 }
 
@@ -496,13 +616,75 @@ function toggleCategories() {
     render(); 
 }
 
-function toggleRegister() { 
-    state.showRegister = !state.showRegister; 
-    render(); 
+function toggleRegister() {
+    state.showRegister = !state.showRegister;
+    render();
 }
 
-function updateFormData(field, value) { 
-    formData[field] = value; 
+// ===== PARTAGE DE DOCUMENTS =====
+async function openShareModal(docId) {
+    try {
+        // Charger la liste des utilisateurs disponibles
+        const result = await apiCall(`/users-for-sharing/${state.currentUser}`);
+        if (result.success) {
+            state.shareAvailableUsers = result.users;
+            state.shareSelectedUsers = [];
+            state.showShareModal = true;
+            render();
+        }
+    } catch (error) {
+        showNotification('Erreur lors du chargement des utilisateurs', 'error');
+    }
+}
+
+function closeShareModal() {
+    state.showShareModal = false;
+    state.shareAvailableUsers = [];
+    state.shareSelectedUsers = [];
+    render();
+}
+
+function toggleUserSelection(username) {
+    const index = state.shareSelectedUsers.indexOf(username);
+    if (index > -1) {
+        // Désélectionner
+        state.shareSelectedUsers.splice(index, 1);
+    } else {
+        // Sélectionner
+        state.shareSelectedUsers.push(username);
+    }
+    render();
+}
+
+async function confirmShare() {
+    if (!state.selectedDoc || state.shareSelectedUsers.length === 0) {
+        showNotification('Veuillez sélectionner au moins un utilisateur', 'error');
+        return;
+    }
+
+    try {
+        const result = await apiCall(
+            `/documents/${state.currentUser}/${state.selectedDoc._id}/share`,
+            'POST',
+            { targetUsers: state.shareSelectedUsers }
+        );
+
+        if (result.success) {
+            showNotification(`✅ Document partagé avec ${state.shareSelectedUsers.length} utilisateur(s)`);
+            closeShareModal();
+        }
+    } catch (error) {
+        showNotification('Erreur lors du partage', 'error');
+    }
+}
+
+function toggleFilters() {
+    state.showFilters = !state.showFilters;
+    render();
+}
+
+function updateFormData(field, value) {
+    formData[field] = value;
 }
 
 function updateTempSearch(value) { 
@@ -572,23 +754,28 @@ async function handleLogin() {
 }
 
 async function handleRegister() {
+    const nom = document.getElementById('reg_nom').value.trim();
+    const email = document.getElementById('reg_email').value.trim();
     const username = document.getElementById('reg_username').value.trim();
     const password = document.getElementById('reg_password').value;
     const passwordConfirm = document.getElementById('reg_password_confirm').value;
+    const idRole = document.getElementById('reg_role').value;
+    const idDepartement = document.getElementById('reg_departement').value;
     const adminPassword = document.getElementById('reg_admin_password').value;
-    if (!username || !password || !passwordConfirm || !adminPassword) {
-        return showNotification('Remplir tous', 'error');
+
+    if (!nom || !email || !username || !password || !passwordConfirm || !idRole || !idDepartement || !adminPassword) {
+        return showNotification('Veuillez remplir tous les champs', 'error');
     }
     if (username.length < 3 || password.length < 4) {
         return showNotification('Username: 3+, Password: 4+', 'error');
     }
     if (password !== passwordConfirm) {
-        return showNotification('Mots de passe différents', 'error');
+        return showNotification('Les mots de passe ne correspondent pas', 'error');
     }
-    const success = await register(username, password, adminPassword);
-    if (success) { 
-        state.showRegister = false; 
-        render(); 
+    const success = await register(username, password, nom, email, idRole, idDepartement, adminPassword);
+    if (success) {
+        state.showRegister = false;
+        render();
     }
 }
 
@@ -629,21 +816,50 @@ function render() {
                     </div>
                     
                     ${state.showRegister ? `
-                        <div class="space-y-4">
-                            <h2 class="text-xl font-semibold text-gray-700">Créer un compte</h2>
-                            <input id="reg_username" type="text" placeholder="Nom d'utilisateur (3+ caractères)" 
+                        <div class="space-y-3">
+                            <h2 class="text-xl font-semibold text-gray-700 mb-2">Créer un compte</h2>
+
+                            <input id="reg_nom" type="text" placeholder="Nom complet"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                            <input id="reg_password" type="password" placeholder="Mot de passe (4+ caractères)" 
+
+                            <input id="reg_email" type="email" placeholder="Email"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                            <input id="reg_password_confirm" type="password" placeholder="Confirmer le mot de passe" 
+
+                            <input id="reg_username" type="text" placeholder="Nom d'utilisateur (3+ caractères)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                            <input id="reg_admin_password" type="password" placeholder="Mot de passe administrateur" 
+
+                            <input id="reg_password" type="password" placeholder="Mot de passe (4+ caractères)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                            <button onclick="handleRegister()" 
+
+                            <input id="reg_password_confirm" type="password" placeholder="Confirmer le mot de passe"
+                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+
+                            <select id="reg_role" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                <option value="">-- Choisir un rôle --</option>
+                                ${state.roles.map(role => `
+                                    <option value="${role._id}">
+                                        ${role.libelle.charAt(0).toUpperCase() + role.libelle.slice(1)} - ${role.description}
+                                    </option>
+                                `).join('')}
+                            </select>
+
+                            <select id="reg_departement" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                <option value="">-- Choisir un département --</option>
+                                ${state.departements.map(dept => `
+                                    <option value="${dept._id}">
+                                        ${dept.nom}
+                                    </option>
+                                `).join('')}
+                            </select>
+
+                            <input id="reg_admin_password" type="password" placeholder="Mot de passe administrateur"
+                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+
+                            <button onclick="handleRegister()"
                                     class="w-full btn-success text-white py-3 rounded-xl font-semibold transition">
                                 Créer le compte
                             </button>
-                            <button onclick="toggleRegister()" 
+                            <button onclick="toggleRegister()"
                                     class="w-full text-gray-600 hover:text-gray-800 py-2">
                                 ← Retour à la connexion
                             </button>
@@ -684,61 +900,100 @@ function render() {
     
     app.innerHTML = `
         <div class="min-h-screen" style="background: linear-gradient(135deg, #e0f2fe 0%, #d1fae5 100%);">
+            <!-- HEADER ULTRA-COMPACT -->
             <header class="header-glass sticky top-0 z-40 shadow-lg">
-                <div class="max-w-7xl mx-auto px-4 py-4">
-                    <div class="flex justify-between items-center mb-4">
+                <div class="max-w-7xl mx-auto px-4 py-3">
+                    <div class="flex justify-between items-center">
                         <div class="logo-container">
-                            <img src="/logo_white.png" alt="Logo C.E.R.E.R" class="w-16 h-16 animate-float" style="filter: drop-shadow(0 4px 6px rgba(59, 130, 246, 0.3));">
+                            <img src="/logo_white.png" alt="Logo C.E.R.E.R" class="w-10 h-10" style="filter: drop-shadow(0 2px 4px rgba(59, 130, 246, 0.3));">
                             <div>
-                                <h1 class="logo-text">C.E.R.E.R</h1>
-                                <p class="text-sm text-gray-600">Bonjour, <strong>${state.currentUser}</strong></p>
+                                <h1 class="logo-text" style="font-size: 1rem;">C.E.R.E.R</h1>
+                                <p class="text-xs text-gray-600">Bonjour, <strong>${state.currentUser}</strong></p>
                             </div>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="toggleUploadForm()" 
-                                    class="px-6 py-3 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold">
+                            <button onclick="toggleUploadForm()"
+                                    class="px-4 py-2 btn-primary text-white rounded-lg hover:shadow-lg transition text-sm font-semibold">
                                 ➕ Ajouter
                             </button>
-                            <button onclick="toggleMenu()" 
-                                    class="px-4 py-3 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-lg transition">
+                            <button onclick="toggleFilters()"
+                                    class="px-4 py-2 ${state.showFilters ? 'bg-gradient-to-br from-blue-500 to-green-500 text-white' : 'bg-gradient-to-br from-gray-100 to-gray-200'} rounded-lg hover:shadow-lg transition text-sm font-semibold">
+                                🔍 Filtres
+                            </button>
+                            <button onclick="toggleMenu()"
+                                    class="px-3 py-2 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg hover:shadow-lg transition">
                                 ☰
                             </button>
                         </div>
                     </div>
-                    
-                    <div class="flex flex-col gap-3">
+                </div>
+
+                <!-- PANNEAU DE FILTRES ESCAMOTABLE -->
+                ${state.showFilters ? `
+                <div class="border-t border-gray-200 bg-gradient-to-br from-blue-50 to-green-50" style="animation: slideDown 0.3s ease-out;">
+                    <div class="max-w-7xl mx-auto px-4 py-4 space-y-4">
+                        <!-- Statistiques -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div class="bg-white p-3 rounded-lg shadow-sm border-l-4 border-blue-500">
+                                <div class="flex items-center gap-2">
+                                    <div class="text-2xl">📊</div>
+                                    <div>
+                                        <p class="text-xs text-gray-600">Total documents</p>
+                                        <p class="text-xl font-bold text-blue-600">${state.documents.length}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-white p-3 rounded-lg shadow-sm border-l-4 border-green-500">
+                                <div class="flex items-center gap-2">
+                                    <div class="text-2xl">📁</div>
+                                    <div>
+                                        <p class="text-xs text-gray-600">Catégories</p>
+                                        <p class="text-xl font-bold text-green-600">${state.categories.length}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-white p-3 rounded-lg shadow-sm border-l-4 border-purple-500">
+                                <div class="flex items-center gap-2">
+                                    <div class="text-2xl">💾</div>
+                                    <div>
+                                        <p class="text-xs text-gray-600">Stockage</p>
+                                        <p class="text-xl font-bold text-purple-600">${state.storageInfo.usedMB} MB</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="flex gap-3 flex-wrap">
-                            <div class="flex-1 min-w-[200px] search-bar">
-                                <input type="text" placeholder="🔍 Rechercher un document..." 
+                            <div class="flex-1 min-w-[200px]">
+                                <input type="text" placeholder="🔍 Rechercher..."
                                        value="${state.tempSearchTerm}"
                                        oninput="updateTempSearch(this.value)"
-                                       class="w-full px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition">
+                                       class="w-full px-4 py-2 text-sm rounded-lg border-2 focus:ring-2 focus:ring-blue-500 outline-none">
                             </div>
-                            <select onchange="updateTempCategory(this.value)" 
-                                    class="px-4 py-3 border-2 rounded-xl input-modern outline-none font-medium">
- value="tous" ${state.tempSelectedCategory === 'tous' ? 'selected' : ''}>📚 Toutes catégories</option>
+                            <select onchange="updateTempCategory(this.value)"
+                                    class="px-4 py-2 text-sm border-2 rounded-lg outline-none font-medium">
+                                <option value="tous" ${state.tempSelectedCategory === 'tous' ? 'selected' : ''}>🔍 Aucun filtre (Toutes catégories)</option>
                                 ${state.categories.map(cat => `
                                     <option value="${cat.id}" ${state.tempSelectedCategory === cat.id ? 'selected' : ''}>
                                         ${cat.icon} ${cat.nom}
                                     </option>
                                 `).join('')}
                             </select>
-                            
-                            <!-- NOUVEAU : Sélecteur de tri -->
-                            <select onchange="changeSortBy(this.value)" 
-                                    class="px-4 py-3 border-2 rounded-xl input-modern outline-none font-medium bg-white">
-                                <option value="dateAjout_desc" ${state.sortBy === 'dateAjout_desc' ? 'selected' : ''}>📅 Plus récent (ajout)</option>
-                                <option value="dateAjout_asc" ${state.sortBy === 'dateAjout_asc' ? 'selected' : ''}>📅 Plus ancien (ajout)</option>
-                                <option value="date_desc" ${state.sortBy === 'date_desc' ? 'selected' : ''}>📄 Plus récent (document)</option>
-                                <option value="date_asc" ${state.sortBy === 'date_asc' ? 'selected' : ''}>📄 Plus ancien (document)</option>
+                            <select onchange="changeSortBy(this.value)"
+                                    class="px-4 py-2 text-sm border-2 rounded-lg outline-none font-medium bg-white">
+                                <option value="" ${state.sortBy === '' ? 'selected' : ''}>🔍 Aucun tri spécifique</option>
+                                <option value="dateAjout_desc" ${state.sortBy === 'dateAjout_desc' ? 'selected' : ''}>📅 Plus récent ajout</option>
+                                <option value="dateAjout_asc" ${state.sortBy === 'dateAjout_asc' ? 'selected' : ''}>📅 Plus ancien ajout</option>
+                                <option value="date_desc" ${state.sortBy === 'date_desc' ? 'selected' : ''}>📄 Plus récent document</option>
+                                <option value="date_asc" ${state.sortBy === 'date_asc' ? 'selected' : ''}>📄 Plus ancien document</option>
                                 <option value="titre_asc" ${state.sortBy === 'titre_asc' ? 'selected' : ''}>🔤 A → Z</option>
                                 <option value="titre_desc" ${state.sortBy === 'titre_desc' ? 'selected' : ''}>🔤 Z → A</option>
-                                <option value="taille_desc" ${state.sortBy === 'taille_desc' ? 'selected' : ''}>📦 Plus gros</option>
-                                <option value="taille_asc" ${state.sortBy === 'taille_asc' ? 'selected' : ''}>📦 Plus petit</option>
+                                <option value="taille_desc" ${state.sortBy === 'taille_desc' ? 'selected' : ''}>📦 Plus grande taille</option>
+                                <option value="taille_asc" ${state.sortBy === 'taille_asc' ? 'selected' : ''}>📦 Plus petite taille</option>
                             </select>
                         </div>
-                        
-                        <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+
+                        <div class="bg-white border-2 border-blue-200 rounded-lg p-3">
                             <div class="flex flex-col gap-3">
                                 <div class="flex items-center gap-4 flex-wrap">
                                     <span class="text-sm font-bold text-blue-800">📅 Filtrer par date:</span>
@@ -777,71 +1032,40 @@ function render() {
                             </div>
                         </div>
                         
-                        <div class="flex gap-2">
-                            <button onclick="applyFilters()" 
-                                    class="px-6 py-3 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold">
-                                🔎 Filtrer
+                        <div class="flex gap-2 flex-wrap">
+                            <button onclick="applyFilters()"
+                                    class="px-6 py-2 btn-primary text-white rounded-lg hover:shadow-lg transition text-sm font-semibold">
+                                🔎 Appliquer
                             </button>
                             ${activeFilters ? `
-                                <button onclick="resetFilters()" 
-                                        class="px-6 py-3 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold">
+                                <button onclick="resetFilters()"
+                                        class="px-6 py-2 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-lg hover:shadow-lg transition text-sm font-semibold">
                                     ✖ Réinitialiser
                                 </button>
                             ` : ''}
+                            <button onclick="toggleFilters()"
+                                    class="px-6 py-2 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg hover:shadow-lg transition text-sm font-semibold ml-auto">
+                                ⬆ Masquer les filtres
+                            </button>
                         </div>
                         
                         ${activeFilters ? `
-                            <div class="bg-green-50 border-2 border-green-200 rounded-xl p-3">
+                            <div class="bg-green-50 border-2 border-green-200 rounded-lg p-3">
                                 <p class="text-sm text-green-800">
-                                    <strong>✓ ${filteredDocs.length}</strong> document(s) trouvé(s) sur <strong>${state.documents.length}</strong>
-                                    ${state.searchTerm ? ` • Recherche: "${state.searchTerm}"` : ''}
-                                    ${state.selectedCategory !== 'tous' ? ` • Catégorie: ${getCategoryName(state.selectedCategory)}` : ''}
-                                    ${state.dateFrom || state.dateTo ? ` • ${state.dateType === 'ajout' ? 'Date d\'ajout' : 'Date du document'}` : ''}
-                                    ${state.dateFrom ? ` • Depuis: ${formatDate(state.dateFrom)}` : ''}
-                                    ${state.dateTo ? ` • Jusqu'à: ${formatDate(state.dateTo)}` : ''}
+                                    <strong>✓ ${filteredDocs.length}</strong> document(s) sur <strong>${state.documents.length}</strong>
+                                    ${state.searchTerm ? ` • "${state.searchTerm}"` : ''}
+                                    ${state.selectedCategory !== 'tous' ? ` • ${getCategoryName(state.selectedCategory)}` : ''}
+                                    ${state.dateFrom ? ` • ${formatDate(state.dateFrom)}` : ''}
+                                    ${state.dateTo ? ` → ${formatDate(state.dateTo)}` : ''}
                                 </p>
                             </div>
                         ` : ''}
                     </div>
                 </div>
+                ` : ''}
             </header>
             
-            <main class="max-w-7xl mx-auto px-4 py-8">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div class="stat-card p-4 rounded-xl shadow-md border-blue-500">
-                        <div class="flex items-center gap-3">
-                            <div class="text-3xl">📊</div>
-                            <div>
-                                <p class="text-sm text-gray-600">Total documents</p>
-                                <p class="text-2xl font-bold text-blue-600">${state.documents.length}</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="stat-card p-4 rounded-xl shadow-md border-green-500">
-                        <div class="flex items-center gap-3">
-                            <div class="text-3xl">📁</div>
-                            <div>
-                                <p class="text-sm text-gray-600">Catégories</p>
-                                <p class="text-2xl font-bold text-green-600">${state.categories.length}</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="stat-card p-4 rounded-xl shadow-md border-purple-500">
-                        <div class="flex items-center gap-3">
-                            <div class="text-3xl">💾</div>
-                            <div>
-                                <p class="text-sm text-gray-600">Stockage utilisé</p>
-                                <p class="text-2xl font-bold text-purple-600">${state.storageInfo.usedMB} MB</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="mb-6 flex justify-between items-center">
-                    <h2 class="text-xl font-bold text-gray-800">
-                        ${filteredDocs.length} document(s) ${activeFilters ? 'trouvé(s)' : ''}
-                    </h2>
-                </div>
+            <main class="max-w-7xl mx-auto px-4 py-4">
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     ${filteredDocs.map(doc => `
@@ -1046,6 +1270,72 @@ function render() {
                                             💡 Faites défiler pour voir tout le document
                                         </p>
                                     </div>
+                                ` : state.selectedDoc.type.includes('word') || state.selectedDoc.type.includes('document') || state.selectedDoc.nomFichier.endsWith('.doc') || state.selectedDoc.nomFichier.endsWith('.docx') ? `
+                                    <div class="text-center py-16">
+                                        <div class="text-6xl mb-4">📝</div>
+                                        <p class="text-gray-700 font-bold text-xl mb-2">
+                                            Document Microsoft Word
+                                        </p>
+                                        <p class="text-gray-600 text-base mt-3 mb-2">
+                                            <strong>Fichier:</strong> ${state.selectedDoc.nomFichier}
+                                        </p>
+                                        <p class="text-gray-600 text-base mb-4">
+                                            <strong>Taille:</strong> ${formatSize(state.selectedDoc.taille)}
+                                        </p>
+                                        <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mx-auto max-w-md mb-4">
+                                            <p class="text-sm text-blue-800 font-medium">
+                                                💡 Téléchargez ce document pour l'ouvrir dans Microsoft Word
+                                            </p>
+                                        </div>
+                                        <button onclick="downloadDoc(state.selectedDoc)"
+                                                class="mt-2 px-8 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold text-lg">
+                                            📥 Télécharger le document
+                                        </button>
+                                    </div>
+                                ` : state.selectedDoc.type.includes('excel') || state.selectedDoc.type.includes('sheet') || state.selectedDoc.nomFichier.endsWith('.xls') || state.selectedDoc.nomFichier.endsWith('.xlsx') ? `
+                                    <div class="text-center py-16">
+                                        <div class="text-6xl mb-4">📊</div>
+                                        <p class="text-gray-700 font-bold text-xl mb-2">
+                                            Tableur Microsoft Excel
+                                        </p>
+                                        <p class="text-gray-600 text-base mt-3 mb-2">
+                                            <strong>Fichier:</strong> ${state.selectedDoc.nomFichier}
+                                        </p>
+                                        <p class="text-gray-600 text-base mb-4">
+                                            <strong>Taille:</strong> ${formatSize(state.selectedDoc.taille)}
+                                        </p>
+                                        <div class="bg-green-50 border-2 border-green-200 rounded-lg p-4 mx-auto max-w-md mb-4">
+                                            <p class="text-sm text-green-800 font-medium">
+                                                💡 Téléchargez ce tableur pour l'ouvrir dans Microsoft Excel
+                                            </p>
+                                        </div>
+                                        <button onclick="downloadDoc(state.selectedDoc)"
+                                                class="mt-2 px-8 py-4 btn-success text-white rounded-xl hover:shadow-lg transition font-semibold text-lg">
+                                            📥 Télécharger le tableur
+                                        </button>
+                                    </div>
+                                ` : state.selectedDoc.type.includes('powerpoint') || state.selectedDoc.type.includes('presentation') || state.selectedDoc.nomFichier.endsWith('.ppt') || state.selectedDoc.nomFichier.endsWith('.pptx') ? `
+                                    <div class="text-center py-16">
+                                        <div class="text-6xl mb-4">🎞️</div>
+                                        <p class="text-gray-700 font-bold text-xl mb-2">
+                                            Présentation PowerPoint
+                                        </p>
+                                        <p class="text-gray-600 text-base mt-3 mb-2">
+                                            <strong>Fichier:</strong> ${state.selectedDoc.nomFichier}
+                                        </p>
+                                        <p class="text-gray-600 text-base mb-4">
+                                            <strong>Taille:</strong> ${formatSize(state.selectedDoc.taille)}
+                                        </p>
+                                        <div class="bg-orange-50 border-2 border-orange-200 rounded-lg p-4 mx-auto max-w-md mb-4">
+                                            <p class="text-sm text-orange-800 font-medium">
+                                                💡 Téléchargez cette présentation pour l'ouvrir dans PowerPoint
+                                            </p>
+                                        </div>
+                                        <button onclick="downloadDoc(state.selectedDoc)"
+                                                class="mt-2 px-8 py-4 bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl hover:shadow-lg transition font-semibold text-lg">
+                                            📥 Télécharger la présentation
+                                        </button>
+                                    </div>
                                 ` : `
                                     <div class="text-center py-16">
                                         <div class="text-6xl mb-4">📄</div>
@@ -1055,7 +1345,7 @@ function render() {
                                         <p class="text-sm text-gray-500 mt-2">
                                             Type: ${state.selectedDoc.type}
                                         </p>
-                                        <button onclick="downloadDoc(state.selectedDoc)" 
+                                        <button onclick="downloadDoc(state.selectedDoc)"
                                                 class="mt-4 px-6 py-3 btn-primary text-white rounded-xl hover:shadow-lg transition">
                                             📥 Télécharger pour voir
                                         </button>
@@ -1101,15 +1391,47 @@ function render() {
                                     <p class="text-gray-600 mt-2">${state.selectedDoc.tags}</p>
                                 </div>
                             ` : ''}
+
+                            <!-- ✅ TRAÇABILITÉ -->
+                            ${state.selectedDoc.archivePar ? `
+                                <div class="pt-4 border-t border-gray-200">
+                                    <strong class="text-gray-700">👤 Archivé par:</strong>
+                                    <p class="text-gray-600 mt-2">
+                                        ${state.selectedDoc.archivePar.nomComplet}
+                                        <span class="text-sm text-gray-500">
+                                            (le ${formatDate(state.selectedDoc.archivePar.date)} à ${new Date(state.selectedDoc.archivePar.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })})
+                                        </span>
+                                    </p>
+                                </div>
+                            ` : ''}
+
+                            ${state.selectedDoc.dernierTelechargement ? `
+                                <div class="pt-4 border-t border-gray-200">
+                                    <strong class="text-gray-700">📥 Dernier téléchargement:</strong>
+                                    <p class="text-gray-600 mt-2">
+                                        ${formatDate(state.selectedDoc.dernierTelechargement.date)}
+                                        à ${new Date(state.selectedDoc.dernierTelechargement.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                        ${state.currentUserInfo && state.currentUserInfo.roleNiveau === 1 ? `
+                                            <br><span class="text-sm">Par: <strong>${state.selectedDoc.dernierTelechargement.nomComplet}</strong></span>
+                                        ` : ''}
+                                    </p>
+                                </div>
+                            ` : ''}
                         </div>
-                        
+
                         <!-- ACTIONS -->
                         <div class="flex gap-3">
-                            <button onclick="downloadDoc(state.selectedDoc)" 
+                            <button onclick="downloadDoc(state.selectedDoc)"
                                     class="flex-1 px-6 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
                                 <span class="text-xl">📥</span> Télécharger
                             </button>
-                            <button onclick="deleteDoc('${state.selectedDoc._id}')" 
+                            ${state.selectedDoc.idUtilisateur === state.currentUser ? `
+                                <button onclick="openShareModal('${state.selectedDoc._id}')"
+                                        class="flex-1 px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    <span class="text-xl">📤</span> Partager
+                                </button>
+                            ` : ''}
+                            <button onclick="deleteDoc('${state.selectedDoc._id}')"
                                     class="flex-1 px-6 py-4 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
                                 <span class="text-xl">🗑️</span> Supprimer
                             </button>
@@ -1125,11 +1447,11 @@ function render() {
                         <p class="text-lg mb-4">TOUS tes <strong>${state.documents.length} documents</strong> seront DÉFINITIVEMENT supprimés!</p>
                         <p class="text-gray-700 mb-6">Es-tu VRAIMENT sûr(e)?</p>
                         <div class="flex gap-3">
-                            <button onclick="confirmDeleteAll()" 
+                            <button onclick="confirmDeleteAll()"
                                     class="flex-1 px-6 py-4 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold">
                                 ✅ OUI, tout supprimer
                             </button>
-                            <button onclick="cancelDeleteAll()" 
+                            <button onclick="cancelDeleteAll()"
                                     class="flex-1 px-6 py-4 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
                                 ❌ Annuler
                             </button>
@@ -1137,7 +1459,60 @@ function render() {
                     </div>
                 </div>
             ` : ''}
-            
+
+            ${state.showShareModal ? `
+                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                     onclick="if(event.target === this) closeShareModal()">
+                    <div class="modal-glass rounded-2xl p-8 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                        <div class="flex justify-between items-start mb-6">
+                            <h2 class="text-3xl font-bold text-gray-800">📤 Partager le document</h2>
+                            <button onclick="closeShareModal()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                        </div>
+
+                        <div class="mb-6">
+                            <p class="text-gray-600 mb-2">Document: <strong>${state.selectedDoc ? state.selectedDoc.titre : ''}</strong></p>
+                            <p class="text-sm text-gray-500">Sélectionnez les utilisateurs avec qui partager ce document</p>
+                        </div>
+
+                        ${state.shareAvailableUsers.length === 0 ? `
+                            <div class="text-center py-8">
+                                <div class="text-4xl mb-3">👥</div>
+                                <p class="text-gray-600">Chargement des utilisateurs...</p>
+                            </div>
+                        ` : `
+                            <div class="space-y-2 max-h-96 overflow-y-auto mb-6">
+                                ${state.shareAvailableUsers.map(user => `
+                                    <label class="flex items-center gap-3 p-4 bg-white rounded-xl hover:shadow-md transition cursor-pointer border-2 ${state.shareSelectedUsers.includes(user.username) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}">
+                                        <input type="checkbox"
+                                               ${state.shareSelectedUsers.includes(user.username) ? 'checked' : ''}
+                                               onchange="toggleUserSelection('${user.username}')"
+                                               class="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500">
+                                        <div class="flex-1">
+                                            <div class="font-semibold text-gray-800">${user.nom}</div>
+                                            <div class="text-sm text-gray-600">
+                                                ${user.email} • ${user.departement}
+                                            </div>
+                                        </div>
+                                    </label>
+                                `).join('')}
+                            </div>
+
+                            <div class="flex gap-3">
+                                <button onclick="confirmShare()"
+                                        class="flex-1 px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2"
+                                        ${state.shareSelectedUsers.length === 0 ? 'disabled opacity-50 cursor-not-allowed' : ''}>
+                                    <span class="text-xl">✅</span> Partager avec ${state.shareSelectedUsers.length} utilisateur(s)
+                                </button>
+                                <button onclick="closeShareModal()"
+                                        class="px-6 py-4 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
+                                    ❌ Annuler
+                                </button>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            ` : ''}
+
             ${state.loading ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center backdrop-blur-sm">
                     <div class="modal-glass p-8 rounded-2xl shadow-2xl">
@@ -1152,3 +1527,4 @@ function render() {
 
 // Initialisation
 render();
+loadRolesAndDepartements(); // Charger les rôles et départements au démarrage

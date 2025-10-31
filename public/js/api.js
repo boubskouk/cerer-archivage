@@ -94,6 +94,55 @@ async function loginUser(username, password) {
     return await apiCall('/login', 'POST', { username, password });
 }
 
-async function registerUser(username, password) {
-    return await apiCall('/register', 'POST', { username, password });
+async function registerUser(username, password, nom, email, idRole, idDepartement) {
+    return await apiCall('/register', 'POST', {
+        username,
+        password,
+        nom,
+        email,
+        idRole,
+        idDepartement
+    });
+}
+
+// Rôles et Départements
+async function getRoles() {
+    return await apiCall('/roles');
+}
+
+async function getDepartements() {
+    return await apiCall('/departements');
+}
+
+async function getUserInfo(username) {
+    return await apiCall(`/users/${username}`);
+}
+
+// ============================================
+// DEMANDES DE SUPPRESSION (NOUVEAU)
+// ============================================
+
+// Récupérer les demandes de suppression en attente (niveau 1 uniquement)
+async function getDeletionRequests(userId) {
+    return await apiCall(`/deletion-requests/${userId}`);
+}
+
+// Approuver une demande de suppression (niveau 1 uniquement)
+async function approveDeletionRequest(requestId, userId) {
+    return await apiCall(`/deletion-requests/${requestId}/approve`, 'POST', { userId });
+}
+
+// Rejeter une demande de suppression (niveau 1 uniquement)
+async function rejectDeletionRequest(requestId, userId, motifRejet) {
+    return await apiCall(`/deletion-requests/${requestId}/reject`, 'POST', { userId, motifRejet });
+}
+
+// Récupérer l'historique des demandes
+async function getDeletionRequestHistory(userId) {
+    return await apiCall(`/deletion-requests/${userId}/history`);
+}
+
+// Enregistrer un téléchargement
+async function recordDownload(userId, docId) {
+    return await apiCall(`/documents/${userId}/${docId}/download`, 'POST');
 }

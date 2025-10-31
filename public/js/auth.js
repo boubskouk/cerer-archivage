@@ -20,15 +20,15 @@ async function login(username, password) {
 }
 
 // Inscription
-async function register(username, password, adminPassword) {
+async function register(username, password, nom, email, idRole, idDepartement, adminPassword) {
     if (adminPassword !== '0811') {
         showNotification('Mot de passe admin incorrect', 'error');
         return false;
     }
 
     try {
-        const result = await registerUser(username, password);
-        
+        const result = await registerUser(username, password, nom, email, idRole, idDepartement);
+
         if (result.success) {
             showNotification('✅ Compte créé avec succès!');
             return true;
@@ -65,12 +65,16 @@ async function handleLogin() {
 
 // Gestion du formulaire d'inscription
 async function handleRegister() {
+    const nom = document.getElementById('reg_nom').value.trim();
+    const email = document.getElementById('reg_email').value.trim();
     const username = document.getElementById('reg_username').value.trim();
     const password = document.getElementById('reg_password').value;
     const passwordConfirm = document.getElementById('reg_password_confirm').value;
+    const idRole = document.getElementById('reg_role').value;
+    const idDepartement = document.getElementById('reg_departement').value;
     const adminPassword = document.getElementById('reg_admin_password').value;
 
-    if (!username || !password || !passwordConfirm || !adminPassword) {
+    if (!nom || !email || !username || !password || !passwordConfirm || !idRole || !idDepartement || !adminPassword) {
         showNotification('Veuillez remplir tous les champs', 'error');
         return;
     }
@@ -85,7 +89,7 @@ async function handleRegister() {
         return;
     }
 
-    const success = await register(username, password, adminPassword);
+    const success = await register(username, password, nom, email, idRole, idDepartement, adminPassword);
     if (success) {
         state.showRegister = false;
         render();
