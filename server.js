@@ -709,29 +709,32 @@ app.post('/api/documents/:userId/:docId/download', async (req, res) => {
             });
         }
 
-        // Enregistrer le téléchargement
+        // Récupérer le rôle de l'utilisateur pour avoir le niveau
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+
+        // Enregistrer le téléchargement avec nom et niveau
         const now = new Date();
+        const downloadInfo = {
+            date: now,
+            utilisateur: userId,
+            nomComplet: user.nom,
+            niveau: userRole ? userRole.niveau : null,
+            role: userRole ? userRole.libelle : null
+        };
+
         await documentsCollection.updateOne(
             { _id: new ObjectId(docId) },
             {
                 $set: {
-                    dernierTelechargement: {
-                        date: now,
-                        utilisateur: userId,
-                        nomComplet: user.nom
-                    }
+                    dernierTelechargement: downloadInfo
                 },
                 $push: {
-                    historiqueTelechargements: {
-                        date: now,
-                        utilisateur: userId,
-                        nomComplet: user.nom
-                    }
+                    historiqueTelechargements: downloadInfo
                 }
             }
         );
 
-        console.log(`📥 Téléchargement enregistré: ${userId} a téléchargé le document ${docId}`);
+        console.log(`📥 Téléchargement enregistré: ${userId} (niveau ${downloadInfo.niveau}) a téléchargé le document ${docId}`);
 
         res.json({ success: true });
 
