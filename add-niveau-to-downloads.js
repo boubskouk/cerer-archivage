@@ -40,15 +40,16 @@ async function addNiveauToDownloads() {
             const updates = {};
 
             // Mettre à jour dernierTelechargement
-            if (doc.dernierTelechargement && !doc.dernierTelechargement.niveau) {
+            if (doc.dernierTelechargement && (!doc.dernierTelechargement.niveau || !doc.dernierTelechargement.email)) {
                 const user = await usersCollection.findOne({ username: doc.dernierTelechargement.utilisateur });
                 if (user) {
                     const role = await rolesCollection.findOne({ _id: user.idRole });
                     if (role) {
                         updates['dernierTelechargement.niveau'] = role.niveau;
                         updates['dernierTelechargement.role'] = role.libelle;
+                        updates['dernierTelechargement.email'] = user.email;
                         needsUpdate = true;
-                        console.log(`📝 Ajout niveau ${role.niveau} pour dernier téléchargement de ${doc.dernierTelechargement.utilisateur}`);
+                        console.log(`📝 Ajout niveau ${role.niveau} et email ${user.email} pour dernier téléchargement de ${doc.dernierTelechargement.utilisateur}`);
                     }
                 }
             }
@@ -59,13 +60,14 @@ async function addNiveauToDownloads() {
                 let historyChanged = false;
 
                 for (const download of doc.historiqueTelechargements) {
-                    if (!download.niveau) {
+                    if (!download.niveau || !download.email) {
                         const user = await usersCollection.findOne({ username: download.utilisateur });
                         if (user) {
                             const role = await rolesCollection.findOne({ _id: user.idRole });
                             if (role) {
                                 download.niveau = role.niveau;
                                 download.role = role.libelle;
+                                download.email = user.email;
                                 historyChanged = true;
                             }
                         }

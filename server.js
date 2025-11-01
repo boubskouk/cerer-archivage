@@ -712,12 +712,13 @@ app.post('/api/documents/:userId/:docId/download', async (req, res) => {
         // Récupérer le rôle de l'utilisateur pour avoir le niveau
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
 
-        // Enregistrer le téléchargement avec nom et niveau
+        // Enregistrer le téléchargement avec nom, email et niveau
         const now = new Date();
         const downloadInfo = {
             date: now,
             utilisateur: userId,
             nomComplet: user.nom,
+            email: user.email,
             niveau: userRole ? userRole.niveau : null,
             role: userRole ? userRole.libelle : null
         };
@@ -734,7 +735,7 @@ app.post('/api/documents/:userId/:docId/download', async (req, res) => {
             }
         );
 
-        console.log(`📥 Téléchargement enregistré: ${userId} (niveau ${downloadInfo.niveau}) a téléchargé le document ${docId}`);
+        console.log(`📥 Téléchargement enregistré: ${user.nom} (${user.email}, niveau ${downloadInfo.niveau}) a téléchargé le document ${docId}`);
 
         res.json({ success: true });
 
