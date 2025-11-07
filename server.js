@@ -31,6 +31,8 @@ let categoriesCollection;
 let rolesCollection;
 let departementsCollection;
 let deletionRequestsCollection;
+let messagesCollection;
+let shareHistoryCollection;
 
 // ============================================
 // MIDDLEWARE
@@ -39,6 +41,65 @@ app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ============================================
+// GÉNÉRATEUR D'ID UNIQUE POUR LES DOCUMENTS
+// ============================================
+
+// ✅ NOUVEAU: Fonction pour générer un ID UNIQUE avec HMST (Heure-Minute-Seconde-Tierce)
+// Format: DOC-YYYYMMDD-HHMMSSTTT-RRRR
+// - YYYYMMDD: Date complète
+// - HH: Heures (00-23)
+// - MM: Minutes (00-59)
+// - SS: Secondes (00-59)
+// - TTT: Millisecondes (000-999) - "Tierce"
+// - RRRR: Identifiant aléatoire sur 4 chiffres pour garantir l'unicité absolue
+async function generateDocumentId() {
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    while (attempts < maxAttempts) {
+        const now = new Date();
+
+        // Date: YYYYMMDD
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const datePrefix = `${year}${month}${day}`;
+
+        // Heure: HHMMSSTTT (Heure-Minute-Seconde-Tierce/Millisecondes)
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+        const hmst = `${hours}${minutes}${seconds}${milliseconds}`;
+
+        // Identifiant aléatoire pour garantir l'unicité absolue
+        const randomId = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+
+        const documentId = `DOC-${datePrefix}-${hmst}-${randomId}`;
+
+        // Vérifier que cet ID n'existe pas déjà dans la base
+        const existingDoc = await documentsCollection.findOne({ idDocument: documentId });
+
+        if (!existingDoc) {
+            console.log(`✅ ID unique généré: ${documentId}`);
+            return documentId;
+        }
+
+        console.warn(`⚠️ Collision détectée pour ${documentId}, nouvelle tentative...`);
+        attempts++;
+
+        // Attendre 1ms avant de réessayer
+        await new Promise(resolve => setTimeout(resolve, 1));
+    }
+
+    // Si après 10 tentatives on n'a pas trouvé d'ID unique, utiliser un timestamp complet
+    const timestamp = Date.now();
+    const fallbackId = `DOC-${timestamp}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+    console.warn(`⚠️ Utilisation d'un ID de secours: ${fallbackId}`);
+    return fallbackId;
+}
 
 // ============================================
 // GESTION DES PERMISSIONS
@@ -185,6 +246,8 @@ async function connectDB(retryCount = 0) {
         rolesCollection = db.collection('roles');
         departementsCollection = db.collection('departements');
         deletionRequestsCollection = db.collection('deletionRequests');
+        messagesCollection = db.collection('messages');
+        shareHistoryCollection = db.collection('shareHistory');
 
         // Créer des index
         await documentsCollection.createIndex({ idUtilisateur: 1, dateAjout: -1 });
@@ -413,15 +476,15 @@ app.post('/api/login', async (req, res) => {
         const role = await rolesCollection.findOne({ _id: user.idRole });
         const departement = await departementsCollection.findOne({ _id: user.idDepartement });
         
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             username,
             user: {
                 username: user.username,
                 nom: user.nom,
                 email: user.email,
                 role: role.libelle,
-                roleNiveau: role.niveau,
+                niveau: role.niveau,  // ✅ CORRECTION: "niveau" au lieu de "roleNiveau"
                 departement: departement.nom
             }
         });
@@ -542,7 +605,7 @@ app.get('/api/users/:username', async (req, res) => {
 // Ajouter un document
 app.post('/api/documents', async (req, res) => {
     try {
-        const { userId, titre, categorie, date, dateAjout, description, tags, nomFichier, taille, type, contenu } = req.body;
+        const { userId, titre, categorie, date, description, tags, nomFichier, taille, type, contenu, departementArchivage } = req.body;
         
         if (!userId || !titre || !nomFichier) {
             return res.status(400).json({
@@ -594,12 +657,23 @@ app.post('/api/documents', async (req, res) => {
             });
         }
 
+        // Récupérer le rôle et le département de l'utilisateur
+        const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
+        const departement = await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) });
+
+        // Déterminer le département d'archivage (celui sélectionné ou celui de l'utilisateur par défaut)
+        const idDeptArchivage = departementArchivage || user.idDepartement;
+        const deptArchivage = await departementsCollection.findOne({ _id: new ObjectId(idDeptArchivage) });
+
+        // Générer l'ID unique du document
+        const idDocument = await generateDocumentId();
+
         const document = {
+            idDocument,  // ID unique généré par le serveur
             idUtilisateur: userId,
             titre,
-            idCategorie: categorie,
+            categorie: categorie,  // ✅ CORRECTION: categorie au lieu de idCategorie
             date: date || new Date(),
-            dateAjout: dateAjout || new Date(),
             description,
             tags,
             nomFichier,
@@ -608,15 +682,24 @@ app.post('/api/documents', async (req, res) => {
             contenu,
             idDepartement: user.idDepartement,
             createdAt: new Date(),
+            // ✅ Département d'archivage
+            departementArchivage: deptArchivage ? deptArchivage.nom : null,
+            idDepartementArchivage: idDeptArchivage,
             // ✅ Informations de l'archiveur
             archivePar: {
                 utilisateur: userId,
                 nomComplet: user.nom,
+                email: user.email,
+                niveau: role ? role.niveau : null,
+                role: role ? role.libelle : null,
+                departement: departement ? departement.nom : null,
                 date: new Date()
             },
-            // ✅ Initialiser les champs de téléchargement
+            // ✅ Initialiser les champs de téléchargement et consultation
             dernierTelechargement: null,
-            historiqueTelechargements: []
+            historiqueTelechargements: [],
+            derniereConsultation: null,
+            historiqueConsultations: []
         };
         
         const result = await documentsCollection.insertOne(document);
@@ -664,24 +747,89 @@ app.get('/api/documents/:userId', async (req, res) => {
 app.get('/api/documents/:userId/:docId', async (req, res) => {
     try {
         const { userId, docId } = req.params;
-        
+
         const canAccess = await canAccessDocument(userId, docId);
         if (!canAccess) {
-            return res.status(403).json({ 
-                message: 'Accès refusé à ce document' 
+            return res.status(403).json({
+                message: 'Accès refusé à ce document'
             });
         }
-        
-        const document = await documentsCollection.findOne({ 
+
+        const document = await documentsCollection.findOne({
             _id: new ObjectId(docId)
         });
-        
+
         if (!document) {
             return res.status(404).json({ message: 'Document non trouvé' });
         }
-        
-        res.json(document);
-        
+
+        // Enregistrer la consultation
+        const user = await usersCollection.findOne({ username: userId });
+        if (user) {
+            const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
+            const departement = await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) });
+
+            const consultationInfo = {
+                utilisateur: userId,
+                nomComplet: user.nom,
+                email: user.email,
+                niveau: role ? role.niveau : null,
+                role: role ? role.libelle : null,
+                departement: departement ? departement.nom : null,
+                date: new Date()
+            };
+
+            await documentsCollection.updateOne(
+                { _id: new ObjectId(docId) },
+                {
+                    $set: {
+                        derniereConsultation: consultationInfo
+                    },
+                    $push: {
+                        historiqueConsultations: consultationInfo
+                    }
+                }
+            );
+
+            console.log(`👁️ Consultation enregistrée: ${user.nom} (${user.email}, niveau ${role?.niveau}) a consulté le document ${docId}`);
+        }
+
+        // ✅ Récupérer l'historique des partages depuis la collection shareHistory
+        const shareHistory = await shareHistoryCollection
+            .find({ documentId: new ObjectId(docId) })
+            .sort({ sharedAt: -1 })
+            .toArray();
+
+        // Enrichir l'historique des partages avec les informations des utilisateurs
+        const enrichedShareHistory = await Promise.all(shareHistory.map(async (share) => {
+            const sharedByUser = await usersCollection.findOne({ username: share.sharedBy });
+            const sharedWithUser = await usersCollection.findOne({ username: share.sharedWith });
+
+            const sharedByRole = sharedByUser ? await rolesCollection.findOne({ _id: sharedByUser.idRole }) : null;
+            const sharedWithRole = sharedWithUser ? await rolesCollection.findOne({ _id: sharedWithUser.idRole }) : null;
+
+            const sharedByDept = sharedByUser ? await departementsCollection.findOne({ _id: sharedByUser.idDepartement }) : null;
+            const sharedWithDept = sharedWithUser ? await departementsCollection.findOne({ _id: sharedWithUser.idDepartement }) : null;
+
+            return {
+                ...share,
+                sharedByRole: sharedByRole ? sharedByRole.libelle : null,
+                sharedByNiveau: sharedByRole ? sharedByRole.niveau : null,
+                sharedByDepartement: sharedByDept ? sharedByDept.nom : null,
+                sharedWithRole: sharedWithRole ? sharedWithRole.libelle : null,
+                sharedWithNiveau: sharedWithRole ? sharedWithRole.niveau : null,
+                sharedWithDepartement: sharedWithDept ? sharedWithDept.nom : null
+            };
+        }));
+
+        // Ajouter l'historique des partages au document
+        const documentWithShareHistory = {
+            ...document,
+            historiquePartages: enrichedShareHistory
+        };
+
+        res.json(documentWithShareHistory);
+
     } catch (error) {
         console.error('Erreur récupération document:', error);
         res.status(500).json({ message: 'Erreur serveur' });
@@ -799,6 +947,44 @@ app.post('/api/documents/:userId/:docId/share', async (req, res) => {
             { $set: { sharedWith: newSharedWith } }
         );
 
+        // ✅ NOUVEAU: Enregistrer l'historique des partages ET envoyer un message
+        const sharer = await usersCollection.findOne({ username: userId });
+        for (const targetUser of targetUsers) {
+            // Ne pas enregistrer si déjà partagé précédemment
+            if (!currentSharedWith.includes(targetUser)) {
+                const targetUserInfo = await usersCollection.findOne({ username: targetUser });
+                await shareHistoryCollection.insertOne({
+                    documentId: new ObjectId(docId),
+                    documentTitle: document.titre,
+                    documentIdDocument: document.idDocument,
+                    sharedBy: userId,
+                    sharedByName: sharer ? sharer.nom : userId,
+                    sharedWith: targetUser,
+                    sharedWithName: targetUserInfo ? targetUserInfo.nom : targetUser,
+                    sharedAt: new Date()
+                });
+
+                // 📧 Envoyer un message automatique de notification de partage
+                const sharerName = sharer ? sharer.nom : userId;
+                await messagesCollection.insertOne({
+                    from: userId,
+                    fromName: sharerName,
+                    to: targetUser,
+                    toName: targetUserInfo ? targetUserInfo.nom : targetUser,
+                    subject: `📄 Document partagé avec vous : ${document.titre}`,
+                    body: `Bonjour,\n\n${sharerName} a partagé le document "${document.titre}" (${document.idDocument}) avec vous.\n\nVous pouvez maintenant consulter ce document dans votre espace de documents partagés.\n\n---\nNotification automatique - C.E.R.E.R`,
+                    type: 'document-share',
+                    read: false,
+                    createdAt: new Date(),
+                    relatedData: {
+                        documentId: docId,
+                        documentTitle: document.titre,
+                        sharedBy: userId
+                    }
+                });
+            }
+        }
+
         console.log(`📤 Document ${docId} partagé par ${userId} avec ${targetUsers.join(', ')}`);
 
         res.json({
@@ -903,6 +1089,32 @@ app.get('/api/documents/:userId/:docId/shared-users', async (req, res) => {
 
     } catch (error) {
         console.error('Erreur récupération utilisateurs partagés:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer tous les utilisateurs
+app.get('/api/users', async (req, res) => {
+    try {
+        const allUsers = await usersCollection.find({}).toArray();
+
+        // Enrichir avec les informations du rôle et département
+        const usersWithInfo = await Promise.all(allUsers.map(async (user) => {
+            const role = await rolesCollection.findOne({ _id: user.idRole });
+            const dept = await departementsCollection.findOne({ _id: user.idDepartement });
+            return {
+                username: user.username,
+                nom: user.nom,
+                email: user.email,
+                role: role ? role.libelle : 'Non défini',
+                niveau: role ? role.niveau : null,
+                departement: dept ? dept.nom : 'Non défini'
+            };
+        }));
+
+        res.json(usersWithInfo);
+    } catch (error) {
+        console.error('Erreur récupération utilisateurs:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
@@ -1071,10 +1283,41 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
 
             console.log(`📝 Demande de suppression créée: ${request.insertedId} par ${userId} pour document ${docId}`);
 
+            // ✅ Envoyer un message aux administrateurs niveau 1 du même département
+            try {
+                const nivel1Users = await usersCollection.find({
+                    idDepartement: user.idDepartement
+                }).toArray();
+
+                // Filtrer pour ne garder que ceux qui ont le rôle niveau 1
+                for (const nivel1User of nivel1Users) {
+                    const nivel1Role = await rolesCollection.findOne({ _id: nivel1User.idRole });
+                    if (nivel1Role && nivel1Role.niveau === 1) {
+                        // Créer un message pour chaque admin niveau 1
+                        await messagesCollection.insertOne({
+                            from: userId,
+                            fromName: user.nom,
+                            to: nivel1User.username,
+                            toName: nivel1User.nom,
+                            subject: `📝 Nouvelle demande de suppression - ${document.titre}`,
+                            body: `Bonjour ${nivel1User.nom},\n\n${user.nom} (${userId}) a créé une demande de suppression pour le document suivant :\n\n📄 Titre: ${document.titre}\n🆔 ID Document: ${document.idDocument}\n💬 Motif: ${req.body.motif || 'Non spécifié'}\n\nVeuillez vous rendre dans la section "Demandes de suppression" pour approuver ou rejeter cette demande.\n\nMerci`,
+                            type: 'deletion-request',
+                            relatedData: { requestId: request.insertedId.toString(), documentId: docId },
+                            read: false,
+                            createdAt: new Date()
+                        });
+                        console.log(`📧 Message envoyé à ${nivel1User.username} pour la demande ${request.insertedId}`);
+                    }
+                }
+            } catch (msgError) {
+                console.error('⚠️ Erreur envoi messages notification:', msgError);
+                // On continue même si l'envoi échoue
+            }
+
             return res.json({
                 success: false,
                 requiresApproval: true,
-                message: 'Demande de suppression créée. Un utilisateur de niveau 1 doit l\'approuver.',
+                message: 'Demande de suppression créée. Les administrateurs niveau 1 ont été notifiés.',
                 requestId: request.insertedId
             });
         }
@@ -1497,14 +1740,47 @@ app.post('/api/categories', async (req, res) => {
     }
 });
 
+// Modifier une catégorie
+app.put('/api/categories/:userId/:catId', async (req, res) => {
+    try {
+        const { userId, catId } = req.params;
+        const { nom, couleur, icon } = req.body;
+
+        if (!nom) {
+            return res.status(400).json({
+                success: false,
+                message: 'Le nom est requis'
+            });
+        }
+
+        const result = await categoriesCollection.updateOne(
+            { idUtilisateur: userId, id: catId },
+            { $set: { nom, couleur, icon } }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Catégorie non trouvée'
+            });
+        }
+
+        res.json({ success: true });
+
+    } catch (error) {
+        console.error('Erreur modification catégorie:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
 app.delete('/api/categories/:userId/:catId', async (req, res) => {
     try {
         const { userId, catId } = req.params;
 
         // Réaffecter les documents de cette catégorie vers "autre"
         await documentsCollection.updateMany(
-            { idUtilisateur: userId, idCategorie: catId },
-            { $set: { idCategorie: 'autre' } }
+            { idUtilisateur: userId, categorie: catId },
+            { $set: { categorie: 'autre' } }
         );
 
         // Supprimer la catégorie
@@ -1547,6 +1823,568 @@ app.get('/api/departements', async (req, res) => {
         res.json(departements);
     } catch (error) {
         res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// Ajouter un département
+app.post('/api/departements', async (req, res) => {
+    try {
+        const { nom, code } = req.body;
+
+        if (!nom || !code) {
+            return res.status(400).json({ message: 'Nom et code requis' });
+        }
+
+        const nouveauDepartement = {
+            _id: new ObjectId(),
+            nom,
+            code,
+            dateCreation: new Date()
+        };
+
+        await departementsCollection.insertOne(nouveauDepartement);
+        res.json({ message: 'Département créé', departement: nouveauDepartement });
+    } catch (error) {
+        console.error('Erreur création département:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// Modifier un département
+app.put('/api/departements/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nom, code } = req.body;
+
+        if (!nom || !code) {
+            return res.status(400).json({ message: 'Nom et code requis' });
+        }
+
+        const result = await departementsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { nom, code } }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ message: 'Département non trouvé' });
+        }
+
+        res.json({ message: 'Département modifié' });
+    } catch (error) {
+        console.error('Erreur modification département:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer un département
+app.delete('/api/departements/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await departementsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Département non trouvé' });
+        }
+
+        res.json({ message: 'Département supprimé' });
+    } catch (error) {
+        console.error('Erreur suppression département:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTES DEMANDES DE SUPPRESSION
+// ============================================
+
+// Créer une demande de suppression (NIVEAU 2)
+app.post('/api/deletion-requests', async (req, res) => {
+    try {
+        const { documentId, requestedBy } = req.body;
+
+        if (!documentId || !requestedBy) {
+            return res.status(400).json({ success: false, message: 'Données manquantes' });
+        }
+
+        // Récupérer le document
+        const document = await documentsCollection.findOne({ _id: new ObjectId(documentId) });
+        if (!document) {
+            return res.status(404).json({ success: false, message: 'Document non trouvé' });
+        }
+
+        // Récupérer l'utilisateur qui fait la demande
+        const requester = await usersCollection.findOne({ username: requestedBy });
+        if (!requester) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Vérifier que l'utilisateur est bien niveau 2
+        const requesterRole = await rolesCollection.findOne({ _id: new ObjectId(requester.idRole) });
+        if (!requesterRole || requesterRole.niveau !== 2) {
+            return res.status(403).json({ success: false, message: 'Seuls les utilisateurs de niveau 2 peuvent faire des demandes' });
+        }
+
+        // Vérifier que le document appartient bien à cet utilisateur
+        if (document.idUtilisateur !== requestedBy) {
+            return res.status(403).json({ success: false, message: 'Vous ne pouvez demander la suppression que de vos propres documents' });
+        }
+
+        // Créer la demande de suppression
+        const deletionRequest = {
+            documentId: new ObjectId(documentId),
+            documentTitle: document.titre,
+            documentIdDocument: document.idDocument,
+            requestedBy,
+            requesterName: requester.nom,
+            requesterDepartment: requester.idDepartement,
+            status: 'pending', // pending, approved, rejected
+            createdAt: new Date(),
+            processedAt: null,
+            processedBy: null,
+            rejectionReason: null
+        };
+
+        const insertResult = await deletionRequestsCollection.insertOne(deletionRequest);
+
+        // ✅ NOUVEAU: Envoyer un message aux administrateurs niveau 1 du même département
+        // Trouver tous les utilisateurs niveau 1 du même département
+        const nivel1Users = await usersCollection.find({
+            idDepartement: requester.idDepartement
+        }).toArray();
+
+        // Filtrer pour ne garder que ceux qui ont le rôle niveau 1
+        for (const user of nivel1Users) {
+            const userRole = await rolesCollection.findOne({ _id: user.idRole });
+            if (userRole && userRole.niveau === 1) {
+                // Créer un message pour chaque admin niveau 1
+                await messagesCollection.insertOne({
+                    from: requestedBy,
+                    fromName: requester.nom,
+                    to: user.username,
+                    toName: user.nom,
+                    subject: `📝 Demande de suppression - ${document.titre}`,
+                    body: `${requester.nom} demande la suppression du document "${document.titre}" (ID: ${document.idDocument}).\n\nVeuillez consulter votre boîte de réception pour approuver ou rejeter cette demande.`,
+                    type: 'deletion-request',
+                    relatedData: {
+                        requestId: insertResult.insertedId.toString(),
+                        documentId: documentId,
+                        documentTitle: document.titre,
+                        documentIdDocument: document.idDocument
+                    },
+                    read: false,
+                    createdAt: new Date()
+                });
+            }
+        }
+
+        res.json({ success: true, message: 'Demande de suppression envoyée' });
+    } catch (error) {
+        console.error('Erreur création demande suppression:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les demandes de suppression pour un département (NIVEAU 1)
+app.get('/api/deletion-requests/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Récupérer l'utilisateur
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+
+        // Vérifier que l'utilisateur est niveau 1
+        const userRole = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
+        if (!userRole || userRole.niveau !== 1) {
+            return res.status(403).json({ message: 'Accès réservé aux niveau 1' });
+        }
+
+        // Récupérer toutes les demandes du département de cet utilisateur
+        const requests = await deletionRequestsCollection.find({
+            requesterDepartment: user.idDepartement,
+            status: 'pending'
+        }).sort({ createdAt: -1 }).toArray();
+
+        res.json(requests);
+    } catch (error) {
+        console.error('Erreur récupération demandes:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// Approuver une demande de suppression (NIVEAU 1)
+app.put('/api/deletion-requests/:requestId/approve', async (req, res) => {
+    try {
+        const { requestId } = req.params;
+        const { approvedBy } = req.body;
+
+        if (!approvedBy) {
+            return res.status(400).json({ success: false, message: 'approvedBy requis' });
+        }
+
+        // Récupérer la demande
+        const request = await deletionRequestsCollection.findOne({ _id: new ObjectId(requestId) });
+        if (!request) {
+            return res.status(404).json({ success: false, message: 'Demande non trouvée' });
+        }
+
+        // Vérifier que l'utilisateur est niveau 1
+        const approver = await usersCollection.findOne({ username: approvedBy });
+        const approverRole = await rolesCollection.findOne({ _id: new ObjectId(approver.idRole) });
+        if (!approverRole || approverRole.niveau !== 1) {
+            return res.status(403).json({ success: false, message: 'Seuls les niveau 1 peuvent approuver' });
+        }
+
+        // Supprimer le document
+        await documentsCollection.deleteOne({ _id: request.documentId });
+
+        // Mettre à jour la demande
+        await deletionRequestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            {
+                $set: {
+                    status: 'approved',
+                    processedAt: new Date(),
+                    processedBy: approvedBy
+                }
+            }
+        );
+
+        // ✅ NOUVEAU: Envoyer un message de confirmation au demandeur (niveau 2)
+        await messagesCollection.insertOne({
+            from: approvedBy,
+            fromName: approver.nom,
+            to: request.requestedBy,
+            toName: request.requesterName,
+            subject: `✅ Demande de suppression approuvée - ${request.documentTitle}`,
+            body: `Votre demande de suppression du document "${request.documentTitle}" (ID: ${request.documentIdDocument}) a été approuvée par ${approver.nom}.\n\nLe document a été supprimé avec succès.`,
+            type: 'deletion-response',
+            relatedData: {
+                requestId: requestId,
+                approved: true,
+                documentTitle: request.documentTitle,
+                documentIdDocument: request.documentIdDocument
+            },
+            read: false,
+            createdAt: new Date()
+        });
+
+        res.json({ success: true, message: 'Document supprimé avec succès' });
+    } catch (error) {
+        console.error('Erreur approbation demande:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Rejeter une demande de suppression (NIVEAU 1)
+app.put('/api/deletion-requests/:requestId/reject', async (req, res) => {
+    try {
+        const { requestId } = req.params;
+        const { rejectedBy, reason } = req.body;
+
+        if (!rejectedBy) {
+            return res.status(400).json({ success: false, message: 'rejectedBy requis' });
+        }
+
+        // Récupérer la demande
+        const request = await deletionRequestsCollection.findOne({ _id: new ObjectId(requestId) });
+        if (!request) {
+            return res.status(404).json({ success: false, message: 'Demande non trouvée' });
+        }
+
+        // Vérifier que l'utilisateur est niveau 1
+        const rejecter = await usersCollection.findOne({ username: rejectedBy });
+        const rejecterRole = await rolesCollection.findOne({ _id: new ObjectId(rejecter.idRole) });
+        if (!rejecterRole || rejecterRole.niveau !== 1) {
+            return res.status(403).json({ success: false, message: 'Seuls les niveau 1 peuvent rejeter' });
+        }
+
+        // Mettre à jour la demande
+        const rejectionReason = reason || 'Aucune raison fournie';
+        await deletionRequestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            {
+                $set: {
+                    status: 'rejected',
+                    processedAt: new Date(),
+                    processedBy: rejectedBy,
+                    rejectionReason: rejectionReason
+                }
+            }
+        );
+
+        // ✅ NOUVEAU: Envoyer un message de rejet au demandeur (niveau 2)
+        await messagesCollection.insertOne({
+            from: rejectedBy,
+            fromName: rejecter.nom,
+            to: request.requestedBy,
+            toName: request.requesterName,
+            subject: `❌ Demande de suppression rejetée - ${request.documentTitle}`,
+            body: `Votre demande de suppression du document "${request.documentTitle}" (ID: ${request.documentIdDocument}) a été rejetée par ${rejecter.nom}.\n\nRaison du rejet:\n${rejectionReason}`,
+            type: 'deletion-response',
+            relatedData: {
+                requestId: requestId,
+                approved: false,
+                documentTitle: request.documentTitle,
+                documentIdDocument: request.documentIdDocument,
+                reason: rejectionReason
+            },
+            read: false,
+            createdAt: new Date()
+        });
+
+        res.json({ success: true, message: 'Demande rejetée' });
+    } catch (error) {
+        console.error('Erreur rejet demande:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTES DE MESSAGERIE INTERNE
+// ============================================
+
+// Envoyer un message
+app.post('/api/messages', async (req, res) => {
+    try {
+        const { from, to, subject, body, type, relatedData } = req.body;
+
+        if (!from || !to || !subject || !body) {
+            return res.status(400).json({ success: false, message: 'Données manquantes' });
+        }
+
+        // Vérifier que l'expéditeur et le destinataire existent
+        const sender = await usersCollection.findOne({ username: from });
+        const recipient = await usersCollection.findOne({ username: to });
+
+        if (!sender || !recipient) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        const message = {
+            from,
+            fromName: sender.nom,
+            to,
+            toName: recipient.nom,
+            subject,
+            body,
+            type: type || 'normal', // normal, deletion-request, deletion-response
+            relatedData: relatedData || null, // Pour stocker l'ID de la demande de suppression, etc.
+            read: false,
+            createdAt: new Date()
+        };
+
+        const result = await messagesCollection.insertOne(message);
+
+        res.json({ success: true, messageId: result.insertedId });
+    } catch (error) {
+        console.error('Erreur envoi message:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les messages reçus (limité à 20)
+app.get('/api/messages/received/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { unreadOnly } = req.query;
+
+        const query = { to: userId };
+        if (unreadOnly === 'true') {
+            query.read = false;
+        }
+
+        const messages = await messagesCollection
+            .find(query)
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .toArray();
+
+        res.json({ success: true, messages });
+    } catch (error) {
+        console.error('Erreur récupération messages reçus:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les messages envoyés (limité à 20)
+app.get('/api/messages/sent/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const messages = await messagesCollection
+            .find({ from: userId })
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .toArray();
+
+        res.json({ success: true, messages });
+    } catch (error) {
+        console.error('Erreur récupération messages envoyés:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les messages d'un utilisateur (ancienne route pour compatibilité)
+app.get('/api/messages/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { unreadOnly } = req.query;
+
+        const query = { to: userId };
+        if (unreadOnly === 'true') {
+            query.read = false;
+        }
+
+        const messages = await messagesCollection
+            .find(query)
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        res.json(messages);
+    } catch (error) {
+        console.error('Erreur récupération messages:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Marquer un message comme lu
+app.put('/api/messages/:messageId/read', async (req, res) => {
+    try {
+        const { messageId } = req.params;
+
+        await messagesCollection.updateOne(
+            { _id: new ObjectId(messageId) },
+            { $set: { read: true, readAt: new Date() } }
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erreur marquage message:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les documents partagés par l'utilisateur (historique de partage)
+app.get('/api/shared-documents/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Récupérer l'historique des partages effectués par l'utilisateur
+        const sharedDocs = await shareHistoryCollection
+            .find({ sharedBy: userId })
+            .sort({ sharedAt: -1 })
+            .limit(50) // Limiter à 50 derniers partages
+            .toArray();
+
+        // Enrichir avec les informations des rôles et départements
+        const enrichedSharedDocs = await Promise.all(sharedDocs.map(async (share) => {
+            const sharedByUser = await usersCollection.findOne({ username: share.sharedBy });
+            const sharedWithUser = await usersCollection.findOne({ username: share.sharedWith });
+
+            let sharedByRole = null, sharedWithRole = null;
+            let sharedByDept = null, sharedWithDept = null;
+
+            if (sharedByUser) {
+                sharedByRole = await rolesCollection.findOne({ _id: sharedByUser.idRole });
+                sharedByDept = await departementsCollection.findOne({ _id: sharedByUser.idDepartement });
+            }
+
+            if (sharedWithUser) {
+                sharedWithRole = await rolesCollection.findOne({ _id: sharedWithUser.idRole });
+                sharedWithDept = await departementsCollection.findOne({ _id: sharedWithUser.idDepartement });
+            }
+
+            return {
+                ...share,
+                sharedByRole: sharedByRole?.libelle || 'Inconnu',
+                sharedByDept: sharedByDept?.nom || 'Inconnu',
+                sharedWithRole: sharedWithRole?.libelle || 'Inconnu',
+                sharedWithDept: sharedWithDept?.nom || 'Inconnu'
+            };
+        }));
+
+        res.json({ success: true, sharedDocuments: enrichedSharedDocs });
+    } catch (error) {
+        console.error('Erreur récupération documents partagés:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Compter les messages non lus
+app.get('/api/messages/:userId/unread-count', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const count = await messagesCollection.countDocuments({
+            to: userId,
+            read: false
+        });
+
+        res.json({ count });
+    } catch (error) {
+        console.error('Erreur comptage messages:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer un message
+app.delete('/api/messages/:messageId', async (req, res) => {
+    try {
+        const { messageId } = req.params;
+
+        await messagesCollection.deleteOne({ _id: new ObjectId(messageId) });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erreur suppression message:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTES HISTORIQUE DES PARTAGES
+// ============================================
+
+// Récupérer les 15 derniers partages
+app.get('/api/share-history', async (req, res) => {
+    try {
+        const history = await shareHistoryCollection
+            .find({})
+            .sort({ sharedAt: -1 })
+            .limit(15)
+            .toArray();
+
+        res.json(history);
+    } catch (error) {
+        console.error('Erreur récupération historique partages:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les 15 derniers partages pour un utilisateur spécifique
+app.get('/api/share-history/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const history = await shareHistoryCollection
+            .find({
+                $or: [
+                    { sharedBy: userId },
+                    { sharedWith: userId }
+                ]
+            })
+            .sort({ sharedAt: -1 })
+            .limit(15)
+            .toArray();
+
+        res.json(history);
+    } catch (error) {
+        console.error('Erreur récupération historique partages utilisateur:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
 

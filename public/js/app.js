@@ -24,11 +24,13 @@ const state = {
     departements: [], // NOUVEAU : Liste des départements
     searchTerm: '',
     selectedCategory: 'tous',
+    selectedDepartement: 'tous',
     dateFrom: '',
     dateTo: '',
     dateType: 'document',
     tempSearchTerm: '',
     tempSelectedCategory: 'tous',
+    tempSelectedDepartement: 'tous',
     tempDateFrom: '',
     tempDateTo: '',
     tempDateType: 'document',
@@ -36,6 +38,11 @@ const state = {
     showUploadForm: false,
     showMenu: false,
     showCategories: false,
+    editingCategory: null, // Catégorie en cours de modification
+    showDepartements: false,
+    editingDepartement: null, // Département en cours de modification
+    showDeletionRequests: false,
+    deletionRequests: [],
     showDeleteConfirm: false,
     isAuthenticated: false,
     currentUser: null,
@@ -44,20 +51,30 @@ const state = {
     storageInfo: { usedMB: 0, totalMB: 1000, percentUsed: 0 },
     loading: false,
     importProgress: { show: false, current: 0, total: 0, message: '' },
-    sortBy: 'dateAjout_desc', // NOUVEAU : Tri par défaut
+    sortBy: '', // Tri par défaut (par date de création)
     showFilters: false, // NOUVEAU : Affichage du panneau de filtres
     showShareModal: false, // NOUVEAU : Modal de partage
     shareAvailableUsers: [], // NOUVEAU : Utilisateurs disponibles pour le partage
-    shareSelectedUsers: [] // NOUVEAU : Utilisateurs sélectionnés pour le partage
+    shareSelectedUsers: [], // NOUVEAU : Utilisateurs sélectionnés pour le partage
+    shareSearchTerm: '', // NOUVEAU : Terme de recherche pour filtrer les utilisateurs
+    messages: [], // NOUVEAU : Messages de la boîte de réception
+    showMessages: false, // NOUVEAU : Affichage de la boîte de réception
+    unreadCount: 0, // NOUVEAU : Nombre de messages non lus
+    showComposeMessage: false, // NOUVEAU : Afficher le formulaire de composition
+    composeMessageTo: '', // NOUVEAU : Destinataire du message
+    composeMessageSubject: '', // NOUVEAU : Sujet du message
+    composeMessageBody: '', // NOUVEAU : Corps du message
+    allUsers: [], // NOUVEAU : Liste de tous les utilisateurs pour composition
+    showMessagingSection: false // NOUVEAU : Afficher la section messagerie dans la page principale
 };
 
 // Données du formulaire
 let formData = {
-    titre: '', 
-    categorie: 'factures', 
+    titre: '',
+    categorie: 'factures',
     date: new Date().toISOString().split('T')[0],
-    dateAjout: new Date().toISOString().split('T')[0],
-    description: '', 
+    departementArchivage: '', // Département d'archivage
+    description: '',
     tags: ''
 };
 
@@ -145,6 +162,7 @@ async function loadData() {
         const cats = await apiCall(`/categories/${state.currentUser}`);
         state.categories = cats;
         calculateStorageUsage();
+        await updateUnreadCount(); // ✅ NOUVEAU: Charger le compteur de messages non lus
         render();
     } catch (error) {
         state.loading = false;
@@ -179,6 +197,81 @@ async function deleteDoc(id) {
     state.selectedDoc = null;
     await loadData();
     showNotification('Supprimé');
+}
+
+// ===== DEMANDE DE SUPPRESSION (pour niveau 2) =====
+async function requestDeletion(docId) {
+    if (!confirm('Envoyer une demande de suppression au niveau 1 de votre département ?')) return;
+
+    try {
+        const result = await apiCall('/api/deletion-requests', 'POST', {
+            documentId: docId,
+            requestedBy: state.currentUser
+        });
+
+        if (result.success) {
+            showNotification('✅ Demande de suppression envoyée au niveau 1');
+            state.selectedDoc = null;
+            render();
+        }
+    } catch (error) {
+        showNotification('❌ Erreur lors de l\'envoi de la demande', 'error');
+    }
+}
+
+// ===== GESTION DES DEMANDES (pour niveau 1) =====
+async function showDeletionRequests() {
+    try {
+        const requests = await apiCall(`/api/deletion-requests/${state.currentUser}`);
+        state.deletionRequests = requests;
+        state.showDeletionRequests = true;
+        state.showMenu = false;
+        render();
+    } catch (error) {
+        showNotification('❌ Erreur lors du chargement des demandes', 'error');
+    }
+}
+
+function closeDeletionRequests() {
+    state.showDeletionRequests = false;
+    render();
+}
+
+async function approveDeletion(requestId) {
+    if (!confirm('Approuver cette demande de suppression ? Le document sera définitivement supprimé.')) return;
+
+    try {
+        const result = await apiCall(`/api/deletion-requests/${requestId}/approve`, 'PUT', {
+            approvedBy: state.currentUser
+        });
+
+        if (result.success) {
+            showNotification('✅ Document supprimé avec succès');
+            await showDeletionRequests(); // Recharger la liste
+            await loadData(); // Recharger les documents
+        }
+    } catch (error) {
+        showNotification('❌ Erreur lors de l\'approbation', 'error');
+    }
+}
+
+async function rejectDeletion(requestId) {
+    const reason = prompt('Raison du rejet (optionnel):');
+    if (reason === null) return; // Annulé
+
+    try {
+        const result = await apiCall(`/api/deletion-requests/${requestId}/reject`, 'PUT', {
+            rejectedBy: state.currentUser,
+            reason: reason || 'Aucune raison fournie'
+        });
+
+        if (result.success) {
+            showNotification('✅ Demande rejetée');
+            await showDeletionRequests(); // Recharger la liste
+        }
+    } catch (error) {
+        showNotification('❌ Erreur lors du rejet', 'error');
+    }
 }
 
 async function deleteAllDocuments() {
@@ -237,6 +330,90 @@ async function deleteCategory(catId) {
     await apiCall(`/categories/${state.currentUser}/${catId}`, 'DELETE');
     await loadData();
     showNotification('Catégorie supprimée');
+}
+
+function startEditCategory(catId) {
+    const category = state.categories.find(c => c.id === catId);
+    if (category) {
+        state.editingCategory = { ...category };
+        render();
+    }
+}
+
+function cancelEditCategory() {
+    state.editingCategory = null;
+    render();
+}
+
+async function saveEditCategory() {
+    if (!state.editingCategory) return;
+
+    const nom = document.getElementById('edit_cat_nom').value.trim();
+    const couleur = document.getElementById('edit_cat_couleur').value;
+    const icon = document.getElementById('edit_cat_icon').value.trim() || '📁';
+
+    if (!nom || nom.length < 2) {
+        showNotification('Nom invalide', 'error');
+        return;
+    }
+
+    await apiCall(`/categories/${state.currentUser}/${state.editingCategory.id}`, 'PUT', { nom, couleur, icon });
+    await loadData();
+    state.editingCategory = null;
+    showNotification('✅ Catégorie modifiée');
+}
+
+// ===== GESTION DES DÉPARTEMENTS =====
+async function addDepartement() {
+    const nom = document.getElementById('new_dept_nom').value.trim();
+    const code = document.getElementById('new_dept_code').value.trim();
+
+    if (!nom || !code) {
+        showNotification('❌ Nom et code requis', 'error');
+        return;
+    }
+
+    await apiCall('/api/departements', 'POST', { nom, code });
+    await loadRolesAndDepartements();
+    showNotification('✅ Département créé');
+    document.getElementById('new_dept_nom').value = '';
+    document.getElementById('new_dept_code').value = '';
+}
+
+async function deleteDepartement(deptId) {
+    if (!confirm('Supprimer ce département ?')) return;
+    await apiCall(`/api/departements/${deptId}`, 'DELETE');
+    await loadRolesAndDepartements();
+    showNotification('✅ Département supprimé');
+}
+
+function startEditDepartement(deptId) {
+    const dept = state.departements.find(d => d._id === deptId);
+    if (!dept) return;
+    state.editingDepartement = { ...dept };
+    render();
+}
+
+function cancelEditDepartement() {
+    state.editingDepartement = null;
+    render();
+}
+
+async function saveEditDepartement() {
+    if (!state.editingDepartement) return;
+
+    const nom = document.getElementById('edit_dept_nom').value.trim();
+    const code = document.getElementById('edit_dept_code').value.trim();
+
+    if (!nom || !code) {
+        showNotification('❌ Nom et code requis', 'error');
+        return;
+    }
+
+    await apiCall(`/api/departements/${state.editingDepartement._id}`, 'PUT', { nom, code });
+    await loadRolesAndDepartements();
+    state.editingDepartement = null;
+    showNotification('✅ Département modifié');
 }
 
 // ===== UTILITAIRES =====
@@ -388,13 +565,13 @@ async function handleFileUpload(e) {
     };
     await saveDocument(newDoc);
     state.showUploadForm = false;
-    formData = { 
-        titre: '', 
-        categorie: 'factures', 
+    formData = {
+        titre: '',
+        categorie: 'factures',
         date: new Date().toISOString().split('T')[0],
-        dateAjout: new Date().toISOString().split('T')[0],
-        description: '', 
-        tags: '' 
+        departementArchivage: '',
+        description: '',
+        tags: ''
     };
     showNotification('✅ Ajouté!');
     render();
@@ -511,18 +688,6 @@ function sortDocuments(docs) {
     const sorted = [...docs];
 
     switch(state.sortBy) {
-        case 'dateAjout_desc':
-            return sorted.sort((a, b) => {
-                const dateA = a.dateAjout ? new Date(a.dateAjout) : new Date(0);
-                const dateB = b.dateAjout ? new Date(b.dateAjout) : new Date(0);
-                return dateB - dateA; // Plus récent en premier
-            });
-        case 'dateAjout_asc':
-            return sorted.sort((a, b) => {
-                const dateA = a.dateAjout ? new Date(a.dateAjout) : new Date(0);
-                const dateB = b.dateAjout ? new Date(b.dateAjout) : new Date(0);
-                return dateA - dateB; // Plus ancien en premier
-            });
         case 'date_desc':
             return sorted.sort((a, b) => {
                 const dateA = a.date ? new Date(a.date) : new Date(0);
@@ -544,10 +709,10 @@ function sortDocuments(docs) {
         case 'taille_asc':
             return sorted.sort((a, b) => (a.taille || 0) - (b.taille || 0));
         default:
-            // Par défaut, tri par date d'ajout décroissant
+            // Par défaut, tri par date de création (createdAt)
             return sorted.sort((a, b) => {
-                const dateA = a.dateAjout ? new Date(a.dateAjout) : new Date(0);
-                const dateB = b.dateAjout ? new Date(b.dateAjout) : new Date(0);
+                const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
+                const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
                 return dateB - dateA;
             });
     }
@@ -555,18 +720,24 @@ function sortDocuments(docs) {
 
 function getFilteredDocs() {
     let filtered = state.documents.filter(doc => {
-        const matchSearch = !state.searchTerm || 
-            doc.titre.toLowerCase().includes(state.searchTerm.toLowerCase()) ||
-            (doc.description && doc.description.toLowerCase().includes(state.searchTerm.toLowerCase())) ||
-            (doc.tags && doc.tags.toLowerCase().includes(state.searchTerm.toLowerCase()));
-        
-        const matchCategory = state.selectedCategory === 'tous' || 
+        // ✅ Recherche améliorée : ID du document, titre, description ou tags
+        const searchLower = state.searchTerm.toLowerCase();
+        const matchSearch = !state.searchTerm ||
+            (doc.idDocument && doc.idDocument.toLowerCase().includes(searchLower)) ||
+            doc.titre.toLowerCase().includes(searchLower) ||
+            (doc.description && doc.description.toLowerCase().includes(searchLower)) ||
+            (doc.tags && doc.tags.toLowerCase().includes(searchLower));
+
+        const matchCategory = state.selectedCategory === 'tous' ||
             doc.categorie === state.selectedCategory;
-        
+
+        const matchDepartement = state.selectedDepartement === 'tous' ||
+            doc.departementArchivage === state.selectedDepartement;
+
         let matchDate = true;
         if (state.dateFrom || state.dateTo) {
-            const dateToCheck = state.dateType === 'ajout' ? doc.dateAjout : doc.date;
-            
+            const dateToCheck = state.dateType === 'ajout' ? doc.createdAt : doc.date;
+
             if (state.dateFrom) {
                 matchDate = matchDate && new Date(dateToCheck) >= new Date(state.dateFrom);
             }
@@ -574,12 +745,18 @@ function getFilteredDocs() {
                 matchDate = matchDate && new Date(dateToCheck) <= new Date(state.dateTo + 'T23:59:59');
             }
         }
-        
-        return matchSearch && matchCategory && matchDate;
+
+        return matchSearch && matchCategory && matchDepartement && matchDate;
     });
-    
-    // NOUVEAU : Appliquer le tri
-    return sortDocuments(filtered);
+
+    // ✅ Tri par date d'ajout : Plus récent en haut
+    filtered.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
+        const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
+        return dateB - dateA; // Décroissant (plus récent en premier)
+    });
+
+    return filtered;
 }
 
 // ===== NOUVEAU : PRÉVISUALISATION DOCUMENT =====
@@ -610,10 +787,18 @@ function toggleUploadForm() {
     render(); 
 }
 
-function toggleCategories() { 
-    state.showCategories = !state.showCategories; 
-    state.showUploadForm = false; 
-    render(); 
+function toggleCategories() {
+    state.showCategories = !state.showCategories;
+    state.showUploadForm = false;
+    state.showDepartements = false;
+    render();
+}
+
+function toggleDepartements() {
+    state.showDepartements = !state.showDepartements;
+    state.showUploadForm = false;
+    state.showCategories = false;
+    render();
 }
 
 function toggleRegister() {
@@ -624,14 +809,15 @@ function toggleRegister() {
 // ===== PARTAGE DE DOCUMENTS =====
 async function openShareModal(docId) {
     try {
-        // Charger la liste des utilisateurs disponibles
-        const result = await apiCall(`/users-for-sharing/${state.currentUser}`);
-        if (result.success) {
-            state.shareAvailableUsers = result.users;
-            state.shareSelectedUsers = [];
-            state.showShareModal = true;
-            render();
-        }
+        // Charger TOUS les utilisateurs de TOUS les départements (sauf l'utilisateur actuel)
+        const allUsers = await apiCall('/api/users');
+        // Filtrer pour exclure l'utilisateur actuel
+        const users = allUsers.filter(u => u.username !== state.currentUser);
+
+        state.shareAvailableUsers = users;
+        state.shareSelectedUsers = [];
+        state.showShareModal = true;
+        render();
     } catch (error) {
         showNotification('Erreur lors du chargement des utilisateurs', 'error');
     }
@@ -641,6 +827,7 @@ function closeShareModal() {
     state.showShareModal = false;
     state.shareAvailableUsers = [];
     state.shareSelectedUsers = [];
+    state.shareSearchTerm = ''; // Réinitialiser la recherche
     render();
 }
 
@@ -678,6 +865,223 @@ async function confirmShare() {
     }
 }
 
+// ✅ NOUVEAU: Mettre à jour le terme de recherche de partage
+function updateShareSearch(value) {
+    state.shareSearchTerm = value.toLowerCase();
+    render();
+}
+
+// ✅ NOUVEAU: Sélectionner / Désélectionner tous les utilisateurs visibles
+function toggleSelectAll() {
+    const filteredUsers = getFilteredShareUsers();
+
+    if (state.shareSelectedUsers.length === filteredUsers.length) {
+        // Tout est déjà sélectionné, on désélectionne tout
+        state.shareSelectedUsers = [];
+    } else {
+        // Sélectionner tous les utilisateurs visibles
+        state.shareSelectedUsers = filteredUsers.map(u => u.username);
+    }
+    render();
+}
+
+// ✅ NOUVEAU: Obtenir les utilisateurs filtrés par recherche
+function getFilteredShareUsers() {
+    if (!state.shareSearchTerm) {
+        return state.shareAvailableUsers;
+    }
+
+    return state.shareAvailableUsers.filter(user => {
+        const searchTerm = state.shareSearchTerm.toLowerCase();
+        return user.nom.toLowerCase().includes(searchTerm) ||
+               user.username.toLowerCase().includes(searchTerm) ||
+               user.email.toLowerCase().includes(searchTerm) ||
+               user.departement.toLowerCase().includes(searchTerm);
+    });
+}
+
+// ============================================
+// FONCTIONS DE MESSAGERIE
+// ============================================
+
+// Ouvrir la boîte de réception
+async function openMessages() {
+    try {
+        state.showMenu = false;
+        state.showMessages = true;
+        await loadMessages();
+        render();
+    } catch (error) {
+        console.error('Erreur ouverture messagerie:', error);
+        showNotification('Erreur lors de l\'ouverture de la messagerie', 'error');
+    }
+}
+
+// Charger les messages
+async function loadMessages() {
+    try {
+        const messages = await apiCall(`/messages/${state.currentUser}`);
+        state.messages = messages;
+        await updateUnreadCount();
+    } catch (error) {
+        console.error('Erreur chargement messages:', error);
+    }
+}
+
+// Mettre à jour le compteur de messages non lus
+async function updateUnreadCount() {
+    try {
+        const result = await apiCall(`/messages/${state.currentUser}/unread-count`);
+        state.unreadCount = result.count;
+    } catch (error) {
+        console.error('Erreur comptage messages:', error);
+    }
+}
+
+// Fermer la boîte de réception
+function closeMessages() {
+    state.showMessages = false;
+    render();
+}
+
+// Marquer un message comme lu
+async function markMessageAsRead(messageId) {
+    try {
+        await apiCall(`/messages/${messageId}/read`, 'PUT');
+        await loadMessages();
+        render();
+    } catch (error) {
+        console.error('Erreur marquage message:', error);
+    }
+}
+
+// Supprimer un message
+async function deleteMessage(messageId) {
+    if (!confirm('Supprimer ce message ?')) return;
+
+    try {
+        await apiCall(`/messages/${messageId}`, 'DELETE');
+        showNotification('Message supprimé');
+        await loadMessages();
+        render();
+    } catch (error) {
+        console.error('Erreur suppression message:', error);
+        showNotification('Erreur lors de la suppression', 'error');
+    }
+}
+
+// Approuver une demande de suppression depuis la messagerie
+async function approveFromMessage(requestId) {
+    try {
+        const result = await apiCall(`/deletion-requests/${requestId}/approve`, 'PUT', {
+            approvedBy: state.currentUser
+        });
+
+        if (result.success) {
+            showNotification('✅ Demande approuvée - Document supprimé');
+            await loadMessages();
+            await loadData();
+            render();
+        }
+    } catch (error) {
+        console.error('Erreur approbation:', error);
+        showNotification('Erreur lors de l\'approbation', 'error');
+    }
+}
+
+// Rejeter une demande de suppression depuis la messagerie
+async function rejectFromMessage(requestId) {
+    const reason = prompt('Raison du rejet (optionnel):');
+    if (reason === null) return;
+
+    try {
+        const result = await apiCall(`/deletion-requests/${requestId}/reject`, 'PUT', {
+            rejectedBy: state.currentUser,
+            reason: reason || 'Aucune raison fournie'
+        });
+
+        if (result.success) {
+            showNotification('✅ Demande rejetée');
+            await loadMessages();
+            render();
+        }
+    } catch (error) {
+        console.error('Erreur rejet:', error);
+        showNotification('Erreur lors du rejet', 'error');
+    }
+}
+
+// Charger tous les utilisateurs pour la composition de messages
+async function loadAllUsers() {
+    try {
+        const result = await apiCall(`/users-for-sharing/${state.currentUser}`);
+        if (result.success) {
+            state.allUsers = result.users;
+        }
+    } catch (error) {
+        console.error('Erreur chargement utilisateurs:', error);
+    }
+}
+
+// Ouvrir le formulaire de composition de message
+async function openComposeMessage() {
+    await loadAllUsers();
+    state.showComposeMessage = true;
+    state.composeMessageTo = '';
+    state.composeMessageSubject = '';
+    state.composeMessageBody = '';
+    render();
+}
+
+// Fermer le formulaire de composition
+function closeComposeMessage() {
+    state.showComposeMessage = false;
+    render();
+}
+
+// Envoyer un nouveau message
+async function sendNewMessage() {
+    if (!state.composeMessageTo || !state.composeMessageSubject || !state.composeMessageBody) {
+        showNotification('Veuillez remplir tous les champs', 'error');
+        return;
+    }
+
+    try {
+        const result = await apiCall('/messages', 'POST', {
+            from: state.currentUser,
+            to: state.composeMessageTo,
+            subject: state.composeMessageSubject,
+            body: state.composeMessageBody,
+            type: 'normal'
+        });
+
+        if (result.success) {
+            showNotification('✅ Message envoyé avec succès');
+            closeComposeMessage();
+            await loadMessages();
+            render();
+        }
+    } catch (error) {
+        console.error('Erreur envoi message:', error);
+        showNotification('Erreur lors de l\'envoi du message', 'error');
+    }
+}
+
+// Basculer l'affichage de la section messagerie
+async function toggleMessagingSection() {
+    state.showMessagingSection = !state.showMessagingSection;
+    if (state.showMessagingSection) {
+        // Initialiser le système de messagerie amélioré
+        await initMessaging();
+    }
+    render();
+}
+
+// ============================================
+// FONCTIONS HISTORIQUE DES PARTAGES
+// ============================================
+// Note: L'historique des partages est maintenant affiché uniquement dans l'aperçu du document
+
 function toggleFilters() {
     state.showFilters = !state.showFilters;
     render();
@@ -691,8 +1095,12 @@ function updateTempSearch(value) {
     state.tempSearchTerm = value; 
 }
 
-function updateTempCategory(value) { 
-    state.tempSelectedCategory = value; 
+function updateTempCategory(value) {
+    state.tempSelectedCategory = value;
+}
+
+function updateTempDepartement(value) {
+    state.tempSelectedDepartement = value;
 }
 
 function updateTempDateFrom(value) {
@@ -717,15 +1125,16 @@ function applyFilters() {
     if (state.tempDateFrom && state.tempDateTo) {
         const dateDebut = new Date(state.tempDateFrom);
         const dateFin = new Date(state.tempDateTo);
-        
+
         if (dateDebut > dateFin) {
             showNotification('⚠️ La date de début doit être antérieure à la date de fin', 'error');
             return;
         }
     }
-    
+
     state.searchTerm = state.tempSearchTerm;
     state.selectedCategory = state.tempSelectedCategory;
+    state.selectedDepartement = state.tempSelectedDepartement;
     state.dateFrom = state.tempDateFrom;
     state.dateTo = state.tempDateTo;
     state.dateType = state.tempDateType;
@@ -735,11 +1144,13 @@ function applyFilters() {
 function resetFilters() {
     state.searchTerm = '';
     state.selectedCategory = 'tous';
+    state.selectedDepartement = 'tous';
     state.dateFrom = '';
     state.dateTo = '';
     state.dateType = 'document';
     state.tempSearchTerm = '';
     state.tempSelectedCategory = 'tous';
+    state.tempSelectedDepartement = 'tous';
     state.tempDateFrom = '';
     state.tempDateTo = '';
     state.tempDateType = 'document';
@@ -916,6 +1327,15 @@ function render() {
                                     class="px-4 py-2 btn-primary text-white rounded-lg hover:shadow-lg transition text-sm font-semibold">
                                 ➕ Ajouter
                             </button>
+                            <button onclick="toggleMessagingSection()"
+                                    class="px-4 py-2 ${state.showMessagingSection ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white' : 'bg-gradient-to-br from-gray-100 to-gray-200'} rounded-lg hover:shadow-lg transition text-sm font-semibold relative">
+                                📬 Boîte de réception
+                                ${state.unreadCount > 0 ? `
+                                    <span class="absolute -top-2 -right-2 px-2 py-1 bg-red-600 text-white text-xs font-bold rounded-full animate-pulse">
+                                        ${state.unreadCount}
+                                    </span>
+                                ` : ''}
+                            </button>
                             <button onclick="toggleFilters()"
                                     class="px-4 py-2 ${state.showFilters ? 'bg-gradient-to-br from-blue-500 to-green-500 text-white' : 'bg-gradient-to-br from-gray-100 to-gray-200'} rounded-lg hover:shadow-lg transition text-sm font-semibold">
                                 🔍 Filtres
@@ -933,57 +1353,72 @@ function render() {
                 <div class="border-t border-gray-200 bg-gradient-to-br from-blue-50 to-green-50" style="animation: slideDown 0.3s ease-out;">
                     <div class="max-w-7xl mx-auto px-4 py-4 space-y-4">
                         <!-- Statistiques -->
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div class="bg-white p-3 rounded-lg shadow-sm border-l-4 border-blue-500">
-                                <div class="flex items-center gap-2">
-                                    <div class="text-2xl">📊</div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-xl shadow-lg text-white">
+                                <div class="flex items-center justify-between">
                                     <div>
-                                        <p class="text-xs text-gray-600">Total documents</p>
-                                        <p class="text-xl font-bold text-blue-600">${state.documents.length}</p>
+                                        <p class="text-sm opacity-90">Total documents</p>
+                                        <p class="text-3xl font-bold mt-1">${state.documents.length}</p>
                                     </div>
+                                    <div class="text-5xl opacity-80">📊</div>
                                 </div>
                             </div>
-                            <div class="bg-white p-3 rounded-lg shadow-sm border-l-4 border-green-500">
-                                <div class="flex items-center gap-2">
-                                    <div class="text-2xl">📁</div>
-                                    <div>
-                                        <p class="text-xs text-gray-600">Catégories</p>
-                                        <p class="text-xl font-bold text-green-600">${state.categories.length}</p>
+                            ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                                <div class="bg-gradient-to-br from-purple-500 to-purple-600 p-4 rounded-xl shadow-lg text-white cursor-pointer" onclick="toggleStatsDetails()">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <p class="text-sm opacity-90">Documents par département</p>
+                                            <p class="text-xl font-bold mt-1">
+                                                ${state.departements.map(dept => {
+                                                    const count = state.documents.filter(doc => doc.departementArchivage === dept.nom).length;
+                                                    return `${dept.nom}: ${count}`;
+                                                }).join(' • ')}
+                                            </p>
+                                        </div>
+                                        <div class="text-5xl opacity-80">🏢</div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="bg-white p-3 rounded-lg shadow-sm border-l-4 border-purple-500">
-                                <div class="flex items-center gap-2">
-                                    <div class="text-2xl">💾</div>
-                                    <div>
-                                        <p class="text-xs text-gray-600">Stockage</p>
-                                        <p class="text-xl font-bold text-purple-600">${state.storageInfo.usedMB} MB</p>
+                            ` : `
+                                <div class="bg-gradient-to-br from-green-500 to-green-600 p-4 rounded-xl shadow-lg text-white">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <p class="text-sm opacity-90">Espace utilisé</p>
+                                            <p class="text-3xl font-bold mt-1">${state.storageInfo.usedMB} MB</p>
+                                        </div>
+                                        <div class="text-5xl opacity-80">💾</div>
                                     </div>
                                 </div>
-                            </div>
+                            `}
                         </div>
 
                         <div class="flex gap-3 flex-wrap">
                             <div class="flex-1 min-w-[200px]">
-                                <input type="text" placeholder="🔍 Rechercher..."
+                                <input type="text" placeholder="🔍 Rechercher par ID, nom ou tags..."
                                        value="${state.tempSearchTerm}"
                                        oninput="updateTempSearch(this.value)"
-                                       class="w-full px-4 py-2 text-sm rounded-lg border-2 focus:ring-2 focus:ring-blue-500 outline-none">
+                                       class="w-full px-4 py-3 text-sm rounded-lg border-2 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm">
                             </div>
                             <select onchange="updateTempCategory(this.value)"
                                     class="px-4 py-2 text-sm border-2 rounded-lg outline-none font-medium">
-                                <option value="tous" ${state.tempSelectedCategory === 'tous' ? 'selected' : ''}>🔍 Aucun filtre (Toutes catégories)</option>
+                                <option value="tous" ${state.tempSelectedCategory === 'tous' ? 'selected' : ''}>📁 Toutes catégories</option>
                                 ${state.categories.map(cat => `
                                     <option value="${cat.id}" ${state.tempSelectedCategory === cat.id ? 'selected' : ''}>
                                         ${cat.icon} ${cat.nom}
                                     </option>
                                 `).join('')}
                             </select>
+                            <select onchange="updateTempDepartement(this.value)"
+                                    class="px-4 py-2 text-sm border-2 rounded-lg outline-none font-medium">
+                                <option value="tous" ${state.tempSelectedDepartement === 'tous' ? 'selected' : ''}>🏢 Tous départements</option>
+                                ${state.departements.map(dept => `
+                                    <option value="${dept.nom}" ${state.tempSelectedDepartement === dept.nom ? 'selected' : ''}>
+                                        🏢 ${dept.nom}
+                                    </option>
+                                `).join('')}
+                            </select>
                             <select onchange="changeSortBy(this.value)"
                                     class="px-4 py-2 text-sm border-2 rounded-lg outline-none font-medium bg-white">
                                 <option value="" ${state.sortBy === '' ? 'selected' : ''}>🔍 Aucun tri spécifique</option>
-                                <option value="dateAjout_desc" ${state.sortBy === 'dateAjout_desc' ? 'selected' : ''}>📅 Plus récent ajout</option>
-                                <option value="dateAjout_asc" ${state.sortBy === 'dateAjout_asc' ? 'selected' : ''}>📅 Plus ancien ajout</option>
                                 <option value="date_desc" ${state.sortBy === 'date_desc' ? 'selected' : ''}>📄 Plus récent document</option>
                                 <option value="date_asc" ${state.sortBy === 'date_asc' ? 'selected' : ''}>📄 Plus ancien document</option>
                                 <option value="titre_asc" ${state.sortBy === 'titre_asc' ? 'selected' : ''}>🔤 A → Z</option>
@@ -999,16 +1434,16 @@ function render() {
                                     <span class="text-sm font-bold text-blue-800">📅 Filtrer par date:</span>
                                     <div class="flex gap-4">
                                         <label class="flex items-center gap-2 cursor-pointer">
-                                            <input type="radio" name="dateType" value="document" 
-                                                   ${state.tempDateType === 'document' ? 'checked' : ''} 
-                                                   onchange="updateTempDateType('document')" 
+                                            <input type="radio" name="dateType" value="document"
+                                                   ${state.tempDateType === 'document' ? 'checked' : ''}
+                                                   onchange="updateTempDateType('document')"
                                                    class="text-blue-600" />
                                             <span class="text-sm font-medium">Date du document</span>
                                         </label>
                                         <label class="flex items-center gap-2 cursor-pointer">
-                                            <input type="radio" name="dateType" value="ajout" 
-                                                   ${state.tempDateType === 'ajout' ? 'checked' : ''} 
-                                                   onchange="updateTempDateType('ajout')" 
+                                            <input type="radio" name="dateType" value="ajout"
+                                                   ${state.tempDateType === 'ajout' ? 'checked' : ''}
+                                                   onchange="updateTempDateType('ajout')"
                                                    class="text-blue-600" />
                                             <span class="text-sm font-medium">Date d'ajout</span>
                                         </label>
@@ -1064,29 +1499,34 @@ function render() {
                 </div>
                 ` : ''}
             </header>
-            
+
             <main class="max-w-7xl mx-auto px-4 py-4">
-                
+
+                ${state.showMessagingSection ? renderMessaging() : ''}
+
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     ${filteredDocs.map(doc => `
-                        <div onclick="showDocDetail('${doc._id}')" 
-                             class="doc-card p-5 rounded-2xl shadow-md cursor-pointer animate-fade-in">
+                        <div onclick="showDocDetail('${doc._id}')"
+                             class="doc-card p-5 rounded-2xl shadow-md cursor-pointer animate-fade-in hover:shadow-xl transition-shadow">
                             <div class="flex justify-between items-start mb-3">
                                 <h3 class="font-bold text-gray-800 flex-1 text-lg">${doc.titre}</h3>
                                 <span class="text-3xl">${getCategoryIcon(doc.categorie)}</span>
                             </div>
-                            <span class="category-badge inline-block px-3 py-1 text-sm rounded-full ${getCategoryColor(doc.categorie)} font-medium">
+                            <span class="category-badge inline-block px-3 py-1 text-sm rounded-full ${getCategoryColor(doc.categorie)} font-medium mb-3">
                                 ${getCategoryName(doc.categorie)}
                             </span>
-                            <div class="mt-4 space-y-1">
-                                <p class="text-sm text-gray-600 flex items-center gap-2">
-                                    📄 Date doc: ${formatDate(doc.date)}
-                                </p>
-                                ${doc.dateAjout ? `
-                                <p class="text-xs text-gray-500 flex items-center gap-2">
-                                    ➕ Ajouté: ${formatDate(doc.dateAjout)}
+                            <div class="mt-3 space-y-2 border-t pt-3">
+                                ${doc.idDocument ? `
+                                <p class="text-sm text-blue-600 font-semibold flex items-center gap-2">
+                                    🆔 ${doc.idDocument}
                                 </p>
                                 ` : ''}
+                                <p class="text-sm text-gray-600 flex items-center gap-2">
+                                    📄 ${formatDate(doc.date)}
+                                </p>
+                                <p class="text-xs text-green-600 font-medium flex items-center gap-2">
+                                    ➕ Ajouté: ${formatDate(doc.createdAt)}
+                                </p>
                                 <p class="text-xs text-gray-500 flex items-center gap-2">
                                     📦 ${formatSize(doc.taille)}
                                 </p>
@@ -1112,33 +1552,53 @@ function render() {
                 <div class="fixed right-0 top-0 h-full w-80 sidebar-menu shadow-2xl z-50 p-6 overflow-y-auto animate-slide-in">
                     <button onclick="toggleMenu()" class="absolute top-4 right-4 text-2xl text-gray-600 hover:text-gray-800">✖</button>
                     <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">Menu</h2>
+
+                    <!-- Affichage du rôle et niveau -->
+                    ${state.currentUserInfo ? `
+                        <div class="mb-4 p-3 bg-gradient-to-br from-blue-50 to-green-50 rounded-xl">
+                            <p class="text-sm font-semibold text-gray-700">${state.currentUserInfo.nom}</p>
+                            <p class="text-xs text-gray-600">Niveau ${state.currentUserInfo.niveau} - ${state.currentUserInfo.role}</p>
+                        </div>
+                    ` : ''}
+
                     <div class="space-y-2">
-                        <button onclick="toggleCategories()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
-                            📂 Gérer les catégories
+                        ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                            <!-- Menu complet pour NIVEAU 1 (Admin) -->
+                            <button onclick="toggleCategories()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                📂 Gérer les catégories
+                            </button>
+                            <button onclick="toggleDepartements()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                🏢 Gérer les départements
+                            </button>
+                            <button onclick="showDeletionRequests()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-orange-50 hover:to-red-50 rounded-xl transition font-medium">
+                                📋 Demandes de suppression
+                            </button>
+                            <button onclick="exportData()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                💾 Exporter les données
+                            </button>
+                            <label class="block w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl cursor-pointer transition font-medium">
+                                📥 Importer des données
+                                <input type="file" accept=".json" onchange="importData(event)" class="hidden">
+                            </label>
+                            <button onclick="deleteAllDocuments()" class="w-full text-left px-4 py-4 hover:bg-red-50 text-red-600 rounded-xl transition font-medium">
+                                🗑️ Tout supprimer
+                            </button>
+                        ` : ''}
+
+                        <!-- ✅ NOUVEAU: Boîte de réception des messages pour tous les niveaux -->
+                        <button onclick="toggleMessagingSection()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium relative">
+                            📬 Boîte de réception des messages
+                            ${state.unreadCount > 0 ? `
+                                <span class="absolute right-4 top-4 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded-full">
+                                    ${state.unreadCount}
+                                </span>
+                            ` : ''}
                         </button>
-                        <button onclick="exportData()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
-                            💾 Exporter les données
-                        </button>
-                        <label class="block w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl cursor-pointer transition font-medium">
-                            📥 Importer des données
-                            <input type="file" accept=".json" onchange="importData(event)" class="hidden">
-                        </label>
-                        <button onclick="deleteAllDocuments()" class="w-full text-left px-4 py-4 hover:bg-red-50 text-red-600 rounded-xl transition font-medium">
-                            🗑️ Tout supprimer
-                        </button>
+
+                        <!-- Déconnexion pour tous les niveaux -->
                         <button onclick="logout()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
                             🚪 Déconnexion
                         </button>
-                    </div>
-                    <div class="mt-8 storage-badge p-5 rounded-2xl">
-                        <p class="text-sm font-bold mb-3 text-gray-700">📊 Stockage</p>
-                        <div class="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">
-                            <div class="${getStorageColorClass()} progress-bar h-3 rounded-full transition-all duration-500" 
-                                 style="width: ${state.storageInfo.percentUsed}%"></div>
-                        </div>
-                        <p class="text-xs text-gray-600 font-medium">
-                            ${state.storageInfo.usedMB} MB / ${state.storageInfo.totalMB} MB (${state.storageInfo.percentUsed}%)
-                        </p>
                     </div>
                 </div>
             ` : ''}
@@ -1166,12 +1626,15 @@ function render() {
                                        onchange="updateFormData('date', this.value)"
                                        class="w-full px-4 py-3 border-2 rounded-xl input-modern">
                             </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-1">➕ Date d'ajout</label>
-                                <input type="date" value="${formData.dateAjout}"
-                                       onchange="updateFormData('dateAjout', this.value)"
-                                       class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                            </div>
+                            <select onchange="updateFormData('departementArchivage', this.value)"
+                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                <option value="">🏢 Sélectionner le département d'archivage</option>
+                                ${state.departements.map(dept => `
+                                    <option value="${dept._id}" ${formData.departementArchivage === dept._id ? 'selected' : ''}>
+                                        ${dept.nom}
+                                    </option>
+                                `).join('')}
+                            </select>
                             <textarea placeholder="Description (optionnelle)" 
                                       oninput="updateFormData('description', this.value)"
                                       class="w-full px-4 py-3 border-2 rounded-xl input-modern resize-none"
@@ -1199,13 +1662,48 @@ function render() {
                         <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">📂 Gérer les catégories</h2>
                         <div class="space-y-3 mb-6">
                             ${state.categories.map(cat => `
-                                <div class="flex justify-between items-center p-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition">
-                                    <span class="font-medium">${cat.icon} ${cat.nom}</span>
-                                    <button onclick="deleteCategory('${cat.id}')" 
-                                            class="text-red-500 hover:text-red-700 text-xl transition">
-                                        🗑️
-                                    </button>
-                                </div>
+                                ${state.editingCategory && state.editingCategory.id === cat.id ? `
+                                    <!-- Mode édition -->
+                                    <div class="p-4 bg-blue-50 rounded-xl space-y-3">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span class="text-lg font-bold">✏️ Modifier</span>
+                                        </div>
+                                        <input id="edit_cat_nom" type="text" value="${cat.nom}" placeholder="Nom de la catégorie"
+                                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                        <input id="edit_cat_icon" type="text" value="${cat.icon}" placeholder="Emoji"
+                                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                        <select id="edit_cat_couleur" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                            ${colorOptions.map(opt => `
+                                                <option value="${opt.value}" ${cat.couleur === opt.value ? 'selected' : ''}>${opt.label}</option>
+                                            `).join('')}
+                                        </select>
+                                        <div class="flex gap-2">
+                                            <button onclick="saveEditCategory()"
+                                                    class="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-semibold">
+                                                ✅ Sauvegarder
+                                            </button>
+                                            <button onclick="cancelEditCategory()"
+                                                    class="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition text-sm font-medium">
+                                                ❌ Annuler
+                                            </button>
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <!-- Mode affichage normal -->
+                                    <div class="flex justify-between items-center p-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition">
+                                        <span class="font-medium">${cat.icon} ${cat.nom}</span>
+                                        <div class="flex gap-2">
+                                            <button onclick="startEditCategory('${cat.id}')"
+                                                    class="text-blue-500 hover:text-blue-700 text-xl transition" title="Modifier">
+                                                ✏️
+                                            </button>
+                                            <button onclick="deleteCategory('${cat.id}')"
+                                                    class="text-red-500 hover:text-red-700 text-xl transition" title="Supprimer">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                `}
                             `).join('')}
                         </div>
                         <div class="border-t-2 border-gray-200 pt-6 space-y-4">
@@ -1232,7 +1730,123 @@ function render() {
                     </div>
                 </div>
             ` : ''}
-            
+
+            ${state.showDepartements ? `
+                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                     onclick="if(event.target === this) toggleDepartements()">
+                    <div class="modal-glass rounded-2xl p-8 max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                        <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">🏢 Gérer les départements</h2>
+                        <div class="space-y-3 mb-6">
+                            ${state.departements.map(dept => `
+                                ${state.editingDepartement && state.editingDepartement._id === dept._id ? `
+                                    <!-- Mode édition -->
+                                    <div class="p-4 bg-blue-50 rounded-xl space-y-3">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span class="text-lg font-bold">✏️ Modifier</span>
+                                        </div>
+                                        <input id="edit_dept_nom" type="text" value="${dept.nom}" placeholder="Nom du département"
+                                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                        <input id="edit_dept_code" type="text" value="${dept.code}" placeholder="Code (ex: INFO)"
+                                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                        <div class="flex gap-2">
+                                            <button onclick="saveEditDepartement()"
+                                                    class="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-semibold">
+                                                ✅ Sauvegarder
+                                            </button>
+                                            <button onclick="cancelEditDepartement()"
+                                                    class="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition text-sm font-medium">
+                                                ❌ Annuler
+                                            </button>
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <!-- Mode affichage normal -->
+                                    <div class="flex justify-between items-center p-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition">
+                                        <span class="font-medium">🏢 ${dept.nom} (${dept.code})</span>
+                                        <div class="flex gap-2">
+                                            <button onclick="startEditDepartement('${dept._id}')"
+                                                    class="text-blue-500 hover:text-blue-700 text-xl transition" title="Modifier">
+                                                ✏️
+                                            </button>
+                                            <button onclick="deleteDepartement('${dept._id}')"
+                                                    class="text-red-500 hover:text-red-700 text-xl transition" title="Supprimer">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                `}
+                            `).join('')}
+                        </div>
+                        <div class="border-t-2 border-gray-200 pt-6 space-y-4">
+                            <h3 class="font-bold text-lg">➕ Nouveau département</h3>
+                            <input id="new_dept_nom" type="text" placeholder="Nom du département"
+                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                            <input id="new_dept_code" type="text" placeholder="Code (ex: INFO, MATH)"
+                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                            <button onclick="addDepartement()"
+                                    class="w-full px-6 py-4 btn-success text-white rounded-xl hover:shadow-lg transition font-semibold">
+                                ✅ Ajouter le département
+                            </button>
+                            <button onclick="toggleDepartements()"
+                                    class="w-full px-6 py-3 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
+                                Fermer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+
+            ${state.showDeletionRequests ? `
+                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                     onclick="if(event.target === this) closeDeletionRequests()">
+                    <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                        <div class="flex justify-between items-center mb-6">
+                            <h2 class="text-2xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">📋 Demandes de suppression</h2>
+                            <button onclick="closeDeletionRequests()" class="text-2xl text-gray-600 hover:text-gray-800">✖</button>
+                        </div>
+
+                        ${state.deletionRequests.length === 0 ? `
+                            <div class="text-center py-12">
+                                <div class="text-6xl mb-4">✅</div>
+                                <p class="text-gray-500 text-lg">Aucune demande en attente</p>
+                            </div>
+                        ` : `
+                            <div class="space-y-4">
+                                ${state.deletionRequests.map(request => `
+                                    <div class="bg-white border-2 border-orange-200 rounded-xl p-5 shadow-sm hover:shadow-md transition">
+                                        <div class="flex justify-between items-start mb-3">
+                                            <div class="flex-1">
+                                                <h3 class="font-bold text-lg text-gray-800 mb-1">${request.documentTitle}</h3>
+                                                <p class="text-sm text-blue-600 font-semibold">🆔 ${request.documentIdDocument}</p>
+                                            </div>
+                                            <span class="px-3 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-semibold">
+                                                ⏳ En attente
+                                            </span>
+                                        </div>
+
+                                        <div class="border-t pt-3 mt-3 space-y-2 text-sm text-gray-600">
+                                            <p><strong>👤 Demandeur:</strong> ${request.requesterName} (${request.requestedBy})</p>
+                                            <p><strong>📅 Date de demande:</strong> ${formatDate(request.createdAt)}</p>
+                                        </div>
+
+                                        <div class="flex gap-3 mt-4">
+                                            <button onclick="approveDeletion('${request._id}')"
+                                                    class="flex-1 px-4 py-3 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                                <span class="text-lg">✅</span> Approuver
+                                            </button>
+                                            <button onclick="rejectDeletion('${request._id}')"
+                                                    class="flex-1 px-4 py-3 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                                <span class="text-lg">❌</span> Rejeter
+                                            </button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `}
+                    </div>
+                </div>
+            ` : ''}
+
             <!-- NOUVEAU : Détail du document AVEC PRÉVISUALISATION -->
             ${state.selectedDoc ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" 
@@ -1358,24 +1972,30 @@ function render() {
                         <div class="space-y-4 mb-8 bg-white rounded-xl p-6 border border-gray-200">
                             <h3 class="font-bold text-lg text-gray-800 mb-4">ℹ️ Informations</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                ${state.selectedDoc.idDocument ? `
+                                <div class="flex items-center gap-2">
+                                    <strong class="text-gray-700">🆔 ID Document:</strong>
+                                    <span class="text-blue-600 font-semibold">${state.selectedDoc.idDocument}</span>
+                                </div>
+                                ` : ''}
                                 <div class="flex items-center gap-3">
-                                    <strong class="text-gray-700">Catégorie:</strong> 
+                                    <strong class="text-gray-700">Catégorie:</strong>
                                     <span class="category-badge inline-block px-3 py-1 text-sm rounded-full ${getCategoryColor(state.selectedDoc.categorie)} font-medium">
                                         ${getCategoryIcon(state.selectedDoc.categorie)} ${getCategoryName(state.selectedDoc.categorie)}
                                     </span>
                                 </div>
+                                ${state.selectedDoc.departementArchivage ? `
                                 <div class="flex items-center gap-2">
-                                    <strong class="text-gray-700">📄 Date document:</strong> 
-                                    <span class="text-gray-600">${formatDate(state.selectedDoc.date)}</span>
-                                </div>
-                                ${state.selectedDoc.dateAjout ? `
-                                <div class="flex items-center gap-2">
-                                    <strong class="text-gray-700">➕ Date d'ajout:</strong> 
-                                    <span class="text-gray-600">${formatDate(state.selectedDoc.dateAjout)}</span>
+                                    <strong class="text-gray-700">🏢 Département d'archivage:</strong>
+                                    <span class="text-gray-600 font-semibold">${state.selectedDoc.departementArchivage}</span>
                                 </div>
                                 ` : ''}
                                 <div class="flex items-center gap-2">
-                                    <strong class="text-gray-700">📦 Taille:</strong> 
+                                    <strong class="text-gray-700">📄 Date document:</strong>
+                                    <span class="text-gray-600">${formatDate(state.selectedDoc.date)}</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <strong class="text-gray-700">📦 Taille:</strong>
                                     <span class="text-gray-600">${formatSize(state.selectedDoc.taille)}</span>
                                 </div>
                             </div>
@@ -1396,45 +2016,131 @@ function render() {
                             ${state.selectedDoc.archivePar ? `
                                 <div class="pt-4 border-t border-gray-200">
                                     <strong class="text-gray-700">👤 Archivé par:</strong>
-                                    <p class="text-gray-600 mt-2">
-                                        ${state.selectedDoc.archivePar.nomComplet}
-                                        <span class="text-sm text-gray-500">
-                                            (le ${formatDate(state.selectedDoc.archivePar.date)} à ${new Date(state.selectedDoc.archivePar.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })})
-                                        </span>
-                                    </p>
+                                    <div class="text-gray-600 mt-2 space-y-1">
+                                        <p><strong>${state.selectedDoc.archivePar.nomComplet}</strong></p>
+                                        ${state.selectedDoc.archivePar.role ? `<p class="text-sm">Rôle: ${state.selectedDoc.archivePar.role} (Niveau ${state.selectedDoc.archivePar.niveau})</p>` : ''}
+                                        ${state.selectedDoc.archivePar.departement ? `<p class="text-sm">Département: ${state.selectedDoc.archivePar.departement}</p>` : ''}
+                                        <p class="text-sm text-gray-500">
+                                            Le ${formatDate(state.selectedDoc.archivePar.date)} à ${new Date(state.selectedDoc.archivePar.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                    </div>
                                 </div>
                             ` : ''}
 
-                            ${state.selectedDoc.dernierTelechargement ? `
+                            ${state.selectedDoc.historiqueConsultations && state.selectedDoc.historiqueConsultations.length > 0 ? `
                                 <div class="pt-4 border-t border-gray-200">
-                                    <strong class="text-gray-700">📥 Dernier téléchargement:</strong>
-                                    <p class="text-gray-600 mt-2">
-                                        ${formatDate(state.selectedDoc.dernierTelechargement.date)}
-                                        à ${new Date(state.selectedDoc.dernierTelechargement.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                                        ${state.currentUserInfo && state.currentUserInfo.roleNiveau === 1 ? `
-                                            <br><span class="text-sm">Par: <strong>${state.selectedDoc.dernierTelechargement.nomComplet}</strong></span>
-                                        ` : ''}
-                                    </p>
+                                    <strong class="text-gray-700">👁️ Dernières consultations (${state.selectedDoc.historiqueConsultations.length}):</strong>
+                                    <div class="mt-2 max-h-60 overflow-y-auto space-y-2">
+                                        ${state.selectedDoc.historiqueConsultations.slice(-10).reverse().map(c => `
+                                            <div class="bg-gray-50 p-3 rounded-lg text-sm">
+                                                <p class="font-semibold text-gray-800">${c.nomComplet}</p>
+                                                ${c.role ? `<p class="text-gray-600">Rôle: ${c.role} (Niveau ${c.niveau})</p>` : ''}
+                                                ${c.departement ? `<p class="text-gray-600">Département: ${c.departement}</p>` : ''}
+                                                <p class="text-gray-500 text-xs mt-1">
+                                                    ${formatDate(c.date)} à ${new Date(c.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+
+                            ${state.selectedDoc.historiqueTelechargements && state.selectedDoc.historiqueTelechargements.length > 0 ? `
+                                <div class="pt-4 border-t border-gray-200">
+                                    <strong class="text-gray-700">📥 Derniers téléchargements (${state.selectedDoc.historiqueTelechargements.length}):</strong>
+                                    <div class="mt-2 max-h-60 overflow-y-auto space-y-2">
+                                        ${state.selectedDoc.historiqueTelechargements.slice(-10).reverse().map(t => `
+                                            <div class="bg-blue-50 p-3 rounded-lg text-sm">
+                                                <p class="font-semibold text-gray-800">${t.nomComplet}</p>
+                                                ${t.role ? `<p class="text-gray-600">Rôle: ${t.role} (Niveau ${t.niveau})</p>` : ''}
+                                                ${t.departement ? `<p class="text-gray-600">Département: ${t.departement}</p>` : ''}
+                                                <p class="text-gray-500 text-xs mt-1">
+                                                    ${formatDate(t.date)} à ${new Date(t.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+
+                            ${state.selectedDoc.historiquePartages && state.selectedDoc.historiquePartages.length > 0 ? `
+                                <div class="pt-4 border-t border-gray-200">
+                                    <strong class="text-gray-700">🔗 Historique des partages (${state.selectedDoc.historiquePartages.length}):</strong>
+                                    <div class="mt-2 max-h-60 overflow-y-auto space-y-2">
+                                        ${state.selectedDoc.historiquePartages.slice(-10).reverse().map(p => `
+                                            <div class="bg-gradient-to-r from-green-50 to-blue-50 p-3 rounded-lg text-sm border-2 border-green-200">
+                                                <div class="flex items-start justify-between mb-2">
+                                                    <div class="flex-1">
+                                                        <p class="font-semibold text-gray-800 flex items-center gap-2">
+                                                            <span class="text-blue-600">👤 ${p.sharedByName || p.sharedBy}</span>
+                                                            <span class="text-gray-400">→</span>
+                                                            <span class="text-green-600">👤 ${p.sharedWithName || p.sharedWith}</span>
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div class="grid grid-cols-2 gap-2 mt-2 text-xs">
+                                                    <div class="bg-white rounded p-2">
+                                                        <p class="text-gray-500">Partagé par:</p>
+                                                        <p class="font-semibold text-gray-700">${p.sharedBy}</p>
+                                                        ${p.sharedByRole ? `<p class="text-gray-600">${p.sharedByRole} (Niv. ${p.sharedByNiveau || 'N/A'})</p>` : ''}
+                                                        ${p.sharedByDepartement ? `<p class="text-gray-600">📍 ${p.sharedByDepartement}</p>` : ''}
+                                                    </div>
+                                                    <div class="bg-white rounded p-2">
+                                                        <p class="text-gray-500">Partagé avec:</p>
+                                                        <p class="font-semibold text-gray-700">${p.sharedWith}</p>
+                                                        ${p.sharedWithRole ? `<p class="text-gray-600">${p.sharedWithRole} (Niv. ${p.sharedWithNiveau || 'N/A'})</p>` : ''}
+                                                        ${p.sharedWithDepartement ? `<p class="text-gray-600">📍 ${p.sharedWithDepartement}</p>` : ''}
+                                                    </div>
+                                                </div>
+                                                <p class="text-gray-500 text-xs mt-2 text-center bg-white rounded p-1">
+                                                    📅 ${formatDate(p.sharedAt)} à ${new Date(p.sharedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+                                            </div>
+                                        `).join('')}
+                                    </div>
                                 </div>
                             ` : ''}
                         </div>
 
-                        <!-- ACTIONS -->
-                        <div class="flex gap-3">
+                        <!-- ACTIONS selon niveau -->
+                        <div class="flex gap-3 flex-wrap">
+                            <!-- Télécharger : Tous les niveaux -->
                             <button onclick="downloadDoc(state.selectedDoc)"
-                                    class="flex-1 px-6 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    class="flex-1 min-w-[200px] px-6 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
                                 <span class="text-xl">📥</span> Télécharger
                             </button>
-                            ${state.selectedDoc.idUtilisateur === state.currentUser ? `
-                                <button onclick="openShareModal('${state.selectedDoc._id}')"
-                                        class="flex-1 px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                    <span class="text-xl">📤</span> Partager
+
+                            ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                                <!-- NIVEAU 1 : Télécharger, Partager (sauf ses propres docs) et Supprimer N'IMPORTE QUEL document -->
+                                ${state.selectedDoc.idUtilisateur !== state.currentUser ? `
+                                    <button onclick="openShareModal('${state.selectedDoc._id}')"
+                                            class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                        <span class="text-xl">📤</span> Partager
+                                    </button>
+                                ` : ''}
+                                <button onclick="deleteDoc('${state.selectedDoc._id}')"
+                                        class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    <span class="text-xl">🗑️</span> Supprimer
                                 </button>
                             ` : ''}
-                            <button onclick="deleteDoc('${state.selectedDoc._id}')"
-                                    class="flex-1 px-6 py-4 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                <span class="text-xl">🗑️</span> Supprimer
-                            </button>
+
+                            ${state.currentUserInfo && state.currentUserInfo.niveau === 2 ? `
+                                <!-- NIVEAU 2 : Télécharger, Partager (sauf ses propres docs) et Demander suppression -->
+                                ${state.selectedDoc.idUtilisateur !== state.currentUser ? `
+                                    <button onclick="openShareModal('${state.selectedDoc._id}')"
+                                            class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                        <span class="text-xl">📤</span> Partager
+                                    </button>
+                                ` : ''}
+                                ${state.selectedDoc.idUtilisateur === state.currentUser ? `
+                                    <button onclick="requestDeletion('${state.selectedDoc._id}')"
+                                        class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    <span class="text-xl">📝</span> Demander suppression
+                                </button>
+                                ` : ''}
+                            ` : ''}
+
+                            <!-- NIVEAU 3 : Seulement télécharger (pas d'action supplémentaire) -->
                         </div>
                     </div>
                 </div>
@@ -1480,8 +2186,34 @@ function render() {
                                 <p class="text-gray-600">Chargement des utilisateurs...</p>
                             </div>
                         ` : `
-                            <div class="space-y-2 max-h-96 overflow-y-auto mb-6">
-                                ${state.shareAvailableUsers.map(user => `
+                            <!-- ✅ NOUVEAU: Barre de recherche -->
+                            <div class="mb-4">
+                                <input type="text"
+                                       placeholder="🔍 Rechercher un utilisateur (nom, email, département)..."
+                                       value="${state.shareSearchTerm}"
+                                       oninput="updateShareSearch(this.value)"
+                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
+                            </div>
+
+                            <!-- ✅ NOUVEAU: Bouton Tout sélectionner / Tout désélectionner -->
+                            <div class="mb-4 flex items-center justify-between bg-blue-50 p-3 rounded-xl">
+                                <span class="text-sm text-gray-700">
+                                    ${state.shareSelectedUsers.length} utilisateur(s) sélectionné(s) sur ${getFilteredShareUsers().length}
+                                </span>
+                                <button onclick="toggleSelectAll()"
+                                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium text-sm">
+                                    ${state.shareSelectedUsers.length === getFilteredShareUsers().length ? '❌ Tout désélectionner' : '✅ Tout sélectionner'}
+                                </button>
+                            </div>
+
+                            <!-- Liste des utilisateurs -->
+                            <div class="space-y-2 max-h-96 overflow-y-auto mb-6 border-2 border-gray-200 rounded-xl p-2">
+                                ${getFilteredShareUsers().length === 0 ? `
+                                    <div class="text-center py-8 text-gray-500">
+                                        <div class="text-4xl mb-2">🔍</div>
+                                        <p>Aucun utilisateur trouvé</p>
+                                    </div>
+                                ` : getFilteredShareUsers().map(user => `
                                     <label class="flex items-center gap-3 p-4 bg-white rounded-xl hover:shadow-md transition cursor-pointer border-2 ${state.shareSelectedUsers.includes(user.username) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}">
                                         <input type="checkbox"
                                                ${state.shareSelectedUsers.includes(user.username) ? 'checked' : ''}
@@ -1497,11 +2229,12 @@ function render() {
                                 `).join('')}
                             </div>
 
+                            <!-- Boutons d'action -->
                             <div class="flex gap-3">
                                 <button onclick="confirmShare()"
                                         class="flex-1 px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2"
                                         ${state.shareSelectedUsers.length === 0 ? 'disabled opacity-50 cursor-not-allowed' : ''}>
-                                    <span class="text-xl">✅</span> Partager avec ${state.shareSelectedUsers.length} utilisateur(s)
+                                    <span class="text-xl">✅</span> Valider le partage (${state.shareSelectedUsers.length})
                                 </button>
                                 <button onclick="closeShareModal()"
                                         class="px-6 py-4 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
@@ -1509,6 +2242,144 @@ function render() {
                                 </button>
                             </div>
                         `}
+                    </div>
+                </div>
+            ` : ''}
+
+            ${state.showComposeMessage ? `
+                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                     onclick="if(event.target === this) closeComposeMessage()">
+                    <div class="modal-glass rounded-2xl p-8 max-w-2xl w-full shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                        <div class="flex justify-between items-start mb-6">
+                            <h2 class="text-3xl font-bold text-gray-800">✉️ Nouveau message</h2>
+                            <button onclick="closeComposeMessage()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Destinataire *</label>
+                                <select onchange="state.composeMessageTo = this.value; render();"
+                                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
+                                    <option value="">-- Sélectionner un utilisateur --</option>
+                                    ${state.allUsers.map(user => `
+                                        <option value="${user.username}" ${state.composeMessageTo === user.username ? 'selected' : ''}>
+                                            ${user.nom} (${user.username}) - ${user.departement}
+                                        </option>
+                                    `).join('')}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Sujet *</label>
+                                <input type="text"
+                                       value="${state.composeMessageSubject}"
+                                       oninput="state.composeMessageSubject = this.value"
+                                       placeholder="Entrez le sujet du message"
+                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Message *</label>
+                                <textarea
+                                       oninput="state.composeMessageBody = this.value"
+                                       placeholder="Entrez votre message..."
+                                       rows="8"
+                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none">${state.composeMessageBody}</textarea>
+                            </div>
+
+                            <div class="flex gap-3">
+                                <button onclick="sendNewMessage()"
+                                        class="flex-1 px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold">
+                                    ✅ Envoyer le message
+                                </button>
+                                <button onclick="closeComposeMessage()"
+                                        class="px-6 py-4 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
+                                    ❌ Annuler
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+
+            ${state.showMessages ? `
+                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                     onclick="if(event.target === this) closeMessages()">
+                    <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[85vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                        <div class="flex justify-between items-start mb-6">
+                            <div>
+                                <h2 class="text-3xl font-bold text-gray-800">📬 Boîte de réception</h2>
+                                <p class="text-sm text-gray-600 mt-1">${state.messages.length} message(s) • ${state.unreadCount} non lu(s)</p>
+                            </div>
+                            <button onclick="closeMessages()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                        </div>
+
+                        ${state.messages.length === 0 ? `
+                            <div class="text-center py-16">
+                                <div class="text-6xl mb-4">📭</div>
+                                <p class="text-xl text-gray-600 font-semibold mb-2">Aucun message</p>
+                                <p class="text-gray-500">Votre boîte de réception est vide</p>
+                            </div>
+                        ` : `
+                            <div class="space-y-3">
+                                ${state.messages.map(msg => `
+                                    <div class="bg-white rounded-xl p-5 border-2 ${msg.read ? 'border-gray-200' : 'border-blue-400 bg-blue-50'} hover:shadow-md transition">
+                                        <div class="flex justify-between items-start mb-3">
+                                            <div class="flex items-center gap-3">
+                                                ${!msg.read ? '<div class="w-3 h-3 bg-blue-500 rounded-full"></div>' : ''}
+                                                <div>
+                                                    <div class="font-bold text-gray-800 text-lg">${msg.subject}</div>
+                                                    <div class="text-sm text-gray-600">De: ${msg.fromName} (${msg.from})</div>
+                                                </div>
+                                            </div>
+                                            <div class="text-xs text-gray-500">
+                                                ${new Date(msg.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                        </div>
+
+                                        <div class="text-gray-700 mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 whitespace-pre-line">
+                                            ${msg.body}
+                                        </div>
+
+                                        <div class="flex gap-2 flex-wrap">
+                                            ${!msg.read ? `
+                                                <button onclick="markMessageAsRead('${msg._id}')"
+                                                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm font-medium">
+                                                    ✅ Marquer comme lu
+                                                </button>
+                                            ` : ''}
+
+                                            ${msg.type === 'deletion-request' && msg.relatedData ? `
+                                                <button onclick="approveFromMessage('${msg.relatedData.requestId}')"
+                                                        class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-medium">
+                                                    ✅ Approuver la suppression
+                                                </button>
+                                                <button onclick="rejectFromMessage('${msg.relatedData.requestId}')"
+                                                        class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm font-medium">
+                                                    ❌ Rejeter la demande
+                                                </button>
+                                            ` : ''}
+
+                                            <button onclick="deleteMessage('${msg._id}')"
+                                                    class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition text-sm font-medium">
+                                                🗑️ Supprimer
+                                            </button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `}
+
+                        <div class="mt-6 flex gap-3">
+                            <button onclick="loadMessages(); render();"
+                                    class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition font-medium">
+                                🔄 Actualiser
+                            </button>
+                            <button onclick="closeMessages()"
+                                    class="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition font-medium">
+                                ❌ Fermer
+                            </button>
+                        </div>
                     </div>
                 </div>
             ` : ''}
