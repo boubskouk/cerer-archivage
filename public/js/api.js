@@ -6,17 +6,15 @@
 const API_URL = (() => {
     const h = window.location.hostname;
     const protocol = window.location.protocol;
-    
+
     // Si localhost, utiliser http://localhost:4000
     if (h === 'localhost' || h === '127.0.0.1') {
         return 'http://localhost:4000/api';
     }
-    
+
     // En production, utiliser le même protocole et host que la page actuelle
     return `${protocol}//${h}/api`;
 })();
-
-console.log('🌐 API URL:', API_URL);
 
 // Fonction générique pour les appels API
 async function apiCall(endpoint, method = 'GET', data = null) {

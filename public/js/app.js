@@ -41,8 +41,12 @@ const state = {
     editingCategory: null, // Catégorie en cours de modification
     showDepartements: false,
     editingDepartement: null, // Département en cours de modification
-    showDeletionRequests: false,
-    deletionRequests: [],
+    showUsersManagement: false,
+    editingUser: null,
+    allUsersForManagement: [],
+    showRolesManagement: false,
+    editingRole: null,
+    showAdvancedStats: false,
     showDeleteConfirm: false,
     isAuthenticated: false,
     currentUser: null,
@@ -141,14 +145,23 @@ async function register(username, password, nom, email, idRole, idDepartement, a
     }
 }
 
-function logout() {
-    if (confirm('Se déconnecter?')) {
+async function logout() {
+    const confirmed = await customConfirm({
+        title: 'Déconnexion',
+        message: 'Êtes-vous sûr de vouloir vous déconnecter ?',
+        confirmText: 'Oui, me déconnecter',
+        cancelText: 'Annuler',
+        type: 'warning',
+        icon: '👋'
+    });
+
+    if (confirmed) {
         state.currentUser = null;
         state.currentUserInfo = null;
         state.isAuthenticated = false;
         state.documents = [];
         state.categories = [];
-        showNotification('Déconnexion');
+        showNotification('✅ Déconnexion réussie');
         render();
     }
 }
@@ -192,86 +205,21 @@ async function saveDocument(doc) {
 }
 
 async function deleteDoc(id) {
-    if (!confirm('Supprimer?')) return;
+    const confirmed = await customConfirm({
+        title: 'Supprimer le document',
+        message: 'Voulez-vous vraiment supprimer ce document ? Cette action est irréversible.',
+        confirmText: 'Oui, supprimer',
+        cancelText: 'Annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) return;
+
     await apiCall(`/documents/${state.currentUser}/${id}`, 'DELETE');
     state.selectedDoc = null;
     await loadData();
-    showNotification('Supprimé');
-}
-
-// ===== DEMANDE DE SUPPRESSION (pour niveau 2) =====
-async function requestDeletion(docId) {
-    if (!confirm('Envoyer une demande de suppression au niveau 1 de votre département ?')) return;
-
-    try {
-        const result = await apiCall('/api/deletion-requests', 'POST', {
-            documentId: docId,
-            requestedBy: state.currentUser
-        });
-
-        if (result.success) {
-            showNotification('✅ Demande de suppression envoyée au niveau 1');
-            state.selectedDoc = null;
-            render();
-        }
-    } catch (error) {
-        showNotification('❌ Erreur lors de l\'envoi de la demande', 'error');
-    }
-}
-
-// ===== GESTION DES DEMANDES (pour niveau 1) =====
-async function showDeletionRequests() {
-    try {
-        const requests = await apiCall(`/api/deletion-requests/${state.currentUser}`);
-        state.deletionRequests = requests;
-        state.showDeletionRequests = true;
-        state.showMenu = false;
-        render();
-    } catch (error) {
-        showNotification('❌ Erreur lors du chargement des demandes', 'error');
-    }
-}
-
-function closeDeletionRequests() {
-    state.showDeletionRequests = false;
-    render();
-}
-
-async function approveDeletion(requestId) {
-    if (!confirm('Approuver cette demande de suppression ? Le document sera définitivement supprimé.')) return;
-
-    try {
-        const result = await apiCall(`/api/deletion-requests/${requestId}/approve`, 'PUT', {
-            approvedBy: state.currentUser
-        });
-
-        if (result.success) {
-            showNotification('✅ Document supprimé avec succès');
-            await showDeletionRequests(); // Recharger la liste
-            await loadData(); // Recharger les documents
-        }
-    } catch (error) {
-        showNotification('❌ Erreur lors de l\'approbation', 'error');
-    }
-}
-
-async function rejectDeletion(requestId) {
-    const reason = prompt('Raison du rejet (optionnel):');
-    if (reason === null) return; // Annulé
-
-    try {
-        const result = await apiCall(`/api/deletion-requests/${requestId}/reject`, 'PUT', {
-            rejectedBy: state.currentUser,
-            reason: reason || 'Aucune raison fournie'
-        });
-
-        if (result.success) {
-            showNotification('✅ Demande rejetée');
-            await showDeletionRequests(); // Recharger la liste
-        }
-    } catch (error) {
-        showNotification('❌ Erreur lors du rejet', 'error');
-    }
+    showNotification('✅ Document supprimé');
 }
 
 async function deleteAllDocuments() {
@@ -326,10 +274,38 @@ async function addCategory() {
 
 async function deleteCategory(catId) {
     const count = state.documents.filter(d => d.categorie === catId).length;
-    if (count > 0 && !confirm(`${count} documents seront déplacés vers "Autre"`)) return;
-    await apiCall(`/categories/${state.currentUser}/${catId}`, 'DELETE');
-    await loadData();
-    showNotification('Catégorie supprimée');
+
+    if (count > 0) {
+        const confirmed = await customConfirm({
+            title: 'Supprimer la catégorie',
+            message: `Cette catégorie contient ${count} document(s). Les documents seront déplacés vers "Autre". Continuer ?`,
+            confirmText: 'Oui, supprimer',
+            cancelText: 'Annuler',
+            type: 'warning',
+            icon: '⚠️'
+        });
+
+        if (!confirmed) return;
+    } else {
+        const confirmed = await customConfirm({
+            title: 'Supprimer la catégorie',
+            message: 'Voulez-vous vraiment supprimer cette catégorie ?',
+            confirmText: 'Oui, supprimer',
+            cancelText: 'Annuler',
+            type: 'danger',
+            icon: '🗑️'
+        });
+
+        if (!confirmed) return;
+    }
+
+    try {
+        await apiCall(`/categories/${state.currentUser}/${catId}`, 'DELETE');
+        await loadData();
+        showNotification('✅ Catégorie supprimée');
+    } catch (error) {
+        console.error('Erreur suppression catégorie:', error);
+    }
 }
 
 function startEditCategory(catId) {
@@ -373,7 +349,7 @@ async function addDepartement() {
         return;
     }
 
-    await apiCall('/api/departements', 'POST', { nom, code });
+    await apiCall('/departements', 'POST', { nom, code });
     await loadRolesAndDepartements();
     showNotification('✅ Département créé');
     document.getElementById('new_dept_nom').value = '';
@@ -381,10 +357,24 @@ async function addDepartement() {
 }
 
 async function deleteDepartement(deptId) {
-    if (!confirm('Supprimer ce département ?')) return;
-    await apiCall(`/api/departements/${deptId}`, 'DELETE');
-    await loadRolesAndDepartements();
-    showNotification('✅ Département supprimé');
+    const confirmed = await customConfirm({
+        title: 'Supprimer le département',
+        message: 'Voulez-vous vraiment supprimer ce département ? Cette action est irréversible.',
+        confirmText: 'Oui, supprimer',
+        cancelText: 'Annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) return;
+
+    try {
+        await apiCall(`/departements/${deptId}`, 'DELETE');
+        await loadRolesAndDepartements();
+        showNotification('✅ Département supprimé');
+    } catch (error) {
+        console.error('Erreur suppression département:', error);
+    }
 }
 
 function startEditDepartement(deptId) {
@@ -410,7 +400,7 @@ async function saveEditDepartement() {
         return;
     }
 
-    await apiCall(`/api/departements/${state.editingDepartement._id}`, 'PUT', { nom, code });
+    await apiCall(`/departements/${state.editingDepartement._id}`, 'PUT', { nom, code });
     await loadRolesAndDepartements();
     state.editingDepartement = null;
     showNotification('✅ Département modifié');
@@ -636,7 +626,17 @@ async function importData(e) {
             const docs = Array.isArray(imported) ? imported : imported.documents || [];
             if (docs.length === 0) return showNotification('Aucun document', 'error');
             if (docs.length > 1000) return showNotification('Max 1000', 'error');
-            if (!confirm(`Importer ${docs.length} documents?`)) return;
+
+            const confirmed = await customConfirm({
+                title: 'Importer des documents',
+                message: `Voulez-vous importer ${docs.length} document(s) ?`,
+                confirmText: 'Oui, importer',
+                cancelText: 'Annuler',
+                type: 'info',
+                icon: '📥'
+            });
+
+            if (!confirmed) return;
             state.importProgress = { 
                 show: true, 
                 current: 0, 
@@ -801,6 +801,49 @@ function toggleDepartements() {
     render();
 }
 
+async function toggleUsersManagement() {
+    state.showUsersManagement = !state.showUsersManagement;
+    if (state.showUsersManagement) {
+        // Charger tous les utilisateurs
+        try {
+            const users = await apiCall('/users');
+            state.allUsersForManagement = users;
+        } catch (error) {
+            console.error('Erreur chargement utilisateurs:', error);
+        }
+    }
+    state.showUploadForm = false;
+    state.showCategories = false;
+    state.showDepartements = false;
+    state.showRolesManagement = false;
+    state.showAdvancedStats = false;
+    render();
+}
+
+async function toggleRolesManagement() {
+    state.showRolesManagement = !state.showRolesManagement;
+    if (state.showRolesManagement) {
+        // Charger tous les rôles
+        await loadRolesAndDepartements();
+    }
+    state.showUploadForm = false;
+    state.showCategories = false;
+    state.showDepartements = false;
+    state.showUsersManagement = false;
+    state.showAdvancedStats = false;
+    render();
+}
+
+function toggleAdvancedStats() {
+    state.showAdvancedStats = !state.showAdvancedStats;
+    state.showUploadForm = false;
+    state.showCategories = false;
+    state.showDepartements = false;
+    state.showUsersManagement = false;
+    state.showRolesManagement = false;
+    render();
+}
+
 function toggleRegister() {
     state.showRegister = !state.showRegister;
     render();
@@ -810,7 +853,7 @@ function toggleRegister() {
 async function openShareModal(docId) {
     try {
         // Charger TOUS les utilisateurs de TOUS les départements (sauf l'utilisateur actuel)
-        const allUsers = await apiCall('/api/users');
+        const allUsers = await apiCall('/users');
         // Filtrer pour exclure l'utilisateur actuel
         const users = allUsers.filter(u => u.username !== state.currentUser);
 
@@ -957,57 +1000,25 @@ async function markMessageAsRead(messageId) {
 
 // Supprimer un message
 async function deleteMessage(messageId) {
-    if (!confirm('Supprimer ce message ?')) return;
+    const confirmed = await customConfirm({
+        title: 'Supprimer le message',
+        message: 'Voulez-vous vraiment supprimer ce message ?',
+        confirmText: 'Oui, supprimer',
+        cancelText: 'Annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) return;
 
     try {
         await apiCall(`/messages/${messageId}`, 'DELETE');
-        showNotification('Message supprimé');
+        showNotification('✅ Message supprimé');
         await loadMessages();
         render();
     } catch (error) {
         console.error('Erreur suppression message:', error);
         showNotification('Erreur lors de la suppression', 'error');
-    }
-}
-
-// Approuver une demande de suppression depuis la messagerie
-async function approveFromMessage(requestId) {
-    try {
-        const result = await apiCall(`/deletion-requests/${requestId}/approve`, 'PUT', {
-            approvedBy: state.currentUser
-        });
-
-        if (result.success) {
-            showNotification('✅ Demande approuvée - Document supprimé');
-            await loadMessages();
-            await loadData();
-            render();
-        }
-    } catch (error) {
-        console.error('Erreur approbation:', error);
-        showNotification('Erreur lors de l\'approbation', 'error');
-    }
-}
-
-// Rejeter une demande de suppression depuis la messagerie
-async function rejectFromMessage(requestId) {
-    const reason = prompt('Raison du rejet (optionnel):');
-    if (reason === null) return;
-
-    try {
-        const result = await apiCall(`/deletion-requests/${requestId}/reject`, 'PUT', {
-            rejectedBy: state.currentUser,
-            reason: reason || 'Aucune raison fournie'
-        });
-
-        if (result.success) {
-            showNotification('✅ Demande rejetée');
-            await loadMessages();
-            render();
-        }
-    } catch (error) {
-        console.error('Erreur rejet:', error);
-        showNotification('Erreur lors du rejet', 'error');
     }
 }
 
@@ -1549,56 +1560,65 @@ function render() {
             
             ${state.showMenu ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 backdrop-blur-sm" onclick="toggleMenu()"></div>
-                <div class="fixed right-0 top-0 h-full w-80 sidebar-menu shadow-2xl z-50 p-6 overflow-y-auto animate-slide-in">
-                    <button onclick="toggleMenu()" class="absolute top-4 right-4 text-2xl text-gray-600 hover:text-gray-800">✖</button>
-                    <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">Menu</h2>
-
-                    <!-- Affichage du rôle et niveau -->
-                    ${state.currentUserInfo ? `
-                        <div class="mb-4 p-3 bg-gradient-to-br from-blue-50 to-green-50 rounded-xl">
-                            <p class="text-sm font-semibold text-gray-700">${state.currentUserInfo.nom}</p>
-                            <p class="text-xs text-gray-600">Niveau ${state.currentUserInfo.niveau} - ${state.currentUserInfo.role}</p>
-                        </div>
-                    ` : ''}
-
-                    <div class="space-y-2">
-                        ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
-                            <!-- Menu complet pour NIVEAU 1 (Admin) -->
-                            <button onclick="toggleCategories()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
-                                📂 Gérer les catégories
-                            </button>
-                            <button onclick="toggleDepartements()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
-                                🏢 Gérer les départements
-                            </button>
-                            <button onclick="showDeletionRequests()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-orange-50 hover:to-red-50 rounded-xl transition font-medium">
-                                📋 Demandes de suppression
-                            </button>
-                            <button onclick="exportData()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
-                                💾 Exporter les données
-                            </button>
-                            <label class="block w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl cursor-pointer transition font-medium">
-                                📥 Importer des données
-                                <input type="file" accept=".json" onchange="importData(event)" class="hidden">
-                            </label>
-                            <button onclick="deleteAllDocuments()" class="w-full text-left px-4 py-4 hover:bg-red-50 text-red-600 rounded-xl transition font-medium">
-                                🗑️ Tout supprimer
-                            </button>
+                <div class="fixed right-0 top-0 h-screen w-80 sidebar-menu shadow-2xl z-50 animate-slide-in flex flex-col">
+                    <div class="flex-shrink-0 p-6 pb-4 border-b border-gray-200">
+                        <button onclick="toggleMenu()" class="absolute top-4 right-4 text-2xl text-gray-600 hover:text-gray-800">✖</button>
+                        <h2 class="text-2xl font-bold bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">Menu</h2>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-6 pt-4">
+                        <!-- Affichage du rôle et niveau -->
+                        ${state.currentUserInfo ? `
+                            <div class="mb-4 p-3 bg-gradient-to-br from-blue-50 to-green-50 rounded-xl">
+                                <p class="text-sm font-semibold text-gray-700">${state.currentUserInfo.nom}</p>
+                                <p class="text-xs text-gray-600">Niveau ${state.currentUserInfo.niveau} - ${state.currentUserInfo.role}</p>
+                            </div>
                         ` : ''}
 
-                        <!-- ✅ NOUVEAU: Boîte de réception des messages pour tous les niveaux -->
-                        <button onclick="toggleMessagingSection()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium relative">
-                            📬 Boîte de réception des messages
-                            ${state.unreadCount > 0 ? `
-                                <span class="absolute right-4 top-4 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded-full">
-                                    ${state.unreadCount}
-                                </span>
+                        <div class="space-y-2">
+                            ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                                <!-- Menu complet pour NIVEAU 1 (Admin) -->
+                                <button onclick="toggleCategories()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                    📂 Gérer les catégories
+                                </button>
+                                <button onclick="toggleDepartements()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                    🏢 Gérer les départements
+                                </button>
+                                <button onclick="toggleUsersManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 rounded-xl transition font-medium">
+                                    👥 Gérer les utilisateurs
+                                </button>
+                                <button onclick="toggleRolesManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-indigo-50 hover:to-blue-50 rounded-xl transition font-medium">
+                                    🎭 Gérer les rôles
+                                </button>
+                                <button onclick="toggleAdvancedStats()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-green-50 hover:to-teal-50 rounded-xl transition font-medium">
+                                    📊 Statistiques avancées
+                                </button>
+                                <button onclick="exportData()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                    💾 Exporter les données
+                                </button>
+                                <label class="block w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl cursor-pointer transition font-medium">
+                                    📥 Importer des données
+                                    <input type="file" accept=".json" onchange="importData(event)" class="hidden">
+                                </label>
+                                <button onclick="deleteAllDocuments()" class="w-full text-left px-4 py-4 hover:bg-red-50 text-red-600 rounded-xl transition font-medium">
+                                    🗑️ Tout supprimer
+                                </button>
                             ` : ''}
-                        </button>
 
-                        <!-- Déconnexion pour tous les niveaux -->
-                        <button onclick="logout()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
-                            🚪 Déconnexion
-                        </button>
+                            <!-- ✅ NOUVEAU: Boîte de réception des messages pour tous les niveaux -->
+                            <button onclick="toggleMessagingSection()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium relative">
+                                📬 Boîte de réception des messages
+                                ${state.unreadCount > 0 ? `
+                                    <span class="absolute right-4 top-4 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded-full">
+                                        ${state.unreadCount}
+                                    </span>
+                                ` : ''}
+                            </button>
+
+                            <!-- Déconnexion pour tous les niveaux -->
+                            <button onclick="logout()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                🚪 Déconnexion
+                            </button>
+                        </div>
                     </div>
                 </div>
             ` : ''}
@@ -1796,56 +1816,14 @@ function render() {
                 </div>
             ` : ''}
 
-            ${state.showDeletionRequests ? `
-                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-                     onclick="if(event.target === this) closeDeletionRequests()">
-                    <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
-                        <div class="flex justify-between items-center mb-6">
-                            <h2 class="text-2xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">📋 Demandes de suppression</h2>
-                            <button onclick="closeDeletionRequests()" class="text-2xl text-gray-600 hover:text-gray-800">✖</button>
-                        </div>
+            <!-- NOUVEAU : Gestion des utilisateurs -->
+            ${renderUsersManagement()}
 
-                        ${state.deletionRequests.length === 0 ? `
-                            <div class="text-center py-12">
-                                <div class="text-6xl mb-4">✅</div>
-                                <p class="text-gray-500 text-lg">Aucune demande en attente</p>
-                            </div>
-                        ` : `
-                            <div class="space-y-4">
-                                ${state.deletionRequests.map(request => `
-                                    <div class="bg-white border-2 border-orange-200 rounded-xl p-5 shadow-sm hover:shadow-md transition">
-                                        <div class="flex justify-between items-start mb-3">
-                                            <div class="flex-1">
-                                                <h3 class="font-bold text-lg text-gray-800 mb-1">${request.documentTitle}</h3>
-                                                <p class="text-sm text-blue-600 font-semibold">🆔 ${request.documentIdDocument}</p>
-                                            </div>
-                                            <span class="px-3 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-semibold">
-                                                ⏳ En attente
-                                            </span>
-                                        </div>
+            <!-- NOUVEAU : Gestion des rôles -->
+            ${renderRolesManagement()}
 
-                                        <div class="border-t pt-3 mt-3 space-y-2 text-sm text-gray-600">
-                                            <p><strong>👤 Demandeur:</strong> ${request.requesterName} (${request.requestedBy})</p>
-                                            <p><strong>📅 Date de demande:</strong> ${formatDate(request.createdAt)}</p>
-                                        </div>
-
-                                        <div class="flex gap-3 mt-4">
-                                            <button onclick="approveDeletion('${request._id}')"
-                                                    class="flex-1 px-4 py-3 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                                <span class="text-lg">✅</span> Approuver
-                                            </button>
-                                            <button onclick="rejectDeletion('${request._id}')"
-                                                    class="flex-1 px-4 py-3 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                                <span class="text-lg">❌</span> Rejeter
-                                            </button>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        `}
-                    </div>
-                </div>
-            ` : ''}
+            <!-- NOUVEAU : Statistiques avancées -->
+            ${renderAdvancedStats()}
 
             <!-- NOUVEAU : Détail du document AVEC PRÉVISUALISATION -->
             ${state.selectedDoc ? `
@@ -2111,13 +2089,11 @@ function render() {
                             </button>
 
                             ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
-                                <!-- NIVEAU 1 : Télécharger, Partager (sauf ses propres docs) et Supprimer N'IMPORTE QUEL document -->
-                                ${state.selectedDoc.idUtilisateur !== state.currentUser ? `
-                                    <button onclick="openShareModal('${state.selectedDoc._id}')"
-                                            class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                        <span class="text-xl">📤</span> Partager
-                                    </button>
-                                ` : ''}
+                                <!-- NIVEAU 1 : Télécharger, Partager et Supprimer N'IMPORTE QUEL document -->
+                                <button onclick="openShareModal('${state.selectedDoc._id}')"
+                                        class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    <span class="text-xl">📤</span> Partager
+                                </button>
                                 <button onclick="deleteDoc('${state.selectedDoc._id}')"
                                         class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
                                     <span class="text-xl">🗑️</span> Supprimer
@@ -2125,19 +2101,11 @@ function render() {
                             ` : ''}
 
                             ${state.currentUserInfo && state.currentUserInfo.niveau === 2 ? `
-                                <!-- NIVEAU 2 : Télécharger, Partager (sauf ses propres docs) et Demander suppression -->
-                                ${state.selectedDoc.idUtilisateur !== state.currentUser ? `
-                                    <button onclick="openShareModal('${state.selectedDoc._id}')"
-                                            class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                        <span class="text-xl">📤</span> Partager
-                                    </button>
-                                ` : ''}
-                                ${state.selectedDoc.idUtilisateur === state.currentUser ? `
-                                    <button onclick="requestDeletion('${state.selectedDoc._id}')"
-                                        class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                    <span class="text-xl">📝</span> Demander suppression
+                                <!-- NIVEAU 2 : Télécharger et Partager des documents de son département -->
+                                <button onclick="openShareModal('${state.selectedDoc._id}')"
+                                        class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    <span class="text-xl">📤</span> Partager
                                 </button>
-                                ` : ''}
                             ` : ''}
 
                             <!-- NIVEAU 3 : Seulement télécharger (pas d'action supplémentaire) -->
@@ -2346,17 +2314,6 @@ function render() {
                                                 <button onclick="markMessageAsRead('${msg._id}')"
                                                         class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm font-medium">
                                                     ✅ Marquer comme lu
-                                                </button>
-                                            ` : ''}
-
-                                            ${msg.type === 'deletion-request' && msg.relatedData ? `
-                                                <button onclick="approveFromMessage('${msg.relatedData.requestId}')"
-                                                        class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-medium">
-                                                    ✅ Approuver la suppression
-                                                </button>
-                                                <button onclick="rejectFromMessage('${msg.relatedData.requestId}')"
-                                                        class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm font-medium">
-                                                    ❌ Rejeter la demande
                                                 </button>
                                             ` : ''}
 

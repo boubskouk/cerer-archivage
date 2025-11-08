@@ -7,9 +7,8 @@ const messagingState = {
     unreadCount: 0,
     receivedMessages: [],
     sentMessages: [],
-    deletionRequests: [],
     sharedDocuments: [],
-    currentView: 'inbox' // 'inbox', 'sent', 'compose', 'deletion-requests', 'shared-docs'
+    currentView: 'inbox' // 'inbox', 'sent', 'compose', 'shared-docs'
 };
 
 // ============================================
@@ -26,61 +25,6 @@ async function sendMessage(to, subject, message) {
             to,
             subject,
             body: message
-        })
-    });
-
-    const data = await response.json();
-    if (!data.success) throw new Error(data.message);
-    return data;
-}
-
-// Créer une demande de suppression de message
-async function requestMessageDeletion(messageId, motif) {
-    const response = await fetch(`/api/messages/${messageId}/request-deletion`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            userId: state.currentUser,
-            motif
-        })
-    });
-
-    const data = await response.json();
-    if (!data.success) throw new Error(data.message);
-    return data;
-}
-
-// Récupérer les demandes de suppression (pour niveau 1)
-async function getMessageDeletionRequests() {
-    const response = await fetch(`/api/messages/deletion-requests/${state.currentUser}`);
-    const data = await response.json();
-    if (!data.success) throw new Error(data.message);
-    return data.requests;
-}
-
-// Approuver une demande de suppression
-async function approveMessageDeletionRequest(requestId) {
-    const response = await fetch(`/api/messages/deletion-requests/${requestId}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            userId: state.currentUser
-        })
-    });
-
-    const data = await response.json();
-    if (!data.success) throw new Error(data.message);
-    return data;
-}
-
-// Rejeter une demande de suppression
-async function rejectMessageDeletionRequest(requestId, motifRejet) {
-    const response = await fetch(`/api/messages/deletion-requests/${requestId}/reject`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            userId: state.currentUser,
-            motifRejet
         })
     });
 
@@ -165,16 +109,87 @@ async function getSharedDocuments() {
     return messagingState.sharedDocuments;
 }
 
+// Supprimer tous les messages reçus
+async function deleteAllReceivedMessages() {
+    if (!confirm('Voulez-vous vraiment supprimer TOUS les messages reçus ? Cette action est irréversible.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/messages/bulk/received/${state.currentUser}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showNotification(`✅ ${data.deletedCount} message(s) reçu(s) supprimé(s) avec succès`);
+            await loadReceivedMessages();
+            render();
+        } else {
+            throw new Error(data.message);
+        }
+    } catch (error) {
+        console.error('Erreur suppression messages reçus:', error);
+        showNotification('Erreur lors de la suppression des messages reçus', 'error');
+    }
+}
+
+// Supprimer tous les messages envoyés
+async function deleteAllSentMessages() {
+    if (!confirm('Voulez-vous vraiment supprimer TOUS les messages envoyés ? Cette action est irréversible.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/messages/bulk/sent/${state.currentUser}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showNotification(`✅ ${data.deletedCount} message(s) envoyé(s) supprimé(s) avec succès`);
+            await loadSentMessages();
+            render();
+        } else {
+            throw new Error(data.message);
+        }
+    } catch (error) {
+        console.error('Erreur suppression messages envoyés:', error);
+        showNotification('Erreur lors de la suppression des messages envoyés', 'error');
+    }
+}
+
+// Supprimer tout l'historique de partage
+async function deleteAllSharedDocuments() {
+    if (!confirm('Voulez-vous vraiment supprimer TOUT l\'historique de partage de documents ? Cette action est irréversible.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/shared-documents/bulk/${state.currentUser}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showNotification(`✅ ${data.deletedCount} partage(s) supprimé(s) avec succès`);
+            await loadSharedDocuments();
+            render();
+        } else {
+            throw new Error(data.message);
+        }
+    } catch (error) {
+        console.error('Erreur suppression historique partages:', error);
+        showNotification('Erreur lors de la suppression de l\'historique', 'error');
+    }
+}
+
 // ============================================
 // RENDU INTERFACE
 // ============================================
 
 // Afficher la messagerie
 function renderMessaging() {
-    const userNiveau = state.currentUserInfo?.roleNiveau;
-    const isJbk = state.currentUser === 'jbk';
-    const showDeletionRequests = isJbk || userNiveau === 1;
-
     return `
         <div class="messaging-container max-w-7xl mx-auto">
             <!-- Header moderne avec gradient -->
@@ -220,14 +235,6 @@ function renderMessaging() {
                         <span class="text-xl">✏️</span>
                         <span>Nouveau</span>
                     </button>
-                    ${showDeletionRequests ? `
-                        <button onclick="switchMessagingView('deletion-requests')"
-                                class="px-6 py-3 rounded-xl font-semibold transition flex items-center gap-2 ${messagingState.currentView === 'deletion-requests' ? 'bg-white text-orange-600 shadow-lg' : 'bg-white/10 hover:bg-white/20 text-white'}">
-                            <span class="text-xl">📝</span>
-                            <span>Demandes</span>
-                            ${messagingState.deletionRequests.length > 0 ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full ml-1">${messagingState.deletionRequests.length}</span>` : ''}
-                        </button>
-                    ` : ''}
                 </div>
             </div>
 
@@ -250,8 +257,6 @@ function renderMessagingContent() {
             return renderSharedDocuments();
         case 'compose':
             return renderComposeForm();
-        case 'deletion-requests':
-            return renderDeletionRequests();
         default:
             return '';
     }
@@ -286,15 +291,23 @@ function renderInbox() {
                             </p>
                         </div>
                     </div>
-                    ${messagingState.unreadCount > 0 ? `
-                        <div class="bg-gradient-to-r from-red-500 to-pink-500 text-white px-4 py-2 rounded-full font-bold shadow-lg">
-                            ${messagingState.unreadCount} non lu${messagingState.unreadCount > 1 ? 's' : ''}
-                        </div>
-                    ` : `
-                        <div class="bg-green-100 text-green-700 px-4 py-2 rounded-full font-semibold">
-                            ✓ Tous lus
-                        </div>
-                    `}
+                    <div class="flex items-center gap-2">
+                        ${messagingState.unreadCount > 0 ? `
+                            <div class="bg-gradient-to-r from-red-500 to-pink-500 text-white px-4 py-2 rounded-full font-bold shadow-lg">
+                                ${messagingState.unreadCount} non lu${messagingState.unreadCount > 1 ? 's' : ''}
+                            </div>
+                        ` : `
+                            <div class="bg-green-100 text-green-700 px-4 py-2 rounded-full font-semibold">
+                                ✓ Tous lus
+                            </div>
+                        `}
+                        ${messagingState.receivedMessages.length > 0 ? `
+                            <button onclick="deleteAllReceivedMessages()"
+                                    class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold text-sm">
+                                🗑️ Tout supprimer
+                            </button>
+                        ` : ''}
+                    </div>
                 </div>
             </div>
 
@@ -374,11 +387,19 @@ function renderSentMessages() {
                             </p>
                         </div>
                     </div>
-                    <button onclick="switchMessagingView('compose')"
-                            class="px-5 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-bold flex items-center gap-2">
-                        <span class="text-xl">✏️</span>
-                        <span>Nouveau</span>
-                    </button>
+                    <div class="flex items-center gap-2">
+                        ${messagingState.sentMessages.length > 0 ? `
+                            <button onclick="deleteAllSentMessages()"
+                                    class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold text-sm">
+                                🗑️ Tout supprimer
+                            </button>
+                        ` : ''}
+                        <button onclick="switchMessagingView('compose')"
+                                class="px-5 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-bold flex items-center gap-2">
+                            <span class="text-xl">✏️</span>
+                            <span>Nouveau</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -465,6 +486,12 @@ function renderSharedDocuments() {
                             </p>
                         </div>
                     </div>
+                    ${messagingState.sharedDocuments.length > 0 ? `
+                        <button onclick="deleteAllSharedDocuments()"
+                                class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold text-sm">
+                            🗑️ Tout supprimer
+                        </button>
+                    ` : ''}
                 </div>
             </div>
 
@@ -622,38 +649,6 @@ function renderComposeForm() {
     `;
 }
 
-// Rendu des demandes de suppression (pour niveau 1)
-function renderDeletionRequests() {
-    if (messagingState.deletionRequests.length === 0) {
-        return '<div class="empty-state">✅ Aucune demande de suppression en attente</div>';
-    }
-
-    return `
-        <div class="deletion-requests-list">
-            <h3>📝 Demandes de suppression en attente</h3>
-            ${messagingState.deletionRequests.map(req => `
-                <div class="deletion-request-card">
-                    <div class="request-header">
-                        <h4>Message: ${escapeHtml(req.messageSubject || 'Sans sujet')}</h4>
-                        <span class="request-date">${formatDate(req.dateCreation)}</span>
-                    </div>
-                    <div class="request-details">
-                        <p><strong>De:</strong> ${escapeHtml(req.messageFrom)}</p>
-                        <p><strong>À:</strong> ${escapeHtml(req.messageTo)}</p>
-                        <p><strong>Demandeur:</strong> ${escapeHtml(req.nomDemandeur)} (${escapeHtml(req.idDemandeur)})</p>
-                        <p><strong>Niveau:</strong> ${req.niveauDemandeur}</p>
-                        <p><strong>Motif:</strong> ${escapeHtml(req.motif)}</p>
-                    </div>
-                    <div class="request-actions">
-                        <button onclick="handleApproveMessageDeletion('${req._id}')" class="btn-approve">✅ Approuver</button>
-                        <button onclick="handleRejectMessageDeletion('${req._id}')" class="btn-reject">❌ Rejeter</button>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-}
-
 // ============================================
 // ACTIONS
 // ============================================
@@ -670,8 +665,6 @@ async function switchMessagingView(view) {
         await loadSharedDocuments();
     } else if (view === 'compose') {
         await loadUsersList();
-    } else if (view === 'deletion-requests') {
-        await loadMessageDeletionRequests();
     }
 
     render();
@@ -723,87 +716,6 @@ async function loadUsersList() {
     } catch (error) {
         console.error('Erreur chargement utilisateurs:', error);
         showNotification('Erreur chargement utilisateurs', 'error');
-    }
-}
-
-// Charger les demandes de suppression
-async function loadMessageDeletionRequests() {
-    try {
-        messagingState.deletionRequests = await getMessageDeletionRequests();
-    } catch (error) {
-        console.error('Erreur chargement demandes suppression:', error);
-        showNotification('Erreur chargement demandes suppression', 'error');
-    }
-}
-
-// Gérer l'approbation d'une demande
-async function handleApproveMessageDeletion(requestId) {
-    const confirmed = await customConfirm({
-        title: 'Approuver la suppression',
-        message: 'Voulez-vous vraiment approuver cette demande de suppression ? Le message sera définitivement supprimé.',
-        confirmText: 'Oui, approuver',
-        cancelText: 'Non, annuler',
-        type: 'success',
-        icon: '✅'
-    });
-
-    if (!confirmed) return;
-
-    try {
-        await approveMessageDeletionRequest(requestId);
-        await customAlert({
-            title: 'Succès',
-            message: 'Demande approuvée et message supprimé avec succès.',
-            type: 'success',
-            icon: '✅'
-        });
-        await loadMessageDeletionRequests();
-        render();
-    } catch (error) {
-        console.error('Erreur approbation demande:', error);
-        await customAlert({
-            title: 'Erreur',
-            message: error.message || 'Erreur lors de l\'approbation',
-            type: 'error',
-            icon: '❌'
-        });
-    }
-}
-
-// Gérer le rejet d'une demande
-async function handleRejectMessageDeletion(requestId) {
-    const motifRejet = await customPrompt({
-        title: 'Rejeter la demande',
-        message: 'Veuillez indiquer le motif du rejet (optionnel) :',
-        placeholder: 'Ex: Document encore nécessaire, demande non justifiée...',
-        confirmText: 'Rejeter',
-        cancelText: 'Annuler',
-        type: 'textarea',
-        icon: '❌',
-        rows: 4
-    });
-
-    // Si l'utilisateur annule
-    if (motifRejet === null) return;
-
-    try {
-        await rejectMessageDeletionRequest(requestId, motifRejet || 'Non spécifié');
-        await customAlert({
-            title: 'Demande rejetée',
-            message: 'La demande de suppression a été rejetée.',
-            type: 'info',
-            icon: '❌'
-        });
-        await loadMessageDeletionRequests();
-        render();
-    } catch (error) {
-        console.error('Erreur rejet demande:', error);
-        await customAlert({
-            title: 'Erreur',
-            message: error.message || 'Erreur lors du rejet',
-            type: 'error',
-            icon: '❌'
-        });
     }
 }
 
@@ -913,72 +825,24 @@ async function deleteMessageAndRefresh(messageId, type) {
     }
 }
 
-// Afficher la modal de demande de suppression
-function showDeletionRequestModal(messageId, type) {
-    const modalContent = `
-        <div class="deletion-request-modal">
-            <h3>📝 Demande de suppression</h3>
-            <p>Veuillez indiquer le motif de votre demande de suppression :</p>
-            <form id="deletion-request-form" onsubmit="handleDeletionRequest(event, '${messageId}', '${type}')">
-                <div class="form-group">
-                    <label for="deletion-motif">Motif de la demande :</label>
-                    <textarea id="deletion-motif" rows="5" required placeholder="Expliquez pourquoi vous souhaitez supprimer ce message..."></textarea>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">📤 Envoyer la demande</button>
-                    <button type="button" onclick="closeModal()" class="btn-secondary">Annuler</button>
-                </div>
-            </form>
-        </div>
-    `;
-
-    showModal('Demande de suppression', modalContent);
-}
-
-// Gérer la soumission de la demande de suppression
-async function handleDeletionRequest(event, messageId, type) {
-    event.preventDefault();
-
-    const motif = document.getElementById('deletion-motif').value;
-
-    if (!motif.trim()) {
-        showNotification('Veuillez saisir un motif', 'error');
-        return;
-    }
-
-    try {
-        await requestMessageDeletion(messageId, motif);
-        closeModal();
-        showNotification('✅ Demande de suppression envoyée au niveau 1 de votre département');
-
-        if (type === 'received') {
-            await loadReceivedMessages();
-        } else {
-            await loadSentMessages();
-        }
-
-        render();
-    } catch (error) {
-        console.error('Erreur envoi demande suppression:', error);
-        showNotification(error.message || 'Erreur lors de l\'envoi de la demande', 'error');
-    }
-}
-
-// Formater une date
+// Formater une date avec heure du serveur
 function formatDate(dateString) {
     const date = new Date(dateString);
     const now = new Date();
     const diff = now - date;
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
+    const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const fullDate = date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
     if (days === 0) {
-        return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        return `Aujourd'hui à ${time}`;
     } else if (days === 1) {
-        return 'Hier ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        return `Hier à ${time}`;
     } else if (days < 7) {
-        return `${days} jours`;
+        return `${fullDate} à ${time}`;
     } else {
-        return date.toLocaleDateString('fr-FR');
+        return `${fullDate} à ${time}`;
     }
 }
 
@@ -1039,5 +903,5 @@ function filterMessageRecipients(searchTerm) {
 window.replyToMessage = replyToMessage;
 window.sendMessage = sendMessage;
 window.deleteMessage = deleteMessage;
-window.markAsRead = markAsRead;
+window.markMessageAsRead = markMessageAsRead;
 window.filterMessageRecipients = filterMessageRecipients;

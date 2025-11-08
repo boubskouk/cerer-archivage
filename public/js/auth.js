@@ -39,13 +39,22 @@ async function register(username, password, nom, email, idRole, idDepartement, a
 }
 
 // Déconnexion
-function logout() {
-    if (confirm('Voulez-vous vraiment vous déconnecter?')) {
+async function logout() {
+    const confirmed = await customConfirm({
+        title: 'Déconnexion',
+        message: 'Voulez-vous vraiment vous déconnecter ?',
+        confirmText: 'Oui, me déconnecter',
+        cancelText: 'Annuler',
+        type: 'warning',
+        icon: '🚪'
+    });
+
+    if (confirmed) {
         state.currentUser = null;
         state.isAuthenticated = false;
         state.documents = [];
         state.categories = [];
-        showNotification('Déconnexion réussie');
+        showNotification('✅ Déconnexion réussie');
         render();
     }
 }

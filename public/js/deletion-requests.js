@@ -18,7 +18,7 @@ async function loadDeletionRequests() {
     }
 
     // Vérifier que l'utilisateur est niveau 1
-    if (state.currentUserInfo.roleNiveau !== 1) {
+    if (state.currentUserInfo.niveau !== 1) {
         return;
     }
 
@@ -91,7 +91,7 @@ async function handleRejectDeletion(requestId) {
 
 // Afficher le badge de notification
 function renderDeletionRequestsBadge() {
-    if (!state.currentUserInfo || state.currentUserInfo.roleNiveau !== 1) {
+    if (!state.currentUserInfo || state.currentUserInfo.niveau !== 1) {
         return '';
     }
 
@@ -117,7 +117,7 @@ function renderDeletionRequests() {
     }
 
     // Si pas niveau 1, ne rien afficher
-    if (!state.currentUserInfo || state.currentUserInfo.roleNiveau !== 1) {
+    if (!state.currentUserInfo || state.currentUserInfo.niveau !== 1) {
         container.innerHTML = '';
         return;
     }
@@ -246,7 +246,7 @@ if (typeof window !== 'undefined') {
 
     // Recharger périodiquement les demandes (toutes les 30 secondes)
     setInterval(() => {
-        if (state.isAuthenticated && state.currentUserInfo && state.currentUserInfo.roleNiveau === 1) {
+        if (state.isAuthenticated && state.currentUserInfo && state.currentUserInfo.niveau === 1) {
             loadDeletionRequests();
         }
     }, 30000);

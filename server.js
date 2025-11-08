@@ -32,6 +32,7 @@ let rolesCollection;
 let departementsCollection;
 let deletionRequestsCollection;
 let messagesCollection;
+let messageDeletionRequestsCollection;
 let shareHistoryCollection;
 
 // ============================================
@@ -153,63 +154,49 @@ async function getAccessibleDocuments(userId) {
 
     console.log(`📋 Récupération documents pour: ${userId} (niveau ${userRole.niveau}, dept: ${user.idDepartement})`);
 
-    // ✅ Rechercher documents du département + documents partagés avec l'utilisateur
-    let query = {
-        $or: [
-            { idDepartement: user.idDepartement },
-            { idUtilisateur: userId, idDepartement: { $exists: false } },
-            { sharedWith: userId } // Documents partagés avec cet utilisateur
-        ]
-    };
+    let accessibleDocs = [];
 
-    const allDocs = await documentsCollection.find(query).toArray();
-    console.log(`📊 Documents trouvés: ${allDocs.length}`);
-
-    // Filtrer selon les règles
-    const accessibleDocs = [];
-    for (const doc of allDocs) {
-        const docCreator = await usersCollection.findOne({ username: doc.idUtilisateur });
-        if (!docCreator) {
-            // Document orphelin - accessible
-            accessibleDocs.push(doc);
-            continue;
-        }
-
-        const docCreatorRole = await rolesCollection.findOne({ _id: docCreator.idRole });
-
-        // Toujours voir ses propres documents
-        if (doc.idUtilisateur === userId) {
-            accessibleDocs.push(doc);
-            continue;
-        }
-
-        // ✅ Document partagé avec cet utilisateur
-        if (doc.sharedWith && doc.sharedWith.includes(userId)) {
-            accessibleDocs.push(doc);
-            continue;
-        }
-
-        // Vérifier même département
-        const sameDepart = docCreator.idDepartement &&
-                          user.idDepartement &&
-                          docCreator.idDepartement.equals(user.idDepartement);
-
-        if (sameDepart) {
-            // ✅ Partage horizontal - même niveau
-            if (userRole.niveau === docCreatorRole.niveau) {
-                accessibleDocs.push(doc);
-                continue;
-            }
-
-            // Règle hiérarchique: niveau supérieur peut voir niveau inférieur
-            if (userRole.niveau < docCreatorRole.niveau) {
-                accessibleDocs.push(doc);
-            }
-        }
+    // ✅ NIVEAU 1 : Voit TOUS les documents de TOUS les départements
+    if (userRole.niveau === 1) {
+        const allDocs = await documentsCollection.find({}).toArray();
+        accessibleDocs = allDocs;
+        console.log(`✅ NIVEAU 1: Accès à TOUS les documents (${accessibleDocs.length})`);
+        return accessibleDocs;
     }
 
-    console.log(`✅ Documents accessibles: ${accessibleDocs.length}`);
-    return accessibleDocs;
+    // ✅ NIVEAU 2 : Voit TOUS les documents de son département
+    if (userRole.niveau === 2) {
+        // Tous les documents du même département
+        const deptDocs = await documentsCollection.find({
+            idDepartement: user.idDepartement
+        }).toArray();
+
+        // + Documents partagés avec lui
+        const sharedDocs = await documentsCollection.find({
+            sharedWith: userId,
+            idDepartement: { $ne: user.idDepartement } // Éviter les doublons
+        }).toArray();
+
+        accessibleDocs = [...deptDocs, ...sharedDocs];
+        console.log(`✅ NIVEAU 2: Accès aux documents de son département (${deptDocs.length}) + partagés (${sharedDocs.length})`);
+        return accessibleDocs;
+    }
+
+    // ✅ NIVEAU 3 : Voit UNIQUEMENT ses propres documents (PAS de documents partagés)
+    if (userRole.niveau === 3) {
+        // Uniquement ses propres documents
+        const myDocs = await documentsCollection.find({
+            idUtilisateur: userId
+        }).toArray();
+
+        accessibleDocs = myDocs;
+        console.log(`✅ NIVEAU 3: Accès uniquement à ses propres documents (${myDocs.length})`);
+        return accessibleDocs;
+    }
+
+    // Par défaut : aucun document
+    console.log(`⚠️ Niveau inconnu (${userRole.niveau}): Aucun document accessible`);
+    return [];
 }
 
 // ============================================
@@ -247,6 +234,7 @@ async function connectDB(retryCount = 0) {
         departementsCollection = db.collection('departements');
         deletionRequestsCollection = db.collection('deletionRequests');
         messagesCollection = db.collection('messages');
+        messageDeletionRequestsCollection = db.collection('messageDeletionRequests');
         shareHistoryCollection = db.collection('shareHistory');
 
         // Créer des index
@@ -475,7 +463,7 @@ app.post('/api/login', async (req, res) => {
         // Récupérer les infos complètes
         const role = await rolesCollection.findOne({ _id: user.idRole });
         const departement = await departementsCollection.findOne({ _id: user.idDepartement });
-        
+
         res.json({
             success: true,
             username,
@@ -483,9 +471,9 @@ app.post('/api/login', async (req, res) => {
                 username: user.username,
                 nom: user.nom,
                 email: user.email,
-                role: role.libelle,
-                niveau: role.niveau,  // ✅ CORRECTION: "niveau" au lieu de "roleNiveau"
-                departement: departement.nom
+                role: role ? role.libelle : 'Non défini',
+                niveau: role ? role.niveau : 0,
+                departement: departement ? departement.nom : 'Non défini'
             }
         });
         
@@ -594,6 +582,95 @@ app.get('/api/users/:username', async (req, res) => {
 
     } catch (error) {
         console.error('Erreur récupération utilisateur:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Modifier un utilisateur
+app.put('/api/users/:username', async (req, res) => {
+    try {
+        const { username } = req.params;
+        const { nom, email, idRole, idDepartement } = req.body;
+
+        if (!nom || !email || !idRole || !idDepartement) {
+            return res.status(400).json({ success: false, message: 'Données manquantes' });
+        }
+
+        // Vérifier que le rôle et le département existent
+        const role = await rolesCollection.findOne({ _id: new ObjectId(idRole) });
+        const departement = await departementsCollection.findOne({ _id: new ObjectId(idDepartement) });
+
+        if (!role || !departement) {
+            return res.status(404).json({ success: false, message: 'Rôle ou département non trouvé' });
+        }
+
+        await usersCollection.updateOne(
+            { username },
+            {
+                $set: {
+                    nom,
+                    email,
+                    idRole: new ObjectId(idRole),
+                    idDepartement: new ObjectId(idDepartement),
+                    roleNiveau: role.niveau,
+                    updatedAt: new Date()
+                }
+            }
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erreur modification utilisateur:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer un utilisateur
+app.delete('/api/users/:username', async (req, res) => {
+    try {
+        const { username } = req.params;
+
+        // Ne pas permettre la suppression de l'utilisateur jbk
+        if (username === 'jbk') {
+            return res.status(403).json({ success: false, message: 'Impossible de supprimer l\'utilisateur jbk' });
+        }
+
+        // Supprimer tous les documents de l'utilisateur
+        await documentsCollection.deleteMany({ idUtilisateur: username });
+
+        // Supprimer toutes les catégories de l'utilisateur
+        await categoriesCollection.deleteMany({ idUtilisateur: username });
+
+        // Supprimer l'utilisateur
+        await usersCollection.deleteOne({ username });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erreur suppression utilisateur:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Réinitialiser le mot de passe d'un utilisateur
+app.post('/api/users/:username/reset-password', async (req, res) => {
+    try {
+        const { username } = req.params;
+        const { newPassword } = req.body;
+
+        if (!newPassword || newPassword.length < 4) {
+            return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 4 caractères' });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        await usersCollection.updateOne(
+            { username },
+            { $set: { password: hashedPassword, updatedAt: new Date() } }
+        );
+
+        res.json({ success: true, message: 'Mot de passe réinitialisé avec succès' });
+    } catch (error) {
+        console.error('Erreur réinitialisation mot de passe:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
@@ -910,7 +987,7 @@ app.post('/api/documents/:userId/:docId/share', async (req, res) => {
             });
         }
 
-        // Vérifier que l'utilisateur est propriétaire du document
+        // Vérifier que le document existe
         const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
         if (!document) {
             return res.status(404).json({
@@ -919,10 +996,26 @@ app.post('/api/documents/:userId/:docId/share', async (req, res) => {
             });
         }
 
-        if (document.idUtilisateur !== userId) {
+        // Vérifier que l'utilisateur a accès au document
+        // Un utilisateur peut partager si :
+        // 1. Le document est du même département que lui
+        // 2. Le document lui a été partagé
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé'
+            });
+        }
+
+        const documentOwner = await usersCollection.findOne({ username: document.idUtilisateur });
+        const sameDepartment = documentOwner && documentOwner.idDepartement.toString() === user.idDepartement.toString();
+        const hasSharedAccess = document.sharedWith && document.sharedWith.includes(userId);
+
+        if (!sameDepartment && !hasSharedAccess) {
             return res.status(403).json({
                 success: false,
-                message: 'Seul le propriétaire peut partager ce document'
+                message: 'Vous n\'avez pas accès à ce document'
             });
         }
 
@@ -1108,7 +1201,9 @@ app.get('/api/users', async (req, res) => {
                 email: user.email,
                 role: role ? role.libelle : 'Non défini',
                 niveau: role ? role.niveau : null,
-                departement: dept ? dept.nom : 'Non défini'
+                departement: dept ? dept.nom : 'Non défini',
+                idRole: user.idRole,
+                idDepartement: user.idDepartement
             };
         }));
 
@@ -1184,19 +1279,17 @@ app.delete('/api/documents/:userId/delete-all', async (req, res) => {
         let query;
 
         if (userRole.niveau === 1) {
-            // ✅ Primaire : Supprimer TOUS les documents du département
-            // OU les documents de l'utilisateur qui n'ont pas de département (anciens documents)
-            query = {
-                $or: [
-                    { idDepartement: user.idDepartement },
-                    { idUtilisateur: userId, idDepartement: { $exists: false } }
-                ]
-            };
-            console.log('📋 Suppression niveau PRIMAIRE - Département:', user.idDepartement);
+            // ✅ NIVEAU 1 : Supprimer TOUS les documents de TOUS les départements
+            query = {};  // Pas de filtre = tous les documents
+            console.log('📋 Suppression niveau 1 (ADMIN) - TOUS les documents du système');
+        } else if (userRole.niveau === 2) {
+            // ✅ NIVEAU 2 : Supprimer TOUS les documents de son département
+            query = { idDepartement: user.idDepartement };
+            console.log('📋 Suppression niveau 2 - Documents du département:', user.idDepartement);
         } else {
-            // ✅ Secondaire/Tertiaire : Uniquement ses propres documents
+            // ✅ NIVEAU 3 : Uniquement ses propres documents
             query = { idUtilisateur: userId };
-            console.log('📋 Suppression niveau SECONDAIRE/TERTIAIRE - Utilisateur:', userId);
+            console.log('📋 Suppression niveau 3 - Documents de l\'utilisateur:', userId);
         }
 
         // Compter avant suppression
@@ -1250,8 +1343,8 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
 
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
 
-        // ✅ NOUVEAU: Si niveau 2 ou 3, créer une demande de suppression
-        if (userRole.niveau === 2 || userRole.niveau === 3) {
+        // ✅ NOUVEAU: Si niveau 3 uniquement, créer une demande de suppression (niveau 2 n'a plus accès)
+        if (userRole.niveau === 3) {
             const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
 
             // Vérifier si une demande existe déjà pour ce document
@@ -1319,6 +1412,14 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
                 requiresApproval: true,
                 message: 'Demande de suppression créée. Les administrateurs niveau 1 ont été notifiés.',
                 requestId: request.insertedId
+            });
+        }
+
+        // Bloquer niveau 2 - ils n'ont plus accès à la suppression
+        if (userRole.niveau === 2) {
+            return res.status(403).json({
+                success: false,
+                message: 'Les utilisateurs de niveau 2 ne peuvent pas supprimer de documents'
             });
         }
 
@@ -1451,6 +1552,14 @@ app.get('/api/deletion-requests/:userId', async (req, res) => {
 
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
 
+        // Vérifier si le rôle existe
+        if (!userRole) {
+            return res.status(404).json({
+                success: false,
+                message: 'Rôle utilisateur non trouvé'
+            });
+        }
+
         // Seuls les niveau 1 peuvent voir les demandes
         if (userRole.niveau !== 1) {
             return res.status(403).json({
@@ -1494,6 +1603,14 @@ app.post('/api/deletion-requests/:requestId/approve', async (req, res) => {
 
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
 
+        // Vérifier si le rôle existe
+        if (!userRole) {
+            return res.status(404).json({
+                success: false,
+                message: 'Rôle utilisateur non trouvé'
+            });
+        }
+
         // Seuls les niveau 1 peuvent approuver
         if (userRole.niveau !== 1) {
             return res.status(403).json({
@@ -1528,6 +1645,16 @@ app.post('/api/deletion-requests/:requestId/approve', async (req, res) => {
             });
         }
 
+        // Récupérer les informations du document AVANT de le supprimer (pour la notification)
+        const document = await documentsCollection.findOne({ _id: request.idDocument });
+
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé ou déjà supprimé'
+            });
+        }
+
         // Supprimer le document
         const deleteResult = await documentsCollection.deleteOne({
             _id: request.idDocument
@@ -1541,6 +1668,7 @@ app.post('/api/deletion-requests/:requestId/approve', async (req, res) => {
         }
 
         // Mettre à jour la demande
+        const dateTraitement = new Date();
         await deletionRequestsCollection.updateOne(
             { _id: new ObjectId(requestId) },
             {
@@ -1548,10 +1676,50 @@ app.post('/api/deletion-requests/:requestId/approve', async (req, res) => {
                     statut: 'approuvee',
                     idApprobateur: userId,
                     nomApprobateur: user.nom,
-                    dateTraitement: new Date()
+                    dateTraitement: dateTraitement
                 }
             }
         );
+
+        // 📧 Envoyer une notification au demandeur
+        try {
+            const demandeur = await usersCollection.findOne({ username: request.idDemandeur });
+            const demandeurRole = demandeur ? await rolesCollection.findOne({ _id: demandeur.idRole }) : null;
+
+            const notificationBody = `Votre demande de suppression a été approuvée.
+
+📄 Document supprimé:
+- Nom: ${document.titre}
+- ID: ${document.idDocument}
+- Catégorie: ${document.categorie || 'Non spécifiée'}
+
+👤 Demandé par: ${request.nomDemandeur} (Niveau ${demandeurRole ? demandeurRole.niveau : 'N/A'})
+
+✅ Validé par: ${user.nom} (Niveau ${userRole.niveau})
+📅 Date: ${dateTraitement.toLocaleString('fr-FR')}`;
+
+            await messagesCollection.insertOne({
+                from: 'Système',
+                fromName: 'Système',
+                to: request.idDemandeur,
+                toName: request.nomDemandeur,
+                subject: '✅ Demande de suppression approuvée',
+                body: notificationBody,
+                type: 'deletion-approved',
+                relatedData: {
+                    requestId: requestId,
+                    documentId: document.idDocument,
+                    documentTitle: document.titre
+                },
+                read: false,
+                createdAt: dateTraitement
+            });
+
+            console.log(`📧 Notification d'approbation envoyée à ${request.idDemandeur}`);
+        } catch (notifError) {
+            console.error('⚠️ Erreur envoi notification approbation:', notifError);
+            // On continue même si la notification échoue
+        }
 
         console.log(`✅ Demande approuvée: ${requestId} par ${userId} - Document ${request.idDocument} supprimé`);
 
@@ -1581,6 +1749,14 @@ app.post('/api/deletion-requests/:requestId/reject', async (req, res) => {
         }
 
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
+
+        // Vérifier si le rôle existe
+        if (!userRole) {
+            return res.status(404).json({
+                success: false,
+                message: 'Rôle utilisateur non trouvé'
+            });
+        }
 
         // Seuls les niveau 1 peuvent rejeter
         if (userRole.niveau !== 1) {
@@ -1616,7 +1792,11 @@ app.post('/api/deletion-requests/:requestId/reject', async (req, res) => {
             });
         }
 
+        // Récupérer les informations du document (pour la notification)
+        const document = await documentsCollection.findOne({ _id: request.idDocument });
+
         // Mettre à jour la demande
+        const dateTraitement = new Date();
         await deletionRequestsCollection.updateOne(
             { _id: new ObjectId(requestId) },
             {
@@ -1624,11 +1804,54 @@ app.post('/api/deletion-requests/:requestId/reject', async (req, res) => {
                     statut: 'rejetee',
                     idApprobateur: userId,
                     nomApprobateur: user.nom,
-                    dateTraitement: new Date(),
+                    dateTraitement: dateTraitement,
                     motifRejet: motifRejet || 'Non spécifié'
                 }
             }
         );
+
+        // 📧 Envoyer une notification au demandeur
+        try {
+            const demandeur = await usersCollection.findOne({ username: request.idDemandeur });
+            const demandeurRole = demandeur ? await rolesCollection.findOne({ _id: demandeur.idRole }) : null;
+
+            const notificationBody = `Votre demande de suppression n'a pas été approuvée.
+
+📄 Document concerné:
+- Nom: ${document ? document.titre : request.documentTitre}
+- ID: ${document ? document.idDocument : 'N/A'}
+- Catégorie: ${document ? (document.categorie || 'Non spécifiée') : 'N/A'}
+
+👤 Demandé par: ${request.nomDemandeur} (Niveau ${demandeurRole ? demandeurRole.niveau : 'N/A'})
+
+❌ Motif du refus: ${motifRejet || 'Non spécifié'}
+
+👤 Rejeté par: ${user.nom} (Niveau ${userRole.niveau})
+📅 Date: ${dateTraitement.toLocaleString('fr-FR')}`;
+
+            await messagesCollection.insertOne({
+                from: 'Système',
+                fromName: 'Système',
+                to: request.idDemandeur,
+                toName: request.nomDemandeur,
+                subject: '❌ Demande de suppression non approuvée',
+                body: notificationBody,
+                type: 'deletion-rejected',
+                relatedData: {
+                    requestId: requestId,
+                    documentId: document ? document.idDocument : null,
+                    documentTitle: document ? document.titre : request.documentTitre,
+                    motifRejet: motifRejet || 'Non spécifié'
+                },
+                read: false,
+                createdAt: dateTraitement
+            });
+
+            console.log(`📧 Notification de rejet envoyée à ${request.idDemandeur}`);
+        } catch (notifError) {
+            console.error('⚠️ Erreur envoi notification rejet:', notifError);
+            // On continue même si la notification échoue
+        }
 
         console.log(`❌ Demande rejetée: ${requestId} par ${userId}`);
 
@@ -1657,6 +1880,14 @@ app.get('/api/deletion-requests/:userId/history', async (req, res) => {
         }
 
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
+
+        // Vérifier si le rôle existe
+        if (!userRole) {
+            return res.status(404).json({
+                success: false,
+                message: 'Rôle utilisateur non trouvé'
+            });
+        }
 
         // Seuls les niveau 1 peuvent voir l'historique complet
         if (userRole.niveau !== 1) {
@@ -1817,6 +2048,64 @@ app.get('/api/roles', async (req, res) => {
     }
 });
 
+// Créer un rôle
+app.post('/api/roles', async (req, res) => {
+    try {
+        const { nom, niveau, description } = req.body;
+
+        if (!nom || !niveau || !description) {
+            return res.status(400).json({ success: false, message: 'Données manquantes' });
+        }
+
+        const result = await rolesCollection.insertOne({ nom, niveau, description, createdAt: new Date() });
+        res.json({ success: true, roleId: result.insertedId });
+    } catch (error) {
+        console.error('Erreur création rôle:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Modifier un rôle
+app.put('/api/roles/:roleId', async (req, res) => {
+    try {
+        const { roleId } = req.params;
+        const { nom, niveau, description } = req.body;
+
+        if (!nom || !niveau || !description) {
+            return res.status(400).json({ success: false, message: 'Données manquantes' });
+        }
+
+        await rolesCollection.updateOne(
+            { _id: new ObjectId(roleId) },
+            { $set: { nom, niveau, description, updatedAt: new Date() } }
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erreur modification rôle:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer un rôle
+app.delete('/api/roles/:roleId', async (req, res) => {
+    try {
+        const { roleId } = req.params;
+
+        // Vérifier qu'aucun utilisateur n'a ce rôle
+        const usersWithRole = await usersCollection.countDocuments({ idRole: new ObjectId(roleId) });
+        if (usersWithRole > 0) {
+            return res.status(400).json({ success: false, message: `${usersWithRole} utilisateur(s) ont ce rôle. Veuillez d'abord changer leur rôle.` });
+        }
+
+        await rolesCollection.deleteOne({ _id: new ObjectId(roleId) });
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erreur suppression rôle:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
 app.get('/api/departements', async (req, res) => {
     try {
         const departements = await departementsCollection.find().toArray();
@@ -1894,10 +2183,6 @@ app.delete('/api/departements/:id', async (req, res) => {
     }
 });
 
-// ============================================
-// ROUTES DEMANDES DE SUPPRESSION
-// ============================================
-
 // Créer une demande de suppression (NIVEAU 2)
 app.post('/api/deletion-requests', async (req, res) => {
     try {
@@ -1919,10 +2204,13 @@ app.post('/api/deletion-requests', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
         }
 
-        // Vérifier que l'utilisateur est bien niveau 2
-        const requesterRole = await rolesCollection.findOne({ _id: new ObjectId(requester.idRole) });
-        if (!requesterRole || requesterRole.niveau !== 2) {
-            return res.status(403).json({ success: false, message: 'Seuls les utilisateurs de niveau 2 peuvent faire des demandes' });
+        // Vérifier que l'utilisateur est bien niveau 3 uniquement (niveau 2 n'a plus accès)
+        const requesterRole = await rolesCollection.findOne({ _id: requester.idRole });
+        if (!requesterRole) {
+            return res.status(404).json({ success: false, message: 'Rôle utilisateur non trouvé' });
+        }
+        if (requesterRole.niveau !== 3) {
+            return res.status(403).json({ success: false, message: 'Seuls les utilisateurs de niveau 3 peuvent faire des demandes de suppression' });
         }
 
         // Vérifier que le document appartient bien à cet utilisateur
@@ -1930,215 +2218,67 @@ app.post('/api/deletion-requests', async (req, res) => {
             return res.status(403).json({ success: false, message: 'Vous ne pouvez demander la suppression que de vos propres documents' });
         }
 
-        // Créer la demande de suppression
-        const deletionRequest = {
-            documentId: new ObjectId(documentId),
-            documentTitle: document.titre,
-            documentIdDocument: document.idDocument,
-            requestedBy,
-            requesterName: requester.nom,
-            requesterDepartment: requester.idDepartement,
-            status: 'pending', // pending, approved, rejected
-            createdAt: new Date(),
-            processedAt: null,
-            processedBy: null,
-            rejectionReason: null
-        };
+        // Vérifier si une demande existe déjà pour ce document
+        const existingRequest = await deletionRequestsCollection.findOne({
+            idDocument: new ObjectId(documentId),
+            statut: 'en_attente'
+        });
 
-        const insertResult = await deletionRequestsCollection.insertOne(deletionRequest);
+        if (existingRequest) {
+            return res.json({
+                success: false,
+                message: 'Une demande de suppression est déjà en attente pour ce document',
+                requestId: existingRequest._id
+            });
+        }
 
-        // ✅ NOUVEAU: Envoyer un message aux administrateurs niveau 1 du même département
-        // Trouver tous les utilisateurs niveau 1 du même département
-        const nivel1Users = await usersCollection.find({
-            idDepartement: requester.idDepartement
-        }).toArray();
+        // Créer la demande de suppression (utiliser la même structure que dans DELETE)
+        const insertResult = await deletionRequestsCollection.insertOne({
+            idDocument: new ObjectId(documentId),
+            documentTitre: document.titre,
+            idDemandeur: requestedBy,
+            nomDemandeur: requester.nom,
+            idDepartement: requester.idDepartement,
+            dateCreation: new Date(),
+            statut: 'en_attente',
+            motif: req.body.motif || 'Non spécifié'
+        });
 
-        // Filtrer pour ne garder que ceux qui ont le rôle niveau 1
-        for (const user of nivel1Users) {
-            const userRole = await rolesCollection.findOne({ _id: user.idRole });
-            if (userRole && userRole.niveau === 1) {
-                // Créer un message pour chaque admin niveau 1
-                await messagesCollection.insertOne({
-                    from: requestedBy,
-                    fromName: requester.nom,
-                    to: user.username,
-                    toName: user.nom,
-                    subject: `📝 Demande de suppression - ${document.titre}`,
-                    body: `${requester.nom} demande la suppression du document "${document.titre}" (ID: ${document.idDocument}).\n\nVeuillez consulter votre boîte de réception pour approuver ou rejeter cette demande.`,
-                    type: 'deletion-request',
-                    relatedData: {
-                        requestId: insertResult.insertedId.toString(),
-                        documentId: documentId,
-                        documentTitle: document.titre,
-                        documentIdDocument: document.idDocument
-                    },
-                    read: false,
-                    createdAt: new Date()
-                });
+        // ✅ Envoyer un message aux administrateurs niveau 1 du même département
+        try {
+            const nivel1Users = await usersCollection.find({
+                idDepartement: requester.idDepartement
+            }).toArray();
+
+            // Filtrer pour ne garder que ceux qui ont le rôle niveau 1
+            for (const user of nivel1Users) {
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (userRole && userRole.niveau === 1) {
+                    await messagesCollection.insertOne({
+                        from: requestedBy,
+                        fromName: requester.nom,
+                        to: user.username,
+                        toName: user.nom,
+                        subject: `📝 Nouvelle demande de suppression - ${document.titre}`,
+                        body: `Bonjour ${user.nom},\n\n${requester.nom} (${requestedBy}) a créé une demande de suppression pour le document suivant :\n\n📄 Titre: ${document.titre}\n🆔 ID Document: ${document.idDocument}\n💬 Motif: ${req.body.motif || 'Non spécifié'}\n\nVeuillez vous rendre dans la section "Demandes de suppression" pour approuver ou rejeter cette demande.\n\nMerci`,
+                        type: 'deletion-request',
+                        relatedData: {
+                            requestId: insertResult.insertedId.toString(),
+                            documentId: documentId
+                        },
+                        read: false,
+                        createdAt: new Date()
+                    });
+                    console.log(`📧 Message envoyé à ${user.username} pour la demande ${insertResult.insertedId}`);
+                }
             }
+        } catch (msgError) {
+            console.error('⚠️ Erreur envoi messages notification:', msgError);
         }
 
         res.json({ success: true, message: 'Demande de suppression envoyée' });
     } catch (error) {
         console.error('Erreur création demande suppression:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Récupérer les demandes de suppression pour un département (NIVEAU 1)
-app.get('/api/deletion-requests/:userId', async (req, res) => {
-    try {
-        const { userId } = req.params;
-
-        // Récupérer l'utilisateur
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({ message: 'Utilisateur non trouvé' });
-        }
-
-        // Vérifier que l'utilisateur est niveau 1
-        const userRole = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
-        if (!userRole || userRole.niveau !== 1) {
-            return res.status(403).json({ message: 'Accès réservé aux niveau 1' });
-        }
-
-        // Récupérer toutes les demandes du département de cet utilisateur
-        const requests = await deletionRequestsCollection.find({
-            requesterDepartment: user.idDepartement,
-            status: 'pending'
-        }).sort({ createdAt: -1 }).toArray();
-
-        res.json(requests);
-    } catch (error) {
-        console.error('Erreur récupération demandes:', error);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
-
-// Approuver une demande de suppression (NIVEAU 1)
-app.put('/api/deletion-requests/:requestId/approve', async (req, res) => {
-    try {
-        const { requestId } = req.params;
-        const { approvedBy } = req.body;
-
-        if (!approvedBy) {
-            return res.status(400).json({ success: false, message: 'approvedBy requis' });
-        }
-
-        // Récupérer la demande
-        const request = await deletionRequestsCollection.findOne({ _id: new ObjectId(requestId) });
-        if (!request) {
-            return res.status(404).json({ success: false, message: 'Demande non trouvée' });
-        }
-
-        // Vérifier que l'utilisateur est niveau 1
-        const approver = await usersCollection.findOne({ username: approvedBy });
-        const approverRole = await rolesCollection.findOne({ _id: new ObjectId(approver.idRole) });
-        if (!approverRole || approverRole.niveau !== 1) {
-            return res.status(403).json({ success: false, message: 'Seuls les niveau 1 peuvent approuver' });
-        }
-
-        // Supprimer le document
-        await documentsCollection.deleteOne({ _id: request.documentId });
-
-        // Mettre à jour la demande
-        await deletionRequestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
-            {
-                $set: {
-                    status: 'approved',
-                    processedAt: new Date(),
-                    processedBy: approvedBy
-                }
-            }
-        );
-
-        // ✅ NOUVEAU: Envoyer un message de confirmation au demandeur (niveau 2)
-        await messagesCollection.insertOne({
-            from: approvedBy,
-            fromName: approver.nom,
-            to: request.requestedBy,
-            toName: request.requesterName,
-            subject: `✅ Demande de suppression approuvée - ${request.documentTitle}`,
-            body: `Votre demande de suppression du document "${request.documentTitle}" (ID: ${request.documentIdDocument}) a été approuvée par ${approver.nom}.\n\nLe document a été supprimé avec succès.`,
-            type: 'deletion-response',
-            relatedData: {
-                requestId: requestId,
-                approved: true,
-                documentTitle: request.documentTitle,
-                documentIdDocument: request.documentIdDocument
-            },
-            read: false,
-            createdAt: new Date()
-        });
-
-        res.json({ success: true, message: 'Document supprimé avec succès' });
-    } catch (error) {
-        console.error('Erreur approbation demande:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Rejeter une demande de suppression (NIVEAU 1)
-app.put('/api/deletion-requests/:requestId/reject', async (req, res) => {
-    try {
-        const { requestId } = req.params;
-        const { rejectedBy, reason } = req.body;
-
-        if (!rejectedBy) {
-            return res.status(400).json({ success: false, message: 'rejectedBy requis' });
-        }
-
-        // Récupérer la demande
-        const request = await deletionRequestsCollection.findOne({ _id: new ObjectId(requestId) });
-        if (!request) {
-            return res.status(404).json({ success: false, message: 'Demande non trouvée' });
-        }
-
-        // Vérifier que l'utilisateur est niveau 1
-        const rejecter = await usersCollection.findOne({ username: rejectedBy });
-        const rejecterRole = await rolesCollection.findOne({ _id: new ObjectId(rejecter.idRole) });
-        if (!rejecterRole || rejecterRole.niveau !== 1) {
-            return res.status(403).json({ success: false, message: 'Seuls les niveau 1 peuvent rejeter' });
-        }
-
-        // Mettre à jour la demande
-        const rejectionReason = reason || 'Aucune raison fournie';
-        await deletionRequestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
-            {
-                $set: {
-                    status: 'rejected',
-                    processedAt: new Date(),
-                    processedBy: rejectedBy,
-                    rejectionReason: rejectionReason
-                }
-            }
-        );
-
-        // ✅ NOUVEAU: Envoyer un message de rejet au demandeur (niveau 2)
-        await messagesCollection.insertOne({
-            from: rejectedBy,
-            fromName: rejecter.nom,
-            to: request.requestedBy,
-            toName: request.requesterName,
-            subject: `❌ Demande de suppression rejetée - ${request.documentTitle}`,
-            body: `Votre demande de suppression du document "${request.documentTitle}" (ID: ${request.documentIdDocument}) a été rejetée par ${rejecter.nom}.\n\nRaison du rejet:\n${rejectionReason}`,
-            type: 'deletion-response',
-            relatedData: {
-                requestId: requestId,
-                approved: false,
-                documentTitle: request.documentTitle,
-                documentIdDocument: request.documentIdDocument,
-                reason: rejectionReason
-            },
-            read: false,
-            createdAt: new Date()
-        });
-
-        res.json({ success: true, message: 'Demande rejetée' });
-    } catch (error) {
-        console.error('Erreur rejet demande:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
@@ -2152,7 +2292,7 @@ app.post('/api/messages', async (req, res) => {
     try {
         const { from, to, subject, body, type, relatedData } = req.body;
 
-        if (!from || !to || !subject || !body) {
+        if (!from || !to || !body) {
             return res.status(400).json({ success: false, message: 'Données manquantes' });
         }
 
@@ -2341,6 +2481,182 @@ app.delete('/api/messages/:messageId', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         console.error('Erreur suppression message:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer tous les messages reçus d'un utilisateur
+app.delete('/api/messages/bulk/received/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const result = await messagesCollection.deleteMany({ to: userId });
+
+        res.json({ success: true, deletedCount: result.deletedCount });
+    } catch (error) {
+        console.error('Erreur suppression messages reçus:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer tous les messages envoyés d'un utilisateur
+app.delete('/api/messages/bulk/sent/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const result = await messagesCollection.deleteMany({ from: userId });
+
+        res.json({ success: true, deletedCount: result.deletedCount });
+    } catch (error) {
+        console.error('Erreur suppression messages envoyés:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer tout l'historique de partage d'un utilisateur
+app.delete('/api/shared-documents/bulk/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const result = await shareHistoryCollection.deleteMany({ sharedBy: userId });
+
+        res.json({ success: true, deletedCount: result.deletedCount });
+    } catch (error) {
+        console.error('Erreur suppression historique partages:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTES DEMANDES DE SUPPRESSION DE MESSAGES
+// ============================================
+
+// Créer une demande de suppression de message
+app.post('/api/messages/:messageId/request-deletion', async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { userId, motif } = req.body;
+
+        // Récupérer le message
+        const message = await messagesCollection.findOne({ _id: new ObjectId(messageId) });
+        if (!message) {
+            return res.status(404).json({ success: false, message: 'Message non trouvé' });
+        }
+
+        // Récupérer les informations de l'utilisateur demandeur
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Trouver un niveau 1 du même département
+        const rolesNiveau1 = await rolesCollection.find({ niveau: 1 }).toArray();
+        const rolesNiveau1Ids = rolesNiveau1.map(r => r._id);
+
+        const niveau1 = await usersCollection.findOne({
+            idDepartement: user.idDepartement,
+            idRole: { $in: rolesNiveau1Ids }
+        });
+
+        if (!niveau1) {
+            return res.status(400).json({ success: false, message: 'Aucun administrateur trouvé dans votre département' });
+        }
+
+        // Créer la demande
+        const deletionRequest = {
+            messageId: new ObjectId(messageId),
+            messageSubject: message.subject || '(Sans sujet)',
+            messageFrom: message.from,
+            messageTo: message.to,
+            idDemandeur: userId,
+            nomDemandeur: user.nom,
+            niveauDemandeur: user.roleNiveau || 2,
+            motif: motif,
+            dateCreation: new Date(),
+            statut: 'en_attente',
+            niveau1Responsable: niveau1.username
+        };
+
+        await messageDeletionRequestsCollection.insertOne(deletionRequest);
+
+        res.json({ success: true, message: 'Demande de suppression envoyée' });
+    } catch (error) {
+        console.error('Erreur création demande suppression message:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les demandes de suppression de messages (pour niveau 1)
+app.get('/api/messages/deletion-requests/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const requests = await messageDeletionRequestsCollection.find({
+            niveau1Responsable: userId,
+            statut: 'en_attente'
+        }).sort({ dateCreation: -1 }).toArray();
+
+        res.json({ success: true, requests });
+    } catch (error) {
+        console.error('Erreur récupération demandes suppression messages:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Approuver une demande de suppression de message
+app.post('/api/messages/deletion-requests/:requestId/approve', async (req, res) => {
+    try {
+        const { requestId } = req.params;
+        const { userId } = req.body;
+
+        const request = await messageDeletionRequestsCollection.findOne({ _id: new ObjectId(requestId) });
+        if (!request) {
+            return res.status(404).json({ success: false, message: 'Demande non trouvée' });
+        }
+
+        // Supprimer le message
+        await messagesCollection.deleteOne({ _id: request.messageId });
+
+        // Mettre à jour la demande
+        await messageDeletionRequestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            {
+                $set: {
+                    statut: 'approuvee',
+                    dateTraitement: new Date(),
+                    traitePar: userId
+                }
+            }
+        );
+
+        res.json({ success: true, message: 'Message supprimé avec succès' });
+    } catch (error) {
+        console.error('Erreur approbation demande suppression message:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Rejeter une demande de suppression de message
+app.post('/api/messages/deletion-requests/:requestId/reject', async (req, res) => {
+    try {
+        const { requestId } = req.params;
+        const { userId, motifRejet } = req.body;
+
+        await messageDeletionRequestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            {
+                $set: {
+                    statut: 'rejetee',
+                    dateTraitement: new Date(),
+                    traitePar: userId,
+                    motifRejet: motifRejet || 'Non spécifié'
+                }
+            }
+        );
+
+        res.json({ success: true, message: 'Demande rejetée' });
+    } catch (error) {
+        console.error('Erreur rejet demande suppression message:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });

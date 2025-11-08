@@ -451,14 +451,17 @@ function formatDate(dateString) {
     const diff = now - date;
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
+    const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const fullDate = date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
     if (days === 0) {
-        return 'Aujourd\'hui ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        return `Aujourd'hui à ${time}`;
     } else if (days === 1) {
-        return 'Hier ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        return `Hier à ${time}`;
     } else if (days < 7) {
-        return `Il y a ${days} jours`;
+        return `${fullDate} à ${time}`;
     } else {
-        return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        return `${fullDate} à ${time}`;
     }
 }
 
