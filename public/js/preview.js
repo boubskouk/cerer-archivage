@@ -123,7 +123,8 @@ async function previewPDF(dataURL) {
         let scale = 1.5;
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        document.getElementById('pdf-canvas-container').appendChild(canvas);
+        const canvasContainer = container.querySelector('#pdf-canvas-container');
+        canvasContainer.appendChild(canvas);
 
         async function renderPage(pageNum) {
             const page = await pdf.getPage(pageNum);
@@ -137,42 +138,60 @@ async function previewPDF(dataURL) {
                 viewport: viewport
             }).promise;
 
-            document.getElementById('pdf-page-info').textContent = `Page ${pageNum} / ${pdf.numPages}`;
-            document.getElementById('pdf-prev').disabled = pageNum === 1;
-            document.getElementById('pdf-next').disabled = pageNum === pdf.numPages;
+            const pageInfo = container.querySelector('#pdf-page-info');
+            const prevBtn = container.querySelector('#pdf-prev');
+            const nextBtn = container.querySelector('#pdf-next');
+
+            if (pageInfo) pageInfo.textContent = `Page ${pageNum} / ${pdf.numPages}`;
+            if (prevBtn) prevBtn.disabled = pageNum === 1;
+            if (nextBtn) nextBtn.disabled = pageNum === pdf.numPages;
         }
 
         await renderPage(currentPage);
 
         // Navigation entre les pages
-        document.getElementById('pdf-prev').addEventListener('click', async () => {
-            if (currentPage > 1) {
-                currentPage--;
-                await renderPage(currentPage);
-            }
-        });
+        const prevBtn = container.querySelector('#pdf-prev');
+        const nextBtn = container.querySelector('#pdf-next');
+        const zoomInBtn = container.querySelector('#pdf-zoom-in');
+        const zoomOutBtn = container.querySelector('#pdf-zoom-out');
+        const zoomLevel = container.querySelector('#pdf-zoom-level');
 
-        document.getElementById('pdf-next').addEventListener('click', async () => {
-            if (currentPage < pdf.numPages) {
-                currentPage++;
-                await renderPage(currentPage);
-            }
-        });
+        if (prevBtn) {
+            prevBtn.addEventListener('click', async () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    await renderPage(currentPage);
+                }
+            });
+        }
+
+        if (nextBtn) {
+            nextBtn.addEventListener('click', async () => {
+                if (currentPage < pdf.numPages) {
+                    currentPage++;
+                    await renderPage(currentPage);
+                }
+            });
+        }
 
         // Zoom
-        document.getElementById('pdf-zoom-in').addEventListener('click', async () => {
-            scale += 0.25;
-            document.getElementById('pdf-zoom-level').textContent = `${Math.round(scale * 100)}%`;
-            await renderPage(currentPage);
-        });
-
-        document.getElementById('pdf-zoom-out').addEventListener('click', async () => {
-            if (scale > 0.5) {
-                scale -= 0.25;
-                document.getElementById('pdf-zoom-level').textContent = `${Math.round(scale * 100)}%`;
+        if (zoomInBtn) {
+            zoomInBtn.addEventListener('click', async () => {
+                scale += 0.25;
+                if (zoomLevel) zoomLevel.textContent = `${Math.round(scale * 100)}%`;
                 await renderPage(currentPage);
-            }
-        });
+            });
+        }
+
+        if (zoomOutBtn) {
+            zoomOutBtn.addEventListener('click', async () => {
+                if (scale > 0.5) {
+                    scale -= 0.25;
+                    if (zoomLevel) zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+                    await renderPage(currentPage);
+                }
+            });
+        }
 
     } catch (error) {
         console.error('Erreur lors du chargement du PDF:', error);
