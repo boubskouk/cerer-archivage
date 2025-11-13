@@ -153,11 +153,11 @@ async function getAccessibleDocuments(userId) {
         return accessibleDocs;
     }
 
-    // ✅ NIVEAU 2 et 3 : Voient UNIQUEMENT les documents de leur département
-    if (userRole.niveau === 2 || userRole.niveau === 3) {
+    // ✅ NIVEAU 2 : Voit TOUS les documents de son département
+    if (userRole.niveau === 2) {
         // Vérifier que l'utilisateur a un département
         if (!user.idDepartement) {
-            console.log(`⚠️ Utilisateur niveau ${userRole.niveau} sans département: Aucun document accessible`);
+            console.log(`⚠️ Utilisateur niveau 2 sans département: Aucun document accessible`);
             return [];
         }
 
@@ -169,11 +169,44 @@ async function getAccessibleDocuments(userId) {
         // + Documents partagés avec lui depuis d'autres départements
         const sharedDocs = await documentsCollection.find({
             sharedWith: userId,
-            idDepartement: { $ne: user.idDepartement } // Documents partagés d'autres départements
+            idDepartement: { $ne: user.idDepartement }
         }).toArray();
 
         accessibleDocs = [...deptDocs, ...sharedDocs];
-        console.log(`✅ NIVEAU ${userRole.niveau}: Accès aux documents de son département (${deptDocs.length}) + partagés d'autres départements (${sharedDocs.length})`);
+        console.log(`✅ NIVEAU 2: Accès à TOUS les documents du département (${deptDocs.length}) + partagés (${sharedDocs.length})`);
+        return accessibleDocs;
+    }
+
+    // ✅ NIVEAU 3 : Voit uniquement ses documents + documents des autres niveau 3 du département + documents partagés
+    if (userRole.niveau === 3) {
+        // Vérifier que l'utilisateur a un département
+        if (!user.idDepartement) {
+            console.log(`⚠️ Utilisateur niveau 3 sans département: Aucun document accessible`);
+            return [];
+        }
+
+        // Récupérer tous les utilisateurs niveau 3 du même département
+        const niveau3Users = await usersCollection.find({
+            idDepartement: user.idDepartement,
+            idRole: userRole._id // Même rôle (niveau 3)
+        }).toArray();
+
+        const niveau3Usernames = niveau3Users.map(u => u.username);
+        console.log(`📋 Utilisateurs niveau 3 du département: ${niveau3Usernames.join(', ')}`);
+
+        // Documents des utilisateurs niveau 3 du département
+        const niveau3Docs = await documentsCollection.find({
+            idDepartement: user.idDepartement,
+            idUtilisateur: { $in: niveau3Usernames }
+        }).toArray();
+
+        // + Documents partagés avec lui (de n'importe quel département)
+        const sharedDocs = await documentsCollection.find({
+            sharedWith: userId
+        }).toArray();
+
+        accessibleDocs = [...niveau3Docs, ...sharedDocs];
+        console.log(`✅ NIVEAU 3: Accès documents niveau 3 du département (${niveau3Docs.length}) + partagés (${sharedDocs.length})`);
         return accessibleDocs;
     }
 
@@ -265,9 +298,9 @@ async function connectDB(retryCount = 0) {
 async function initializeDefaultData() {
     // 1. RÔLES
     const defaultRoles = [
-        { libelle: 'primaire', niveau: 1, description: 'Accès complet au département' },
-        { libelle: 'secondaire', niveau: 2, description: 'Accès à ses documents et aux documents tertiaires' },
-        { libelle: 'tertiaire', niveau: 3, description: 'Accès uniquement à ses propres documents' }
+        { libelle: 'primaire', niveau: 1, description: 'Accès complet à tous les départements' },
+        { libelle: 'secondaire', niveau: 2, description: 'Accès à tous les documents de son département' },
+        { libelle: 'tertiaire', niveau: 3, description: 'Accès à ses documents et ceux des autres niveau 3 du département' }
     ];
     
     for (const role of defaultRoles) {
