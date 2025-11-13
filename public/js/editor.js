@@ -18,18 +18,21 @@ function isEditable(doc) {
     const ext = doc.nomFichier ? doc.nomFichier.toLowerCase().split('.').pop() : '';
     const type = doc.type || '';
 
-    // Excel moderne
-    if (type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || ext === 'xlsx') {
+    // Excel (moderne et ancien)
+    if (type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || ext === 'xlsx' ||
+        type === 'application/vnd.ms-excel' || ext === 'xls') {
         return 'excel';
     }
 
-    // Word moderne
-    if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || ext === 'docx') {
+    // Word (moderne et ancien)
+    if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || ext === 'docx' ||
+        type === 'application/msword' || ext === 'doc') {
         return 'word';
     }
 
-    // PowerPoint moderne
-    if (type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || ext === 'pptx') {
+    // PowerPoint (moderne et ancien)
+    if (type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || ext === 'pptx' ||
+        type === 'application/vnd.ms-powerpoint' || ext === 'ppt') {
         return 'powerpoint';
     }
 

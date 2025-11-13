@@ -502,12 +502,14 @@ async function openPreview(doc) {
                 break;
 
             case 'word':
+            case 'word-old':
                 content = await previewWord(fullDoc.contenu);
                 previewContent.innerHTML = '';
                 previewContent.appendChild(content);
                 break;
 
             case 'excel':
+            case 'excel-old':
                 content = await previewExcel(fullDoc.contenu);
                 previewContent.innerHTML = '';
                 previewContent.appendChild(content);
