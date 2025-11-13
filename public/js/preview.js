@@ -520,6 +520,53 @@ async function openPreview(doc) {
                 previewContent.innerHTML = content;
                 break;
 
+            case 'powerpoint':
+            case 'powerpoint-old':
+                content = `
+                    <div class="flex items-center justify-center h-full bg-gradient-to-br from-orange-50 to-red-50">
+                        <div class="text-center p-8 max-w-lg">
+                            <div class="text-6xl mb-4">📽️</div>
+                            <h3 class="text-2xl font-bold text-gray-800 mb-3">Présentation PowerPoint</h3>
+                            <p class="text-gray-600 mb-6">
+                                La prévisualisation PowerPoint n'est pas disponible dans le navigateur.
+                                Vous pouvez télécharger ou éditer le fichier.
+                            </p>
+                            <div class="bg-white rounded-lg p-6 mb-6 shadow-lg">
+                                <div class="grid grid-cols-2 gap-4 text-sm text-left">
+                                    <div>
+                                        <p class="text-gray-500">Fichier:</p>
+                                        <p class="font-semibold text-gray-800">${fullDoc.nomFichier}</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-gray-500">Taille:</p>
+                                        <p class="font-semibold text-gray-800">${(fullDoc.taille / 1024).toFixed(2)} KB</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-gray-500">Type:</p>
+                                        <p class="font-semibold text-gray-800">PowerPoint</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-gray-500">Format:</p>
+                                        <p class="font-semibold text-gray-800">${fullDoc.nomFichier.split('.').pop().toUpperCase()}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex gap-3 justify-center">
+                                <button onclick="downloadDoc(previewState.currentDoc)" class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium">
+                                    📥 Télécharger
+                                </button>
+                                ${isEditable && isEditable(fullDoc) ? `
+                                <button onclick="openEditor(previewState.currentDoc)" class="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition font-medium">
+                                    ✏️ Éditer
+                                </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                previewContent.innerHTML = content;
+                break;
+
             default:
                 content = previewUnsupported(fullDoc.nomFichier, fullDoc.type);
                 previewContent.innerHTML = content;
