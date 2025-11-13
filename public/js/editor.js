@@ -18,19 +18,23 @@ function isEditable(doc) {
     const ext = doc.nomFichier ? doc.nomFichier.toLowerCase().split('.').pop() : '';
     const type = doc.type || '';
 
-    // Excel (moderne et ancien)
-    if (type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || ext === 'xlsx' ||
-        type === 'application/vnd.ms-excel' || ext === 'xls') {
+    // Excel moderne → Éditeur intégré
+    if (type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || ext === 'xlsx') {
         return 'excel';
     }
 
-    // Word (moderne et ancien)
+    // Excel ancien → OnlyOffice (ExcelJS ne supporte pas .xls)
+    if (type === 'application/vnd.ms-excel' || ext === 'xls') {
+        return 'excel-old';
+    }
+
+    // Word (moderne et ancien) → OnlyOffice
     if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || ext === 'docx' ||
         type === 'application/msword' || ext === 'doc') {
         return 'word';
     }
 
-    // PowerPoint (moderne et ancien)
+    // PowerPoint (moderne et ancien) → OnlyOffice
     if (type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || ext === 'pptx' ||
         type === 'application/vnd.ms-powerpoint' || ext === 'ppt') {
         return 'powerpoint';
@@ -54,9 +58,10 @@ async function openEditor(doc) {
     editorState.changes = {};
 
     if (editableType === 'excel') {
+        // Excel moderne (.xlsx) → Éditeur intégré
         await openExcelEditor(doc);
-    } else if (editableType === 'word' || editableType === 'powerpoint') {
-        // Utiliser OnlyOffice pour Word et PowerPoint
+    } else if (editableType === 'excel-old' || editableType === 'word' || editableType === 'powerpoint') {
+        // Excel ancien (.xls), Word, PowerPoint → OnlyOffice
         await openWordEditor(doc);
     }
 }
