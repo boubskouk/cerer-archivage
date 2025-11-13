@@ -2452,15 +2452,18 @@ function render() {
                                             </div>
                                         ` : `
                                             <div class="relative bg-white rounded-lg" style="height: 700px;">
-                                                <iframe
-                                                    src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + '/api/office-file/' + state.currentUser + '/' + state.selectedDoc._id)}"
-                                                    class="w-full h-full rounded-lg border-2 border-gray-300"
-                                                    frameborder="0">
-                                                </iframe>
-                                                <div class="absolute bottom-4 left-4 right-4 bg-green-100 border-2 border-green-300 rounded-lg p-3 text-center">
-                                                    <p class="text-sm text-green-800 font-medium">
-                                                        💡 Visualiseur Microsoft Office Online • Faites défiler pour voir tout le document
-                                                    </p>
+                                                <!-- Office Online désactivé: causait des erreurs XML -->
+                                                <div class="flex items-center justify-center h-full bg-gradient-to-br from-gray-50 to-gray-100">
+                                                    <div class="text-center p-8">
+                                                        <div class="text-6xl mb-4">📝</div>
+                                                        <p class="text-xl font-bold text-gray-800 mb-2">Prévisualisation non disponible</p>
+                                                        <p class="text-gray-600 mb-6">
+                                                            Utilisez le bouton "Éditer" pour modifier ce document avec OnlyOffice
+                                                        </p>
+                                                        <button onclick="downloadDoc(state.selectedDoc)" class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                                                            📥 Télécharger
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         `}
@@ -2520,15 +2523,18 @@ function render() {
                                             </div>
                                         ` : `
                                             <div class="relative bg-white rounded-lg" style="height: 700px;">
-                                                <iframe
-                                                    src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + '/api/office-file/' + state.currentUser + '/' + state.selectedDoc._id)}"
-                                                    class="w-full h-full rounded-lg border-2 border-gray-300"
-                                                    frameborder="0">
-                                                </iframe>
-                                                <div class="absolute bottom-4 left-4 right-4 bg-blue-100 border-2 border-blue-300 rounded-lg p-3 text-center">
-                                                    <p class="text-sm text-blue-800 font-medium">
-                                                        💡 Visualiseur Microsoft Office Online • Consultez vos feuilles de calcul
-                                                    </p>
+                                                <!-- Office Online désactivé: causait des erreurs XML -->
+                                                <div class="flex items-center justify-center h-full bg-gradient-to-br from-gray-50 to-gray-100">
+                                                    <div class="text-center p-8">
+                                                        <div class="text-6xl mb-4">📊</div>
+                                                        <p class="text-xl font-bold text-gray-800 mb-2">Prévisualisation non disponible</p>
+                                                        <p class="text-gray-600 mb-6">
+                                                            Utilisez le bouton "Éditer" pour modifier ce document avec l'éditeur Excel
+                                                        </p>
+                                                        <button onclick="downloadDoc(state.selectedDoc)" class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                                                            📥 Télécharger
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         `}
@@ -2588,15 +2594,18 @@ function render() {
                                             </div>
                                         ` : `
                                             <div class="relative bg-white rounded-lg" style="height: 700px;">
-                                                <iframe
-                                                    src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + '/api/office-file/' + state.currentUser + '/' + state.selectedDoc._id)}"
-                                                    class="w-full h-full rounded-lg border-2 border-gray-300"
-                                                    frameborder="0">
-                                                </iframe>
-                                                <div class="absolute bottom-4 left-4 right-4 bg-purple-100 border-2 border-purple-300 rounded-lg p-3 text-center">
-                                                    <p class="text-sm text-purple-800 font-medium">
-                                                        💡 Visualiseur Microsoft Office Online • Parcourez vos diapositives
-                                                    </p>
+                                                <!-- Office Online désactivé: causait des erreurs XML -->
+                                                <div class="flex items-center justify-center h-full bg-gradient-to-br from-gray-50 to-gray-100">
+                                                    <div class="text-center p-8">
+                                                        <div class="text-6xl mb-4">📽️</div>
+                                                        <p class="text-xl font-bold text-gray-800 mb-2">Prévisualisation non disponible</p>
+                                                        <p class="text-gray-600 mb-6">
+                                                            Utilisez le bouton "Éditer" pour modifier ce document avec OnlyOffice
+                                                        </p>
+                                                        <button onclick="downloadDoc(state.selectedDoc)" class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                                                            📥 Télécharger
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         `}
