@@ -315,12 +315,19 @@ function isOnlineDeployment() {
 }
 
 async function openWordEditor(doc) {
-    // Si l'app est en ligne, utiliser Office Online
-    if (isOnlineDeployment()) {
-        await openOfficeOnlineEditor(doc);
-    } else {
-        await openLocalWordEditor(doc);
-    }
+    // DÉSACTIVÉ: Office Online nécessite le protocole WOPI pour fonctionner
+    // Sans WOPI, Office Online retourne des erreurs d'analyse XML
+    // Solution temporaire: toujours afficher le guide de téléchargement
+
+    // Pour réactiver Office Online une fois WOPI implémenté, décommenter:
+    // if (isOnlineDeployment()) {
+    //     await openOfficeOnlineEditor(doc);
+    // } else {
+    //     await openLocalWordEditor(doc);
+    // }
+
+    // Guide de téléchargement pour tous les environnements
+    await openLocalWordEditor(doc);
 }
 
 // Éditeur Office Online (pour déploiement en ligne)
