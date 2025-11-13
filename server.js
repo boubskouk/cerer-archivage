@@ -3029,6 +3029,68 @@ app.get('/api/office/info/:docId', async (req, res) => {
     }
 });
 
+// ============================================
+// ROUTES ONLYOFFICE
+// ============================================
+
+// Route callback OnlyOffice pour sauvegarder les modifications
+app.post('/api/onlyoffice/callback/:docId', async (req, res) => {
+    try {
+        const { docId } = req.params;
+        const callbackData = req.body;
+
+        console.log('📝 OnlyOffice callback reçu pour:', docId);
+        console.log('Status:', callbackData.status);
+
+        // Statuts OnlyOffice:
+        // 0 - Document non trouvé
+        // 1 - Document en cours d'édition
+        // 2 - Document prêt à être sauvegardé
+        // 3 - Erreur de sauvegarde
+        // 4 - Document fermé sans modifications
+        // 6 - Document en cours d'édition, sauvegarde requise
+        // 7 - Erreur de conversion
+
+        // Sauvegarder uniquement si le document est prêt (status 2 ou 6)
+        if (callbackData.status === 2 || callbackData.status === 6) {
+            console.log('💾 Sauvegarde du document depuis OnlyOffice...');
+
+            // Télécharger le fichier modifié depuis OnlyOffice (avec fetch natif)
+            const response = await fetch(callbackData.url);
+            const arrayBuffer = await response.arrayBuffer();
+
+            const fileBuffer = Buffer.from(arrayBuffer);
+            const base64Content = fileBuffer.toString('base64');
+
+            // Mettre à jour le document dans MongoDB
+            const result = await documentsCollection.updateOne(
+                { _id: new ObjectId(docId) },
+                {
+                    $set: {
+                        contenu: base64Content,
+                        taille: fileBuffer.length,
+                        dateModification: new Date()
+                    }
+                }
+            );
+
+            if (result.modifiedCount > 0) {
+                console.log('✅ Document sauvegardé avec succès dans MongoDB');
+            } else {
+                console.warn('⚠️ Document non trouvé ou non modifié');
+            }
+        }
+
+        // OnlyOffice attend toujours une réponse avec error: 0
+        res.json({ error: 0 });
+
+    } catch (error) {
+        console.error('❌ Erreur callback OnlyOffice:', error);
+        // Même en cas d'erreur, renvoyer error: 0 pour ne pas bloquer OnlyOffice
+        res.json({ error: 0 });
+    }
+});
+
 // Route catch-all
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));

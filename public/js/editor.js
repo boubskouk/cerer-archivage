@@ -23,9 +23,14 @@ function isEditable(doc) {
         return 'excel';
     }
 
-    // Word moderne (templates uniquement)
+    // Word moderne
     if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || ext === 'docx') {
         return 'word';
+    }
+
+    // PowerPoint moderne
+    if (type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || ext === 'pptx') {
+        return 'powerpoint';
     }
 
     return false;
@@ -47,7 +52,8 @@ async function openEditor(doc) {
 
     if (editableType === 'excel') {
         await openExcelEditor(doc);
-    } else if (editableType === 'word') {
+    } else if (editableType === 'word' || editableType === 'powerpoint') {
+        // Utiliser OnlyOffice pour Word et PowerPoint
         await openWordEditor(doc);
     }
 }
@@ -315,19 +321,18 @@ function isOnlineDeployment() {
 }
 
 async function openWordEditor(doc) {
-    // DÉSACTIVÉ: Office Online nécessite le protocole WOPI pour fonctionner
-    // Sans WOPI, Office Online retourne des erreurs d'analyse XML
-    // Solution temporaire: toujours afficher le guide de téléchargement
+    // NOUVELLE APPROCHE: Utiliser OnlyOffice pour Word et PowerPoint
+    // OnlyOffice fonctionne sans WOPI (contrairement à Office Online)
 
-    // Pour réactiver Office Online une fois WOPI implémenté, décommenter:
-    // if (isOnlineDeployment()) {
-    //     await openOfficeOnlineEditor(doc);
-    // } else {
-    //     await openLocalWordEditor(doc);
-    // }
-
-    // Guide de téléchargement pour tous les environnements
-    await openLocalWordEditor(doc);
+    // Vérifier si OnlyOffice est disponible
+    if (typeof openOnlyOfficeEditor === 'function') {
+        // Utiliser OnlyOffice pour l'édition
+        await openOnlyOfficeEditor(doc);
+    } else {
+        // Fallback: Guide de téléchargement si OnlyOffice n'est pas chargé
+        console.warn('⚠️ OnlyOffice non disponible, affichage du guide de téléchargement');
+        await openLocalWordEditor(doc);
+    }
 }
 
 // Éditeur Office Online (pour déploiement en ligne)
