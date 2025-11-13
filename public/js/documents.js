@@ -87,6 +87,10 @@ async function deleteAllDocuments() {
 async function downloadDoc(doc) {
     try {
         const fullDoc = await getDocument(state.currentUser, doc._id);
+
+        // Enregistrer le téléchargement
+        await recordDownload(state.currentUser, doc._id);
+
         const link = document.createElement('a');
         link.href = fullDoc.contenu;
         link.download = fullDoc.nomFichier;

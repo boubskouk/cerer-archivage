@@ -49,6 +49,7 @@ const state = {
     showAdvancedStats: false,
     showDeleteConfirm: false,
     isAuthenticated: false,
+    isCheckingSession: true, // NOUVEAU : Vérifier si on restaure une session
     currentUser: null,
     currentUserInfo: null, // Informations complètes de l'utilisateur (nom, rôle, niveau)
     showRegister: false,
@@ -69,7 +70,10 @@ const state = {
     composeMessageSubject: '', // NOUVEAU : Sujet du message
     composeMessageBody: '', // NOUVEAU : Corps du message
     allUsers: [], // NOUVEAU : Liste de tous les utilisateurs pour composition
-    showMessagingSection: false // NOUVEAU : Afficher la section messagerie dans la page principale
+    showMessagingSection: false, // NOUVEAU : Afficher la section messagerie dans la page principale
+    userSearchTerm: '', // NOUVEAU : Terme de recherche pour filtrer les utilisateurs destinataires
+    showUserDropdown: false, // NOUVEAU : Afficher le dropdown de recherche
+    selectedUser: null // NOUVEAU : Utilisateur sélectionné
 };
 
 // Données du formulaire
@@ -105,6 +109,123 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     }
 }
 
+// ===== GESTION DES SESSIONS =====
+
+// Sauvegarder la session dans localStorage
+function saveSession(username, userInfo) {
+    try {
+        localStorage.setItem('cerer_session', JSON.stringify({
+            username,
+            userInfo,
+            timestamp: Date.now()
+        }));
+    } catch (error) {
+        console.error('Erreur sauvegarde session:', error);
+    }
+}
+
+// Restaurer la session depuis localStorage
+async function restoreSession() {
+    try {
+        const sessionData = localStorage.getItem('cerer_session');
+        if (!sessionData) {
+            state.isCheckingSession = false;
+            return false;
+        }
+
+        const { username, userInfo, timestamp } = JSON.parse(sessionData);
+
+        // Vérifier que la session n'est pas trop ancienne (7 jours)
+        const sevenDays = 7 * 24 * 60 * 60 * 1000;
+        if (Date.now() - timestamp > sevenDays) {
+            clearSession();
+            state.isCheckingSession = false;
+            return false;
+        }
+
+        // Vérifier que la session est toujours valide côté serveur
+        const result = await apiCall('/verify-session', 'POST', { username });
+        if (result.success) {
+            state.currentUser = username;
+            state.currentUserInfo = userInfo;
+            state.isAuthenticated = true;
+            state.isCheckingSession = false;
+
+            // Démarrer le système de déconnexion automatique
+            startInactivityTimer();
+
+            await loadData();
+            return true;
+        } else {
+            clearSession();
+            state.isCheckingSession = false;
+            return false;
+        }
+    } catch (error) {
+        console.error('Erreur restauration session:', error);
+        clearSession();
+        state.isCheckingSession = false;
+        return false;
+    }
+}
+
+// Nettoyer la session
+function clearSession() {
+    try {
+        localStorage.removeItem('cerer_session');
+    } catch (error) {
+        console.error('Erreur nettoyage session:', error);
+    }
+}
+
+// ===== SYSTÈME DE DÉCONNEXION AUTOMATIQUE =====
+let inactivityTimer = null;
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes en millisecondes
+
+// Démarrer le système de détection d'inactivité
+function startInactivityTimer() {
+    // Réinitialiser le timer existant
+    resetInactivityTimer();
+
+    // Événements à surveiller pour détecter l'activité
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+
+    // Ajouter les écouteurs d'événements
+    events.forEach(event => {
+        document.addEventListener(event, resetInactivityTimer, true);
+    });
+}
+
+// Réinitialiser le timer d'inactivité
+function resetInactivityTimer() {
+    // Annuler le timer existant
+    if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+    }
+
+    // Ne démarrer le timer que si l'utilisateur est connecté
+    if (state.isAuthenticated) {
+        inactivityTimer = setTimeout(() => {
+            console.log('Déconnexion automatique après inactivité');
+            logout(true); // Déconnexion automatique
+        }, INACTIVITY_TIMEOUT);
+    }
+}
+
+// Arrêter le système de détection d'inactivité
+function stopInactivityTimer() {
+    if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+    }
+
+    // Retirer tous les écouteurs d'événements
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    events.forEach(event => {
+        document.removeEventListener(event, resetInactivityTimer, true);
+    });
+}
+
 // ===== AUTHENTIFICATION =====
 async function login(username, password) {
     try {
@@ -113,6 +234,13 @@ async function login(username, password) {
             state.currentUser = username;
             state.currentUserInfo = result.user; // Stocker les infos complètes (nom, rôle, niveau)
             state.isAuthenticated = true;
+
+            // Sauvegarder la session
+            saveSession(username, result.user);
+
+            // Démarrer le système de déconnexion automatique
+            startInactivityTimer();
+
             await loadData();
             showNotification(`✅ Bienvenue ${result.user.nom}!`);
             return true;
@@ -145,25 +273,39 @@ async function register(username, password, nom, email, idRole, idDepartement, a
     }
 }
 
-async function logout() {
-    const confirmed = await customConfirm({
-        title: 'Déconnexion',
-        message: 'Êtes-vous sûr de vouloir vous déconnecter ?',
-        confirmText: 'Oui, me déconnecter',
-        cancelText: 'Annuler',
-        type: 'warning',
-        icon: '👋'
-    });
+async function logout(isAutoLogout = false) {
+    if (!isAutoLogout) {
+        const confirmed = await customConfirm({
+            title: 'Déconnexion',
+            message: 'Êtes-vous sûr de vouloir vous déconnecter ?',
+            confirmText: 'Oui, me déconnecter',
+            cancelText: 'Annuler',
+            type: 'warning',
+            icon: '👋'
+        });
 
-    if (confirmed) {
-        state.currentUser = null;
-        state.currentUserInfo = null;
-        state.isAuthenticated = false;
-        state.documents = [];
-        state.categories = [];
-        showNotification('✅ Déconnexion réussie');
-        render();
+        if (!confirmed) return;
     }
+
+    // Nettoyer la session
+    clearSession();
+
+    // Arrêter le système de détection d'inactivité
+    stopInactivityTimer();
+
+    state.currentUser = null;
+    state.currentUserInfo = null;
+    state.isAuthenticated = false;
+    state.documents = [];
+    state.categories = [];
+
+    if (isAutoLogout) {
+        showNotification('⏰ Déconnexion automatique après 10 minutes d\'inactivité', 'warning');
+    } else {
+        showNotification('✅ Déconnexion réussie');
+    }
+
+    render();
 }
 
 // ===== GESTION DES DONNÉES =====
@@ -589,6 +731,275 @@ async function downloadDoc(doc) {
     } catch (error) {
         console.error('Erreur téléchargement:', error);
         showNotification('Erreur lors du téléchargement', 'error');
+    }
+}
+
+// ===== ÉDITION OFFICE =====
+
+// Vérifier si un fichier est un fichier Office éditable
+function isEditableOfficeFile(fileName) {
+    if (!fileName) return false;
+    const ext = fileName.toLowerCase();
+    return ext.endsWith('.xlsx') || ext.endsWith('.xls');
+}
+
+// Éditer un document Excel
+async function editExcelDocument(doc) {
+    try {
+        // Créer une interface modale pour l'édition
+        const modalHtml = `
+            <div id="editExcelModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in">
+                    <div class="flex justify-between items-start mb-6">
+                        <h2 class="text-3xl font-bold text-gray-800">✏️ Éditer le tableur Excel</h2>
+                        <button onclick="closeEditExcelModal()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                    </div>
+
+                    <div class="mb-6 bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
+                        <p class="text-gray-700"><strong>📊 Fichier:</strong> ${doc.nomFichier}</p>
+                        <p class="text-sm text-gray-600 mt-2">Modifiez les cellules ci-dessous. Format: <code>A1</code>, <code>B2</code>, etc.</p>
+                    </div>
+
+                    <div id="cellEditsContainer" class="space-y-3 mb-6">
+                        <div class="flex gap-3 items-center">
+                            <input type="text" id="cell_0" placeholder="Cellule (ex: A1)"
+                                   class="w-32 px-3 py-2 border-2 rounded-lg input-modern">
+                            <input type="text" id="value_0" placeholder="Nouvelle valeur"
+                                   class="flex-1 px-3 py-2 border-2 rounded-lg input-modern">
+                        </div>
+                    </div>
+
+                    <button onclick="addCellEditRow()"
+                            class="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition font-medium mb-6">
+                        ➕ Ajouter une cellule
+                    </button>
+
+                    <div class="flex gap-3">
+                        <button onclick="saveExcelEdits('${doc._id}')"
+                                class="flex-1 px-6 py-4 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-semibold">
+                            ✅ Enregistrer les modifications
+                        </button>
+                        <button onclick="closeEditExcelModal()"
+                                class="flex-1 px-6 py-4 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition font-medium">
+                            ❌ Annuler
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Ajouter la modale au DOM
+        const container = document.createElement('div');
+        container.innerHTML = modalHtml;
+        document.body.appendChild(container.firstElementChild);
+
+    } catch (error) {
+        console.error('Erreur ouverture éditeur:', error);
+        showNotification('Erreur lors de l\'ouverture de l\'éditeur', 'error');
+    }
+}
+
+// Ajouter une ligne de cellule à éditer
+function addCellEditRow() {
+    const container = document.getElementById('cellEditsContainer');
+    const count = container.children.length;
+
+    const newRow = document.createElement('div');
+    newRow.className = 'flex gap-3 items-center';
+    newRow.innerHTML = `
+        <input type="text" id="cell_${count}" placeholder="Cellule (ex: B${count + 1})"
+               class="w-32 px-3 py-2 border-2 rounded-lg input-modern">
+        <input type="text" id="value_${count}" placeholder="Nouvelle valeur"
+               class="flex-1 px-3 py-2 border-2 rounded-lg input-modern">
+        <button onclick="this.parentElement.remove()"
+                class="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition">
+            🗑️
+        </button>
+    `;
+    container.appendChild(newRow);
+}
+
+// Enregistrer les modifications Excel
+async function saveExcelEdits(docId) {
+    try {
+        const container = document.getElementById('cellEditsContainer');
+        const cellUpdates = {};
+
+        // Récupérer toutes les modifications
+        for (let i = 0; i < container.children.length; i++) {
+            const cellInput = document.getElementById(`cell_${i}`);
+            const valueInput = document.getElementById(`value_${i}`);
+
+            if (cellInput && valueInput && cellInput.value.trim() && valueInput.value.trim()) {
+                cellUpdates[cellInput.value.trim().toUpperCase()] = valueInput.value.trim();
+            }
+        }
+
+        if (Object.keys(cellUpdates).length === 0) {
+            showNotification('⚠️ Aucune modification à enregistrer', 'warning');
+            return;
+        }
+
+        showNotification('⏳ Modification du tableur en cours...', 'info');
+
+        // Appeler l'API d'édition
+        const result = await apiCall(`/office/edit-excel/${docId}`, 'POST', { cellUpdates });
+
+        if (result.success) {
+            showNotification('✅ Tableur modifié avec succès !', 'success');
+            closeEditExcelModal();
+            await loadData(); // Recharger les documents
+        } else {
+            showNotification('❌ Erreur lors de la modification', 'error');
+        }
+
+    } catch (error) {
+        console.error('Erreur sauvegarde Excel:', error);
+        showNotification('Erreur lors de la sauvegarde', 'error');
+    }
+}
+
+// Fermer la modale d'édition
+function closeEditExcelModal() {
+    const modal = document.getElementById('editExcelModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// Créer un nouveau rapport Excel
+async function createExcelReport() {
+    try {
+        // Créer une interface pour la création de rapport
+        const modalHtml = `
+            <div id="createExcelModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in">
+                    <div class="flex justify-between items-start mb-6">
+                        <h2 class="text-3xl font-bold text-gray-800">📊 Créer un rapport Excel</h2>
+                        <button onclick="closeCreateExcelModal()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                    </div>
+
+                    <div class="space-y-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Nom du fichier</label>
+                            <input type="text" id="excelFileName"
+                                   placeholder="rapport-documents.xlsx"
+                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Type de rapport</label>
+                            <select id="reportType" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                <option value="documents">Liste de tous les documents</option>
+                                <option value="categories">Documents par catégorie</option>
+                                <option value="stats">Statistiques générales</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <button onclick="generateExcelReport()"
+                                class="flex-1 px-6 py-4 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-semibold">
+                            ✅ Générer le rapport
+                        </button>
+                        <button onclick="closeCreateExcelModal()"
+                                class="flex-1 px-6 py-4 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition font-medium">
+                            ❌ Annuler
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Ajouter la modale au DOM
+        const container = document.createElement('div');
+        container.innerHTML = modalHtml;
+        document.body.appendChild(container.firstElementChild);
+
+    } catch (error) {
+        console.error('Erreur création rapport:', error);
+        showNotification('Erreur lors de l\'ouverture', 'error');
+    }
+}
+
+// Générer le rapport Excel
+async function generateExcelReport() {
+    try {
+        const fileName = document.getElementById('excelFileName').value.trim() || 'rapport.xlsx';
+        const reportType = document.getElementById('reportType').value;
+
+        let data = [];
+        let sheetName = 'Rapport';
+
+        if (reportType === 'documents') {
+            data = [
+                ['ID', 'Titre', 'Catégorie', 'Date', 'Taille', 'Fichier'],
+                ...state.documents.map(doc => [
+                    doc.idDocument || doc._id,
+                    doc.titre,
+                    getCategoryName(doc.categorie),
+                    formatDate(doc.dateAjout),
+                    formatSize(doc.taille),
+                    doc.nomFichier
+                ])
+            ];
+            sheetName = 'Documents';
+        } else if (reportType === 'categories') {
+            const catCounts = {};
+            state.documents.forEach(doc => {
+                const catName = getCategoryName(doc.categorie);
+                catCounts[catName] = (catCounts[catName] || 0) + 1;
+            });
+            data = [
+                ['Catégorie', 'Nombre de documents'],
+                ...Object.entries(catCounts).map(([cat, count]) => [cat, count])
+            ];
+            sheetName = 'Catégories';
+        } else if (reportType === 'stats') {
+            const totalSize = state.documents.reduce((sum, doc) => sum + doc.taille, 0);
+            data = [
+                ['Statistique', 'Valeur'],
+                ['Total de documents', state.documents.length],
+                ['Taille totale', formatSize(totalSize)],
+                ['Catégories', state.categories.length],
+                ['Date du rapport', new Date().toLocaleDateString('fr-FR')]
+            ];
+            sheetName = 'Statistiques';
+        }
+
+        showNotification('⏳ Génération du rapport en cours...', 'info');
+
+        // Appeler l'API de création
+        const result = await apiCall('/office/create-excel', 'POST', {
+            data,
+            fileName,
+            sheetName
+        });
+
+        if (result.success) {
+            // Télécharger le fichier
+            const link = document.createElement('a');
+            link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${result.content}`;
+            link.download = fileName;
+            link.click();
+
+            showNotification('✅ Rapport généré et téléchargé !', 'success');
+            closeCreateExcelModal();
+        } else {
+            showNotification('❌ Erreur lors de la génération', 'error');
+        }
+
+    } catch (error) {
+        console.error('Erreur génération rapport:', error);
+        showNotification('Erreur lors de la génération', 'error');
+    }
+}
+
+// Fermer la modale de création
+function closeCreateExcelModal() {
+    const modal = document.getElementById('createExcelModal');
+    if (modal) {
+        modal.remove();
     }
 }
 
@@ -1041,13 +1452,55 @@ async function openComposeMessage() {
     state.composeMessageTo = '';
     state.composeMessageSubject = '';
     state.composeMessageBody = '';
+    state.userSearchTerm = '';
+    state.showUserDropdown = false;
+    state.selectedUser = null;
     render();
 }
 
 // Fermer le formulaire de composition
 function closeComposeMessage() {
     state.showComposeMessage = false;
+    state.userSearchTerm = '';
+    state.showUserDropdown = false;
+    state.selectedUser = null;
     render();
+}
+
+// Gérer la recherche d'utilisateurs
+function handleUserSearch(value) {
+    state.userSearchTerm = value;
+    state.showUserDropdown = value.length > 0;
+    state.selectedUser = null;
+    state.composeMessageTo = '';
+    render();
+}
+
+// Filtrer les utilisateurs selon le terme de recherche
+function getFilteredUsers() {
+    if (!state.userSearchTerm) return [];
+
+    const searchLower = state.userSearchTerm.toLowerCase();
+    return state.allUsers.filter(user => {
+        return (
+            user.nom.toLowerCase().includes(searchLower) ||
+            user.username.toLowerCase().includes(searchLower) ||
+            (user.departement && user.departement.toLowerCase().includes(searchLower)) ||
+            (user.role && user.role.toLowerCase().includes(searchLower))
+        );
+    }).slice(0, 10); // Limiter à 10 résultats
+}
+
+// Sélectionner un utilisateur
+function selectUser(username) {
+    const user = state.allUsers.find(u => u.username === username);
+    if (user) {
+        state.selectedUser = user;
+        state.composeMessageTo = username;
+        state.showUserDropdown = false;
+        state.userSearchTerm = `${user.nom} (${user.username})${user.niveau !== 1 ? ` - ${user.departement}` : ''}`;
+        render();
+    }
 }
 
 // Envoyer un nouveau message
@@ -1175,6 +1628,31 @@ async function handleLogin() {
     await login(username, password);
 }
 
+// Gérer le changement de rôle pour désactiver le département si niveau 1
+function handleRoleChange() {
+    const roleSelect = document.getElementById('reg_role');
+    const departementContainer = document.getElementById('departement_container');
+    const departementSelect = document.getElementById('reg_departement');
+
+    if (!roleSelect || !departementContainer || !departementSelect) return;
+
+    const selectedOption = roleSelect.options[roleSelect.selectedIndex];
+    const niveau = selectedOption ? parseInt(selectedOption.getAttribute('data-niveau')) : null;
+
+    if (niveau === 1) {
+        // Niveau 1 : désactiver et masquer le département
+        departementSelect.disabled = true;
+        departementSelect.value = '';
+        departementContainer.style.opacity = '0.5';
+        departementContainer.style.pointerEvents = 'none';
+    } else {
+        // Autres niveaux : activer le département
+        departementSelect.disabled = false;
+        departementContainer.style.opacity = '1';
+        departementContainer.style.pointerEvents = 'auto';
+    }
+}
+
 async function handleRegister() {
     const nom = document.getElementById('reg_nom').value.trim();
     const email = document.getElementById('reg_email').value.trim();
@@ -1185,8 +1663,20 @@ async function handleRegister() {
     const idDepartement = document.getElementById('reg_departement').value;
     const adminPassword = document.getElementById('reg_admin_password').value;
 
-    if (!nom || !email || !username || !password || !passwordConfirm || !idRole || !idDepartement || !adminPassword) {
-        return showNotification('Veuillez remplir tous les champs', 'error');
+    // Vérifier le niveau du rôle sélectionné
+    const roleSelect = document.getElementById('reg_role');
+    const selectedOption = roleSelect.options[roleSelect.selectedIndex];
+    const niveau = selectedOption ? parseInt(selectedOption.getAttribute('data-niveau')) : null;
+
+    // Pour niveau 1, le département n'est pas requis
+    if (niveau === 1) {
+        if (!nom || !email || !username || !password || !passwordConfirm || !idRole || !adminPassword) {
+            return showNotification('Veuillez remplir tous les champs', 'error');
+        }
+    } else {
+        if (!nom || !email || !username || !password || !passwordConfirm || !idRole || !idDepartement || !adminPassword) {
+            return showNotification('Veuillez remplir tous les champs', 'error');
+        }
     }
     if (username.length < 3 || password.length < 4) {
         return showNotification('Username: 3+, Password: 4+', 'error');
@@ -1194,7 +1684,9 @@ async function handleRegister() {
     if (password !== passwordConfirm) {
         return showNotification('Les mots de passe ne correspondent pas', 'error');
     }
-    const success = await register(username, password, nom, email, idRole, idDepartement, adminPassword);
+    // Pour niveau 1, envoyer null pour le département
+    const finalIdDepartement = niveau === 1 ? null : idDepartement;
+    const success = await register(username, password, nom, email, idRole, finalIdDepartement, adminPassword);
     if (success) {
         state.showRegister = false;
         render();
@@ -1223,7 +1715,20 @@ function render() {
     ];
     
     const app = document.getElementById('app');
-    
+
+    // Afficher un loader pendant la vérification de session
+    if (state.isCheckingSession) {
+        app.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center gradient-bg">
+                <div class="text-center">
+                    <div class="loader mx-auto mb-4"></div>
+                    <p class="text-lg font-semibold text-white">⏳ Restauration de la session...</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
     if (!state.isAuthenticated) {
         app.innerHTML = `
             <div class="min-h-screen flex items-center justify-center gradient-bg">
@@ -1250,32 +1755,53 @@ function render() {
                             <input id="reg_username" type="text" placeholder="Nom d'utilisateur (3+ caractères)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
 
-                            <input id="reg_password" type="password" placeholder="Mot de passe (4+ caractères)"
-                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                            <div class="relative">
+                                <input id="reg_password" type="password" placeholder="Mot de passe (4+ caractères)"
+                                       class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
+                                <button type="button" onclick="togglePasswordVisibility('reg_password')"
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                    <span id="reg_password_icon">👁️</span>
+                                </button>
+                            </div>
 
-                            <input id="reg_password_confirm" type="password" placeholder="Confirmer le mot de passe"
-                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                            <div class="relative">
+                                <input id="reg_password_confirm" type="password" placeholder="Confirmer le mot de passe"
+                                       class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
+                                <button type="button" onclick="togglePasswordVisibility('reg_password_confirm')"
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                    <span id="reg_password_confirm_icon">👁️</span>
+                                </button>
+                            </div>
 
-                            <select id="reg_role" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                            <select id="reg_role" class="w-full px-4 py-3 border-2 rounded-xl input-modern" onchange="handleRoleChange()">
                                 <option value="">-- Choisir un rôle --</option>
                                 ${state.roles.map(role => `
-                                    <option value="${role._id}">
+                                    <option value="${role._id}" data-niveau="${role.niveau}">
                                         ${role.libelle.charAt(0).toUpperCase() + role.libelle.slice(1)} - ${role.description}
                                     </option>
                                 `).join('')}
                             </select>
 
-                            <select id="reg_departement" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                                <option value="">-- Choisir un département --</option>
-                                ${state.departements.map(dept => `
-                                    <option value="${dept._id}">
-                                        ${dept.nom}
-                                    </option>
-                                `).join('')}
-                            </select>
+                            <div id="departement_container">
+                                <select id="reg_departement" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                    <option value="">-- Choisir un département --</option>
+                                    ${state.departements.map(dept => `
+                                        <option value="${dept._id}">
+                                            ${dept.nom}
+                                        </option>
+                                    `).join('')}
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Les administrateurs de niveau 1 n'ont pas de département spécifique</p>
+                            </div>
 
-                            <input id="reg_admin_password" type="password" placeholder="Mot de passe administrateur"
-                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                            <div class="relative">
+                                <input id="reg_admin_password" type="password" placeholder="Mot de passe administrateur"
+                                       class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
+                                <button type="button" onclick="togglePasswordVisibility('reg_admin_password')"
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                    <span id="reg_admin_password_icon">👁️</span>
+                                </button>
+                            </div>
 
                             <button onclick="handleRegister()"
                                     class="w-full btn-success text-white py-3 rounded-xl font-semibold transition">
@@ -1289,12 +1815,18 @@ function render() {
                     ` : `
                         <div class="space-y-4">
                             <h2 class="text-xl font-semibold text-gray-700">Connexion</h2>
-                            <input id="login_username" type="text" placeholder="Nom d'utilisateur" 
+                            <input id="login_username" type="text" placeholder="Nom d'utilisateur"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern"
                                    onkeypress="if(event.key==='Enter') handleLogin()">
-                            <input id="login_password" type="password" placeholder="Mot de passe" 
-                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern"
-                                   onkeypress="if(event.key==='Enter') handleLogin()">
+                            <div class="relative">
+                                <input id="login_password" type="password" placeholder="Mot de passe"
+                                       class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern"
+                                       onkeypress="if(event.key==='Enter') handleLogin()">
+                                <button type="button" onclick="togglePasswordVisibility('login_password')"
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                    <span id="login_password_icon">👁️</span>
+                                </button>
+                            </div>
                             <button onclick="handleLogin()" 
                                     class="w-full btn-primary text-white py-3 rounded-xl font-semibold transition btn-shine">
                                 Se connecter
@@ -1592,6 +2124,9 @@ function render() {
                                 <button onclick="toggleAdvancedStats()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-green-50 hover:to-teal-50 rounded-xl transition font-medium">
                                     📊 Statistiques avancées
                                 </button>
+                                <button onclick="createExcelReport()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 rounded-xl transition font-medium">
+                                    📊 Créer un rapport Excel
+                                </button>
                                 <button onclick="exportData()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
                                     💾 Exporter les données
                                 </button>
@@ -1863,70 +2398,208 @@ function render() {
                                         </p>
                                     </div>
                                 ` : state.selectedDoc.type.includes('word') || state.selectedDoc.type.includes('document') || state.selectedDoc.nomFichier.endsWith('.doc') || state.selectedDoc.nomFichier.endsWith('.docx') ? `
-                                    <div class="text-center py-16">
-                                        <div class="text-6xl mb-4">📝</div>
-                                        <p class="text-gray-700 font-bold text-xl mb-2">
-                                            Document Microsoft Word
-                                        </p>
-                                        <p class="text-gray-600 text-base mt-3 mb-2">
-                                            <strong>Fichier:</strong> ${state.selectedDoc.nomFichier}
-                                        </p>
-                                        <p class="text-gray-600 text-base mb-4">
-                                            <strong>Taille:</strong> ${formatSize(state.selectedDoc.taille)}
-                                        </p>
-                                        <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mx-auto max-w-md mb-4">
-                                            <p class="text-sm text-blue-800 font-medium">
-                                                💡 Téléchargez ce document pour l'ouvrir dans Microsoft Word
-                                            </p>
+                                    <div>
+                                        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-lg mb-4 border-2 border-blue-200">
+                                            <div class="flex items-center justify-between mb-3">
+                                                <div class="flex items-center gap-3">
+                                                    <span class="text-4xl">📝</span>
+                                                    <div>
+                                                        <p class="font-bold text-lg text-gray-800">Document Microsoft Word</p>
+                                                        <p class="text-sm text-gray-600">${state.selectedDoc.nomFichier} • ${formatSize(state.selectedDoc.taille)}</p>
+                                                    </div>
+                                                </div>
+                                                <button onclick="downloadDoc(state.selectedDoc)"
+                                                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium text-sm">
+                                                    📥 Télécharger
+                                                </button>
+                                            </div>
                                         </div>
-                                        <button onclick="downloadDoc(state.selectedDoc)"
-                                                class="mt-2 px-8 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold text-lg">
-                                            📥 Télécharger le document
-                                        </button>
+                                        ${window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? `
+                                            <div class="text-center py-12 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl border-2 border-blue-300">
+                                                <div class="text-6xl mb-4 animate-bounce">📝</div>
+                                                <p class="text-xl font-bold text-gray-800 mb-3">Aperçu en mode local</p>
+                                                <p class="text-gray-600 mb-6 max-w-md mx-auto">
+                                                    Le visualiseur Office Online nécessite une URL publique.
+                                                    Téléchargez le document pour l'ouvrir dans Microsoft Word.
+                                                </p>
+                                                <div class="bg-white rounded-lg p-6 max-w-lg mx-auto mb-6 shadow-lg">
+                                                    <div class="grid grid-cols-2 gap-4 text-sm">
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Fichier:</p>
+                                                            <p class="font-semibold text-gray-800">${state.selectedDoc.nomFichier}</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Taille:</p>
+                                                            <p class="font-semibold text-gray-800">${formatSize(state.selectedDoc.taille)}</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Type:</p>
+                                                            <p class="font-semibold text-gray-800">Microsoft Word</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Format:</p>
+                                                            <p class="font-semibold text-gray-800">${state.selectedDoc.nomFichier.split('.').pop().toUpperCase()}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button onclick="downloadDoc(state.selectedDoc)"
+                                                        class="px-8 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold text-lg transform hover:scale-105">
+                                                    📥 Télécharger et ouvrir dans Word
+                                                </button>
+                                                <p class="text-xs text-gray-500 mt-4">
+                                                    💡 Le visualiseur fonctionnera automatiquement une fois déployé en production
+                                                </p>
+                                            </div>
+                                        ` : `
+                                            <div class="relative bg-white rounded-lg" style="height: 700px;">
+                                                <iframe
+                                                    src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + '/api/office-file/' + state.currentUser + '/' + state.selectedDoc._id)}"
+                                                    class="w-full h-full rounded-lg border-2 border-gray-300"
+                                                    frameborder="0">
+                                                </iframe>
+                                                <div class="absolute bottom-4 left-4 right-4 bg-green-100 border-2 border-green-300 rounded-lg p-3 text-center">
+                                                    <p class="text-sm text-green-800 font-medium">
+                                                        💡 Visualiseur Microsoft Office Online • Faites défiler pour voir tout le document
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        `}
                                     </div>
                                 ` : state.selectedDoc.type.includes('excel') || state.selectedDoc.type.includes('sheet') || state.selectedDoc.nomFichier.endsWith('.xls') || state.selectedDoc.nomFichier.endsWith('.xlsx') ? `
-                                    <div class="text-center py-16">
-                                        <div class="text-6xl mb-4">📊</div>
-                                        <p class="text-gray-700 font-bold text-xl mb-2">
-                                            Tableur Microsoft Excel
-                                        </p>
-                                        <p class="text-gray-600 text-base mt-3 mb-2">
-                                            <strong>Fichier:</strong> ${state.selectedDoc.nomFichier}
-                                        </p>
-                                        <p class="text-gray-600 text-base mb-4">
-                                            <strong>Taille:</strong> ${formatSize(state.selectedDoc.taille)}
-                                        </p>
-                                        <div class="bg-green-50 border-2 border-green-200 rounded-lg p-4 mx-auto max-w-md mb-4">
-                                            <p class="text-sm text-green-800 font-medium">
-                                                💡 Téléchargez ce tableur pour l'ouvrir dans Microsoft Excel
-                                            </p>
+                                    <div>
+                                        <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg mb-4 border-2 border-green-200">
+                                            <div class="flex items-center justify-between mb-3">
+                                                <div class="flex items-center gap-3">
+                                                    <span class="text-4xl">📊</span>
+                                                    <div>
+                                                        <p class="font-bold text-lg text-gray-800">Tableur Microsoft Excel</p>
+                                                        <p class="text-sm text-gray-600">${state.selectedDoc.nomFichier} • ${formatSize(state.selectedDoc.taille)}</p>
+                                                    </div>
+                                                </div>
+                                                <button onclick="downloadDoc(state.selectedDoc)"
+                                                        class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition font-medium text-sm">
+                                                    📥 Télécharger
+                                                </button>
+                                            </div>
                                         </div>
-                                        <button onclick="downloadDoc(state.selectedDoc)"
-                                                class="mt-2 px-8 py-4 btn-success text-white rounded-xl hover:shadow-lg transition font-semibold text-lg">
-                                            📥 Télécharger le tableur
-                                        </button>
+                                        ${window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? `
+                                            <div class="text-center py-12 bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl border-2 border-green-300">
+                                                <div class="text-6xl mb-4 animate-bounce">📊</div>
+                                                <p class="text-xl font-bold text-gray-800 mb-3">Aperçu en mode local</p>
+                                                <p class="text-gray-600 mb-6 max-w-md mx-auto">
+                                                    Le visualiseur Office Online nécessite une URL publique.
+                                                    Téléchargez le tableur pour l'ouvrir dans Microsoft Excel.
+                                                </p>
+                                                <div class="bg-white rounded-lg p-6 max-w-lg mx-auto mb-6 shadow-lg">
+                                                    <div class="grid grid-cols-2 gap-4 text-sm">
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Fichier:</p>
+                                                            <p class="font-semibold text-gray-800">${state.selectedDoc.nomFichier}</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Taille:</p>
+                                                            <p class="font-semibold text-gray-800">${formatSize(state.selectedDoc.taille)}</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Type:</p>
+                                                            <p class="font-semibold text-gray-800">Microsoft Excel</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Format:</p>
+                                                            <p class="font-semibold text-gray-800">${state.selectedDoc.nomFichier.split('.').pop().toUpperCase()}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button onclick="downloadDoc(state.selectedDoc)"
+                                                        class="px-8 py-4 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-semibold text-lg transform hover:scale-105">
+                                                    📥 Télécharger et ouvrir dans Excel
+                                                </button>
+                                                <p class="text-xs text-gray-500 mt-4">
+                                                    💡 Le visualiseur fonctionnera automatiquement une fois déployé en production
+                                                </p>
+                                            </div>
+                                        ` : `
+                                            <div class="relative bg-white rounded-lg" style="height: 700px;">
+                                                <iframe
+                                                    src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + '/api/office-file/' + state.currentUser + '/' + state.selectedDoc._id)}"
+                                                    class="w-full h-full rounded-lg border-2 border-gray-300"
+                                                    frameborder="0">
+                                                </iframe>
+                                                <div class="absolute bottom-4 left-4 right-4 bg-blue-100 border-2 border-blue-300 rounded-lg p-3 text-center">
+                                                    <p class="text-sm text-blue-800 font-medium">
+                                                        💡 Visualiseur Microsoft Office Online • Consultez vos feuilles de calcul
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        `}
                                     </div>
                                 ` : state.selectedDoc.type.includes('powerpoint') || state.selectedDoc.type.includes('presentation') || state.selectedDoc.nomFichier.endsWith('.ppt') || state.selectedDoc.nomFichier.endsWith('.pptx') ? `
-                                    <div class="text-center py-16">
-                                        <div class="text-6xl mb-4">🎞️</div>
-                                        <p class="text-gray-700 font-bold text-xl mb-2">
-                                            Présentation PowerPoint
-                                        </p>
-                                        <p class="text-gray-600 text-base mt-3 mb-2">
-                                            <strong>Fichier:</strong> ${state.selectedDoc.nomFichier}
-                                        </p>
-                                        <p class="text-gray-600 text-base mb-4">
-                                            <strong>Taille:</strong> ${formatSize(state.selectedDoc.taille)}
-                                        </p>
-                                        <div class="bg-orange-50 border-2 border-orange-200 rounded-lg p-4 mx-auto max-w-md mb-4">
-                                            <p class="text-sm text-orange-800 font-medium">
-                                                💡 Téléchargez cette présentation pour l'ouvrir dans PowerPoint
-                                            </p>
+                                    <div>
+                                        <div class="bg-gradient-to-br from-orange-50 to-red-50 p-4 rounded-lg mb-4 border-2 border-orange-200">
+                                            <div class="flex items-center justify-between mb-3">
+                                                <div class="flex items-center gap-3">
+                                                    <span class="text-4xl">🎞️</span>
+                                                    <div>
+                                                        <p class="font-bold text-lg text-gray-800">Présentation PowerPoint</p>
+                                                        <p class="text-sm text-gray-600">${state.selectedDoc.nomFichier} • ${formatSize(state.selectedDoc.taille)}</p>
+                                                    </div>
+                                                </div>
+                                                <button onclick="downloadDoc(state.selectedDoc)"
+                                                        class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition font-medium text-sm">
+                                                    📥 Télécharger
+                                                </button>
+                                            </div>
                                         </div>
-                                        <button onclick="downloadDoc(state.selectedDoc)"
-                                                class="mt-2 px-8 py-4 bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl hover:shadow-lg transition font-semibold text-lg">
-                                            📥 Télécharger la présentation
-                                        </button>
+                                        ${window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? `
+                                            <div class="text-center py-12 bg-gradient-to-br from-orange-50 to-red-100 rounded-xl border-2 border-orange-300">
+                                                <div class="text-6xl mb-4 animate-bounce">🎞️</div>
+                                                <p class="text-xl font-bold text-gray-800 mb-3">Aperçu en mode local</p>
+                                                <p class="text-gray-600 mb-6 max-w-md mx-auto">
+                                                    Le visualiseur Office Online nécessite une URL publique.
+                                                    Téléchargez la présentation pour l'ouvrir dans PowerPoint.
+                                                </p>
+                                                <div class="bg-white rounded-lg p-6 max-w-lg mx-auto mb-6 shadow-lg">
+                                                    <div class="grid grid-cols-2 gap-4 text-sm">
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Fichier:</p>
+                                                            <p class="font-semibold text-gray-800">${state.selectedDoc.nomFichier}</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Taille:</p>
+                                                            <p class="font-semibold text-gray-800">${formatSize(state.selectedDoc.taille)}</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Type:</p>
+                                                            <p class="font-semibold text-gray-800">Microsoft PowerPoint</p>
+                                                        </div>
+                                                        <div class="text-left">
+                                                            <p class="text-gray-500">Format:</p>
+                                                            <p class="font-semibold text-gray-800">${state.selectedDoc.nomFichier.split('.').pop().toUpperCase()}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button onclick="downloadDoc(state.selectedDoc)"
+                                                        class="px-8 py-4 bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl hover:shadow-lg transition font-semibold text-lg transform hover:scale-105">
+                                                    📥 Télécharger et ouvrir dans PowerPoint
+                                                </button>
+                                                <p class="text-xs text-gray-500 mt-4">
+                                                    💡 Le visualiseur fonctionnera automatiquement une fois déployé en production
+                                                </p>
+                                            </div>
+                                        ` : `
+                                            <div class="relative bg-white rounded-lg" style="height: 700px;">
+                                                <iframe
+                                                    src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + '/api/office-file/' + state.currentUser + '/' + state.selectedDoc._id)}"
+                                                    class="w-full h-full rounded-lg border-2 border-gray-300"
+                                                    frameborder="0">
+                                                </iframe>
+                                                <div class="absolute bottom-4 left-4 right-4 bg-purple-100 border-2 border-purple-300 rounded-lg p-3 text-center">
+                                                    <p class="text-sm text-purple-800 font-medium">
+                                                        💡 Visualiseur Microsoft Office Online • Parcourez vos diapositives
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        `}
                                     </div>
                                 ` : `
                                     <div class="text-center py-16">
@@ -2082,11 +2755,25 @@ function render() {
 
                         <!-- ACTIONS selon niveau -->
                         <div class="flex gap-3 flex-wrap">
+                            <!-- Prévisualiser : Tous les niveaux -->
+                            <button onclick="openPreview(state.selectedDoc)"
+                                    class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                <span class="text-xl">👁️</span> Prévisualiser
+                            </button>
+
                             <!-- Télécharger : Tous les niveaux -->
                             <button onclick="downloadDoc(state.selectedDoc)"
                                     class="flex-1 min-w-[200px] px-6 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
                                 <span class="text-xl">📥</span> Télécharger
                             </button>
+
+                            <!-- Éditer : Fichiers Excel uniquement -->
+                            ${state.selectedDoc && isEditableOfficeFile(state.selectedDoc.nomFichier) ? `
+                                <button onclick="editExcelDocument(state.selectedDoc)"
+                                        class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    <span class="text-xl">✏️</span> Éditer Excel
+                                </button>
+                            ` : ''}
 
                             ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
                                 <!-- NIVEAU 1 : Télécharger, Partager et Supprimer N'IMPORTE QUEL document -->
@@ -2224,17 +2911,31 @@ function render() {
                         </div>
 
                         <div class="space-y-4">
-                            <div>
+                            <div class="relative">
                                 <label class="block text-sm font-semibold text-gray-700 mb-2">Destinataire *</label>
-                                <select onchange="state.composeMessageTo = this.value; render();"
-                                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
-                                    <option value="">-- Sélectionner un utilisateur --</option>
-                                    ${state.allUsers.map(user => `
-                                        <option value="${user.username}" ${state.composeMessageTo === user.username ? 'selected' : ''}>
-                                            ${user.nom} (${user.username}) - ${user.departement}
-                                        </option>
-                                    `).join('')}
-                                </select>
+                                <input type="text"
+                                       value="${state.selectedUser ? `${state.selectedUser.nom} (${state.selectedUser.username})${state.selectedUser.niveau !== 1 ? ` - ${state.selectedUser.departement}` : ''}` : state.userSearchTerm}"
+                                       oninput="handleUserSearch(this.value)"
+                                       onfocus="state.showUserDropdown = true; render();"
+                                       placeholder="Rechercher un utilisateur (nom, prénom, username)..."
+                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition"
+                                       autocomplete="off">
+
+                                ${state.showUserDropdown && state.userSearchTerm && getFilteredUsers().length > 0 ? `
+                                    <div class="absolute z-50 w-full mt-2 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                        ${getFilteredUsers().map(user => `
+                                            <div onclick="selectUser('${user.username}')"
+                                                 class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0">
+                                                <div class="font-semibold text-gray-800">${user.nom}</div>
+                                                <div class="text-sm text-gray-600">
+                                                    <span class="font-mono bg-gray-100 px-2 py-1 rounded">@${user.username}</span>
+                                                    ${user.niveau !== 1 ? `<span class="ml-2">• ${user.departement}</span>` : '<span class="ml-2 text-blue-600">• Admin Principal</span>'}
+                                                </div>
+                                                <div class="text-xs text-gray-500 mt-1">Niveau ${user.niveau} - ${user.role}</div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : ''}
                             </div>
 
                             <div>
@@ -2353,6 +3054,36 @@ function render() {
     `;
 }
 
+// Fonction pour afficher/masquer le mot de passe
+function togglePasswordVisibility(inputId) {
+    const input = document.getElementById(inputId);
+    const icon = document.getElementById(inputId + '_icon');
+
+    if (!input || !icon) return;
+
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.textContent = '🙈'; // Œil barré
+    } else {
+        input.type = 'password';
+        icon.textContent = '👁️'; // Œil ouvert
+    }
+}
+
 // Initialisation
-render();
-loadRolesAndDepartements(); // Charger les rôles et départements au démarrage
+async function initApp() {
+    // Afficher le loader de vérification de session
+    render();
+
+    // Restaurer la session si elle existe
+    const sessionRestored = await restoreSession();
+
+    // Afficher l'interface appropriée (connecté ou page de connexion)
+    render();
+
+    // Charger les rôles et départements
+    await loadRolesAndDepartements();
+}
+
+// Démarrer l'application
+initApp();

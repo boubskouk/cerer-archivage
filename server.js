@@ -11,7 +11,9 @@ const cors = require('cors');
 const { MongoClient, ObjectId } = require('mongodb');
 const os = require('os');
 const path = require('path');
+const fs = require('fs');
 const bcrypt = require('bcrypt'); // SÉCURITÉ: Hachage des mots de passe
+const OfficeEditor = require('./office-editor'); // Module d'édition Office
 
 const app = express();
 
@@ -107,41 +109,28 @@ async function generateDocumentId() {
 // ============================================
 
 // Vérifier si un utilisateur peut accéder à un document
+// ✅ NOUVELLE LOGIQUE : Si le document est dans la liste accessible, l'utilisateur peut l'ouvrir
 async function canAccessDocument(userId, documentId) {
     const user = await usersCollection.findOne({ username: userId });
     const document = await documentsCollection.findOne({ _id: new ObjectId(documentId) });
 
     if (!user || !document) return false;
 
-    // Si c'est le créateur
-    if (document.idUtilisateur === userId) return true;
+    // Récupérer tous les documents accessibles pour cet utilisateur
+    const accessibleDocs = await getAccessibleDocuments(userId);
 
-    // ✅ NOUVEAU: Vérifier si le document a été partagé avec cet utilisateur
-    if (document.sharedWith && document.sharedWith.includes(userId)) {
-        console.log(`📤 Document partagé: ${userId} accède au document de ${document.idUtilisateur}`);
+    // Vérifier si le document demandé est dans la liste des documents accessibles
+    const isAccessible = accessibleDocs.some(doc =>
+        doc._id.toString() === documentId.toString()
+    );
+
+    if (isAccessible) {
+        console.log(`✅ ${userId} peut accéder au document ${documentId} (présent dans sa liste accessible)`);
         return true;
     }
 
-    // Récupérer les rôles
-    const userRole = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
-    const docCreatorUser = await usersCollection.findOne({ username: document.idUtilisateur });
-
-    if (!docCreatorUser) return true; // Document orphelin
-
-    const docCreatorRole = await rolesCollection.findOne({ _id: new ObjectId(docCreatorUser.idRole) });
-
-    // Vérifier le même département
-    if (!user.idDepartement.equals(document.idDepartement)) return false;
-
-    // ✅ Partage horizontal - même niveau, même département
-    if (userRole.niveau === docCreatorRole.niveau) {
-        console.log(`🤝 Partage horizontal niveau ${userRole.niveau}: ${userId} accède au document de ${document.idUtilisateur}`);
-        return true;
-    }
-
-    // Règle hiérarchique classique: niveau supérieur peut voir niveau inférieur
-    // (niveau plus bas = plus de droits)
-    return userRole.niveau < docCreatorRole.niveau;
+    console.log(`❌ ${userId} ne peut PAS accéder au document ${documentId} (absent de sa liste accessible)`);
+    return false;
 }
 
 // Récupérer les documents accessibles pour un utilisateur
@@ -164,33 +153,27 @@ async function getAccessibleDocuments(userId) {
         return accessibleDocs;
     }
 
-    // ✅ NIVEAU 2 : Voit TOUS les documents de son département
-    if (userRole.niveau === 2) {
+    // ✅ NIVEAU 2 et 3 : Voient UNIQUEMENT les documents de leur département
+    if (userRole.niveau === 2 || userRole.niveau === 3) {
+        // Vérifier que l'utilisateur a un département
+        if (!user.idDepartement) {
+            console.log(`⚠️ Utilisateur niveau ${userRole.niveau} sans département: Aucun document accessible`);
+            return [];
+        }
+
         // Tous les documents du même département
         const deptDocs = await documentsCollection.find({
             idDepartement: user.idDepartement
         }).toArray();
 
-        // + Documents partagés avec lui
+        // + Documents partagés avec lui depuis d'autres départements
         const sharedDocs = await documentsCollection.find({
             sharedWith: userId,
-            idDepartement: { $ne: user.idDepartement } // Éviter les doublons
+            idDepartement: { $ne: user.idDepartement } // Documents partagés d'autres départements
         }).toArray();
 
         accessibleDocs = [...deptDocs, ...sharedDocs];
-        console.log(`✅ NIVEAU 2: Accès aux documents de son département (${deptDocs.length}) + partagés (${sharedDocs.length})`);
-        return accessibleDocs;
-    }
-
-    // ✅ NIVEAU 3 : Voit UNIQUEMENT ses propres documents (PAS de documents partagés)
-    if (userRole.niveau === 3) {
-        // Uniquement ses propres documents
-        const myDocs = await documentsCollection.find({
-            idUtilisateur: userId
-        }).toArray();
-
-        accessibleDocs = myDocs;
-        console.log(`✅ NIVEAU 3: Accès uniquement à ses propres documents (${myDocs.length})`);
+        console.log(`✅ NIVEAU ${userRole.niveau}: Accès aux documents de son département (${deptDocs.length}) + partagés d'autres départements (${sharedDocs.length})`);
         return accessibleDocs;
     }
 
@@ -295,63 +278,23 @@ async function initializeDefaultData() {
         }
     }
     
-    // 2. DÉPARTEMENTS
-    const defaultDepartements = [
-        { nom: 'Direction', description: 'Direction générale' },
-        { nom: 'Comptabilité', description: 'Service comptabilité' },
-        { nom: 'Ressources Humaines', description: 'Service RH' },
-        { nom: 'Technique', description: 'Service technique' }
-    ];
-    
-    for (const dept of defaultDepartements) {
-        const exists = await departementsCollection.findOne({ nom: dept.nom });
-        if (!exists) {
-            await departementsCollection.insertOne(dept);
-            console.log(`✅ Département créé: ${dept.nom}`);
-        }
-    }
-    
+    // 2. DÉPARTEMENTS - Désactivé (aucun département par défaut)
+    // Les départements seront créés manuellement selon les besoins
+
     // 3. UTILISATEURS
     const primaryRole = await rolesCollection.findOne({ libelle: 'primaire' });
     const secondaryRole = await rolesCollection.findOne({ libelle: 'secondaire' });
     const tertiaryRole = await rolesCollection.findOne({ libelle: 'tertiaire' });
-    
-    const directionDept = await departementsCollection.findOne({ nom: 'Direction' });
-    const comptaDept = await departementsCollection.findOne({ nom: 'Comptabilité' });
-    
-    // ✅ CORRECTION: Utiliser bcrypt.hash() directement
+
+    // ✅ Utilisateur par défaut: JBK uniquement (sans département)
     const defaultUsers = [
-        { 
-            username: 'fatima', 
-            password: await bcrypt.hash('1234', 10),
-            nom: 'Fatima',
-            email: 'fatima@cerer.sn',
-            idRole: primaryRole._id,
-            idDepartement: directionDept._id
-        },
         {
-            username: 'awa',
-            password: await bcrypt.hash('5746', 10),
-            nom: 'Awa',
-            email: 'awa@cerer.sn',
-            idRole: primaryRole._id, // ✅ Niveau 1 (Primaire)
-            idDepartement: directionDept._id
-        },
-        { 
-            username: 'deguene', 
-            password: await bcrypt.hash('3576', 10),
-            nom: 'Deguene',
-            email: 'deguene@cerer.sn',
-            idRole: tertiaryRole._id,
-            idDepartement: comptaDept._id
-        },
-        { 
-            username: 'jbk', 
+            username: 'jbk',
             password: await bcrypt.hash('0811', 10),
             nom: 'JBK',
             email: 'jbk@cerer.sn',
             idRole: primaryRole._id,
-            idDepartement: comptaDept._id
+            idDepartement: null // Pas de département par défaut
         }
     ];
     
@@ -462,7 +405,7 @@ app.post('/api/login', async (req, res) => {
         
         // Récupérer les infos complètes
         const role = await rolesCollection.findOne({ _id: user.idRole });
-        const departement = await departementsCollection.findOne({ _id: user.idDepartement });
+        const departement = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
 
         res.json({
             success: true,
@@ -473,12 +416,56 @@ app.post('/api/login', async (req, res) => {
                 email: user.email,
                 role: role ? role.libelle : 'Non défini',
                 niveau: role ? role.niveau : 0,
-                departement: departement ? departement.nom : 'Non défini'
+                departement: departement ? departement.nom : 'Aucun (Admin Principal)'
             }
         });
         
     } catch (error) {
         console.error('Erreur login:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Vérifier la session (pour restaurer la session après un refresh)
+app.post('/api/verify-session', async (req, res) => {
+    try {
+        const { username } = req.body;
+
+        if (!username) {
+            return res.status(400).json({
+                success: false,
+                message: 'Username requis'
+            });
+        }
+
+        // Vérifier que l'utilisateur existe toujours
+        const user = await usersCollection.findOne({ username });
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Session invalide'
+            });
+        }
+
+        // Récupérer les infos complètes
+        const role = await rolesCollection.findOne({ _id: user.idRole });
+        const departement = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
+
+        res.json({
+            success: true,
+            user: {
+                username: user.username,
+                nom: user.nom,
+                email: user.email,
+                role: role ? role.libelle : 'Non défini',
+                niveau: role ? role.niveau : 0,
+                departement: departement ? departement.nom : 'Aucun (Admin Principal)'
+            }
+        });
+
+    } catch (error) {
+        console.error('Erreur vérification session:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
@@ -506,29 +493,43 @@ app.post('/api/register', async (req, res) => {
         // Rôle et département par défaut si non spécifiés
         let roleId = idRole;
         let deptId = idDepartement;
-        
+
         if (!roleId) {
             const defaultRole = await rolesCollection.findOne({ libelle: 'tertiaire' });
             roleId = defaultRole._id;
         }
-        
-        if (!deptId) {
+
+        // Vérifier le niveau du rôle pour déterminer si un département est nécessaire
+        const selectedRole = await rolesCollection.findOne({ _id: new ObjectId(roleId) });
+        const isNiveau1 = selectedRole && selectedRole.niveau === 1;
+
+        // Pour les utilisateurs de niveau 1, pas de département
+        if (!isNiveau1 && !deptId) {
             const defaultDept = await departementsCollection.findOne({ nom: 'Direction' });
             deptId = defaultDept._id;
         }
-        
+
         // SÉCURITÉ: Hacher le mot de passe avec bcrypt (10 rounds)
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        await usersCollection.insertOne({
+        // Construire l'objet utilisateur selon le niveau
+        const newUser = {
             username,
             password: hashedPassword, // ✅ Mot de passe sécurisé
             nom,
             email,
             idRole: new ObjectId(roleId),
-            idDepartement: new ObjectId(deptId),
             dateCreation: new Date()
-        });
+        };
+
+        // Ajouter le département seulement si ce n'est pas un niveau 1
+        if (!isNiveau1 && deptId) {
+            newUser.idDepartement = new ObjectId(deptId);
+        } else {
+            newUser.idDepartement = null; // Niveau 1 : pas de département
+        }
+
+        await usersCollection.insertOne(newUser);
         
         // Créer les catégories par défaut
         const defaultCategories = [
@@ -564,7 +565,7 @@ app.get('/api/users/:username', async (req, res) => {
         }
 
         const role = await rolesCollection.findOne({ _id: user.idRole });
-        const departement = await departementsCollection.findOne({ _id: user.idDepartement });
+        const departement = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
 
         res.json({
             success: true,
@@ -574,7 +575,7 @@ app.get('/api/users/:username', async (req, res) => {
                 email: user.email,
                 role: role.libelle,
                 roleNiveau: role.niveau,
-                departement: departement.nom,
+                departement: departement ? departement.nom : 'Aucun (Admin Principal)',
                 idRole: user.idRole,
                 idDepartement: user.idDepartement
             }
@@ -592,16 +593,24 @@ app.put('/api/users/:username', async (req, res) => {
         const { username } = req.params;
         const { nom, email, idRole, idDepartement } = req.body;
 
-        if (!nom || !email || !idRole || !idDepartement) {
-            return res.status(400).json({ success: false, message: 'Données manquantes' });
+        if (!nom || !email || !idRole) {
+            return res.status(400).json({ success: false, message: 'Nom, email et rôle sont requis' });
         }
 
-        // Vérifier que le rôle et le département existent
+        // Vérifier que le rôle existe
         const role = await rolesCollection.findOne({ _id: new ObjectId(idRole) });
-        const departement = await departementsCollection.findOne({ _id: new ObjectId(idDepartement) });
+        if (!role) {
+            return res.status(404).json({ success: false, message: 'Rôle non trouvé' });
+        }
 
-        if (!role || !departement) {
-            return res.status(404).json({ success: false, message: 'Rôle ou département non trouvé' });
+        // Vérifier que le département existe si fourni
+        let departementId = null;
+        if (idDepartement) {
+            const departement = await departementsCollection.findOne({ _id: new ObjectId(idDepartement) });
+            if (!departement) {
+                return res.status(404).json({ success: false, message: 'Département non trouvé' });
+            }
+            departementId = new ObjectId(idDepartement);
         }
 
         await usersCollection.updateOne(
@@ -611,7 +620,7 @@ app.put('/api/users/:username', async (req, res) => {
                     nom,
                     email,
                     idRole: new ObjectId(idRole),
-                    idDepartement: new ObjectId(idDepartement),
+                    idDepartement: departementId,
                     roleNiveau: role.niveau,
                     updatedAt: new Date()
                 }
@@ -736,11 +745,11 @@ app.post('/api/documents', async (req, res) => {
 
         // Récupérer le rôle et le département de l'utilisateur
         const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
-        const departement = await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) });
+        const departement = user.idDepartement ? await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) }) : null;
 
         // Déterminer le département d'archivage (celui sélectionné ou celui de l'utilisateur par défaut)
         const idDeptArchivage = departementArchivage || user.idDepartement;
-        const deptArchivage = await departementsCollection.findOne({ _id: new ObjectId(idDeptArchivage) });
+        const deptArchivage = idDeptArchivage ? await departementsCollection.findOne({ _id: new ObjectId(idDeptArchivage) }) : null;
 
         // Générer l'ID unique du document
         const idDocument = await generateDocumentId();
@@ -844,7 +853,7 @@ app.get('/api/documents/:userId/:docId', async (req, res) => {
         const user = await usersCollection.findOne({ username: userId });
         if (user) {
             const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
-            const departement = await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) });
+            const departement = user.idDepartement ? await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) }) : null;
 
             const consultationInfo = {
                 utilisateur: userId,
@@ -1009,7 +1018,18 @@ app.post('/api/documents/:userId/:docId/share', async (req, res) => {
         }
 
         const documentOwner = await usersCollection.findOne({ username: document.idUtilisateur });
-        const sameDepartment = documentOwner && documentOwner.idDepartement.toString() === user.idDepartement.toString();
+
+        // Vérifier le rôle de l'utilisateur pour voir si c'est un niveau 1
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        const isNiveau1 = userRole && userRole.niveau === 1;
+
+        // Admin niveau 1 a accès à tout
+        const sameDepartment = isNiveau1 || (
+            documentOwner &&
+            user.idDepartement &&
+            documentOwner.idDepartement &&
+            documentOwner.idDepartement.toString() === user.idDepartement.toString()
+        );
         const hasSharedAccess = document.sharedWith && document.sharedWith.includes(userId);
 
         if (!sameDepartment && !hasSharedAccess) {
@@ -1194,14 +1214,14 @@ app.get('/api/users', async (req, res) => {
         // Enrichir avec les informations du rôle et département
         const usersWithInfo = await Promise.all(allUsers.map(async (user) => {
             const role = await rolesCollection.findOne({ _id: user.idRole });
-            const dept = await departementsCollection.findOne({ _id: user.idDepartement });
+            const dept = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
             return {
                 username: user.username,
                 nom: user.nom,
                 email: user.email,
                 role: role ? role.libelle : 'Non défini',
                 niveau: role ? role.niveau : null,
-                departement: dept ? dept.nom : 'Non défini',
+                departement: dept ? dept.nom : 'Aucun (Admin Principal)',
                 idRole: user.idRole,
                 idDepartement: user.idDepartement
             };
@@ -1224,20 +1244,23 @@ app.get('/api/users-for-sharing/:userId', async (req, res) => {
             username: { $ne: userId }
         }).toArray();
 
-        // Enrichir avec les informations du département
-        const usersWithDept = await Promise.all(allUsers.map(async (user) => {
-            const dept = await departementsCollection.findOne({ _id: user.idDepartement });
+        // Enrichir avec les informations du rôle et département
+        const usersWithInfo = await Promise.all(allUsers.map(async (user) => {
+            const role = await rolesCollection.findOne({ _id: user.idRole });
+            const dept = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
             return {
                 username: user.username,
                 nom: user.nom,
                 email: user.email,
-                departement: dept ? dept.libelle : 'Non défini'
+                role: role ? role.libelle : 'Non défini',
+                niveau: role ? role.niveau : 0,
+                departement: dept ? dept.nom : 'Aucun'
             };
         }));
 
         res.json({
             success: true,
-            users: usersWithDept
+            users: usersWithInfo
         });
 
     } catch (error) {
@@ -2701,6 +2724,275 @@ app.get('/api/share-history/:userId', async (req, res) => {
     } catch (error) {
         console.error('Erreur récupération historique partages utilisateur:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTE POUR SERVIR LES FICHIERS OFFICE (Visualiseur)
+// ============================================
+app.get('/api/office-file/:userId/:docId', async (req, res) => {
+    try {
+        const { userId, docId } = req.params;
+
+        // Vérifier les permissions
+        const canAccess = await canAccessDocument(userId, docId);
+        if (!canAccess) {
+            return res.status(403).send('Accès refusé à ce document');
+        }
+
+        // Récupérer le document
+        const document = await documentsCollection.findOne({
+            _id: new ObjectId(docId)
+        });
+
+        if (!document) {
+            return res.status(404).send('Document non trouvé');
+        }
+
+        // Extraire le contenu base64
+        const base64Data = document.contenu.split(',')[1] || document.contenu;
+        const fileBuffer = Buffer.from(base64Data, 'base64');
+
+        // Définir le Content-Type selon le type de fichier
+        let contentType = document.type;
+        const extension = document.nomFichier.split('.').pop().toLowerCase();
+
+        // Mapper les extensions aux Content-Types corrects
+        const contentTypeMap = {
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls': 'application/vnd.ms-excel',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'ppt': 'application/vnd.ms-powerpoint',
+            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'pdf': 'application/pdf'
+        };
+
+        if (contentTypeMap[extension]) {
+            contentType = contentTypeMap[extension];
+        }
+
+        // Définir les en-têtes pour permettre le téléchargement ou la visualisation
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(document.nomFichier)}"`);
+        res.setHeader('Content-Length', fileBuffer.length);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+
+        res.send(fileBuffer);
+
+        console.log(`📄 Fichier Office servi: ${document.nomFichier} pour ${userId}`);
+
+    } catch (error) {
+        console.error('Erreur lors du service du fichier Office:', error);
+        res.status(500).send('Erreur serveur');
+    }
+});
+
+// ============================================
+// ÉDITION DE FICHIERS OFFICE
+// ============================================
+
+// Route pour créer un rapport Excel depuis des données
+app.post('/api/office/create-excel', async (req, res) => {
+    try {
+        const { data, fileName, sheetName, headers } = req.body;
+
+        if (!data || !Array.isArray(data)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Données invalides'
+            });
+        }
+
+        // Créer le fichier dans temp
+        const tempDir = path.join(__dirname, 'temp');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const outputPath = path.join(tempDir, fileName || `rapport-${Date.now()}.xlsx`);
+
+        await OfficeEditor.createExcel(outputPath, data, {
+            sheetName: sheetName || 'Données',
+            headers
+        });
+
+        // Lire le fichier créé
+        const fileBuffer = fs.readFileSync(outputPath);
+        const base64Content = fileBuffer.toString('base64');
+
+        // Nettoyer le fichier temporaire
+        fs.unlinkSync(outputPath);
+
+        res.json({
+            success: true,
+            fileName: fileName || `rapport-${Date.now()}.xlsx`,
+            content: base64Content,
+            size: fileBuffer.length
+        });
+
+    } catch (error) {
+        console.error('Erreur création Excel:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la création du fichier Excel'
+        });
+    }
+});
+
+// Route pour éditer un fichier Excel existant
+app.post('/api/office/edit-excel/:docId', async (req, res) => {
+    try {
+        const { docId } = req.params;
+        const { cellUpdates } = req.body;
+
+        if (!cellUpdates || typeof cellUpdates !== 'object') {
+            return res.status(400).json({
+                success: false,
+                message: 'Mises à jour invalides'
+            });
+        }
+
+        // Récupérer le document
+        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé'
+            });
+        }
+
+        // Créer un fichier temporaire depuis le contenu base64
+        const tempDir = path.join(__dirname, 'temp');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const inputPath = path.join(tempDir, `${docId}-input.xlsx`);
+        const outputPath = path.join(tempDir, `${docId}-output.xlsx`);
+
+        const buffer = Buffer.from(document.contenu, 'base64');
+        fs.writeFileSync(inputPath, buffer);
+
+        // Éditer le fichier
+        await OfficeEditor.editExcel(inputPath, outputPath, cellUpdates);
+
+        // Lire le fichier modifié
+        const editedBuffer = fs.readFileSync(outputPath);
+        const base64Content = editedBuffer.toString('base64');
+
+        // Mettre à jour le document dans la base de données
+        await documentsCollection.updateOne(
+            { _id: new ObjectId(docId) },
+            {
+                $set: {
+                    contenu: base64Content,
+                    taille: editedBuffer.length,
+                    dateModification: new Date()
+                }
+            }
+        );
+
+        // Nettoyer les fichiers temporaires
+        fs.unlinkSync(inputPath);
+        fs.unlinkSync(outputPath);
+
+        res.json({
+            success: true,
+            message: 'Document Excel modifié avec succès'
+        });
+
+    } catch (error) {
+        console.error('Erreur édition Excel:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de l\'édition du fichier Excel'
+        });
+    }
+});
+
+// Route pour lire le contenu d'un fichier Excel
+app.get('/api/office/read-excel/:docId', async (req, res) => {
+    try {
+        const { docId } = req.params;
+
+        // Récupérer le document
+        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé'
+            });
+        }
+
+        // Créer un fichier temporaire
+        const tempDir = path.join(__dirname, 'temp');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const tempPath = path.join(tempDir, `${docId}.xlsx`);
+        const buffer = Buffer.from(document.contenu, 'base64');
+        fs.writeFileSync(tempPath, buffer);
+
+        // Lire les données
+        const data = await OfficeEditor.readExcel(tempPath);
+
+        // Nettoyer
+        fs.unlinkSync(tempPath);
+
+        res.json({
+            success: true,
+            data,
+            rows: data.length
+        });
+
+    } catch (error) {
+        console.error('Erreur lecture Excel:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la lecture du fichier Excel'
+        });
+    }
+});
+
+// Route pour obtenir les informations d'un fichier Office
+app.get('/api/office/info/:docId', async (req, res) => {
+    try {
+        const { docId } = req.params;
+
+        // Récupérer le document
+        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé'
+            });
+        }
+
+        const info = {
+            name: document.nomFichier,
+            size: document.taille,
+            sizeKB: (document.taille / 1024).toFixed(2),
+            sizeMB: (document.taille / (1024 * 1024)).toFixed(2),
+            extension: path.extname(document.nomFichier),
+            type: OfficeEditor.getFileType(path.extname(document.nomFichier)),
+            created: document.dateAjout,
+            modified: document.dateModification || document.dateAjout
+        };
+
+        res.json({
+            success: true,
+            info
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération info:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la récupération des informations'
+        });
     }
 });
 

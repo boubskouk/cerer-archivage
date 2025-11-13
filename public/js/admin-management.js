@@ -4,6 +4,54 @@
 
 // ===== GESTION DES UTILISATEURS =====
 
+async function createUser() {
+    const username = document.getElementById('new_user_username').value.trim();
+    const password = document.getElementById('new_user_password').value;
+    const nom = document.getElementById('new_user_nom').value.trim();
+    const email = document.getElementById('new_user_email').value.trim();
+    const idRole = document.getElementById('new_user_role').value;
+    const idDepartement = document.getElementById('new_user_dept').value;
+
+    if (!username || !password || !nom || !email || !idRole) {
+        showNotification('❌ Tous les champs sont requis', 'error');
+        return;
+    }
+
+    if (username.length < 3) {
+        showNotification('❌ Le nom d\'utilisateur doit contenir au moins 3 caractères', 'error');
+        return;
+    }
+
+    if (password.length < 4) {
+        showNotification('❌ Le mot de passe doit contenir au moins 4 caractères', 'error');
+        return;
+    }
+
+    try {
+        await apiCall('/register', 'POST', {
+            username,
+            password,
+            nom,
+            email,
+            idRole,
+            idDepartement: idDepartement || null
+        });
+
+        await toggleUsersManagement(); // Recharger la liste
+        showNotification('✅ Utilisateur créé avec succès');
+
+        // Réinitialiser le formulaire
+        document.getElementById('new_user_username').value = '';
+        document.getElementById('new_user_password').value = '';
+        document.getElementById('new_user_nom').value = '';
+        document.getElementById('new_user_email').value = '';
+        document.getElementById('new_user_role').value = '';
+        document.getElementById('new_user_dept').value = '';
+    } catch (error) {
+        console.error('Erreur création utilisateur:', error);
+    }
+}
+
 async function deleteUser(username) {
     const confirmed = await customConfirm({
         title: 'Supprimer l\'utilisateur',
@@ -45,8 +93,8 @@ async function saveEditUser() {
     const idRole = document.getElementById('edit_user_role').value;
     const idDepartement = document.getElementById('edit_user_dept').value;
 
-    if (!nom || !email || !idRole || !idDepartement) {
-        showNotification('❌ Tous les champs sont requis', 'error');
+    if (!nom || !email || !idRole) {
+        showNotification('❌ Nom, email et rôle sont requis', 'error');
         return;
     }
 
@@ -55,7 +103,7 @@ async function saveEditUser() {
             nom,
             email,
             idRole,
-            idDepartement
+            idDepartement: idDepartement || null
         });
         await toggleUsersManagement(); // Recharger
         state.editingUser = null;
@@ -212,6 +260,7 @@ function renderUsersManagement() {
                                     `).join('')}
                                 </select>
                                 <select id="edit_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                    <option value="" ${!user.idDepartement ? 'selected' : ''}>-- Aucun département --</option>
                                     ${state.departements.map(dept => `
                                         <option value="${dept._id}" ${user.idDepartement === dept._id ? 'selected' : ''}>
                                             ${dept.nom}
@@ -275,6 +324,52 @@ function renderUsersManagement() {
                             </div>
                         `}
                     `).join('')}
+                </div>
+
+                <!-- Formulaire d'ajout d'utilisateur -->
+                <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-xl border-2 border-purple-300 mb-4">
+                    <h3 class="font-bold text-gray-800 mb-3">➕ Créer un nouvel utilisateur</h3>
+                    <div class="space-y-3">
+                        <input id="new_user_username" type="text" placeholder="Nom d'utilisateur (3+ caractères)"
+                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+
+                        <div class="relative">
+                            <input id="new_user_password" type="password" placeholder="Mot de passe (4+ caractères)"
+                                   class="w-full px-3 py-2 pr-10 border-2 rounded-lg input-modern text-sm">
+                            <button type="button" onclick="togglePasswordVisibility('new_user_password')"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 text-sm">
+                                <span id="new_user_password_icon">👁️</span>
+                            </button>
+                        </div>
+
+                        <input id="new_user_nom" type="text" placeholder="Nom complet"
+                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+
+                        <input id="new_user_email" type="email" placeholder="Email"
+                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+
+                        <select id="new_user_role" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                            <option value="">-- Sélectionner un rôle --</option>
+                            ${state.roles.map(role => `
+                                <option value="${role._id}">
+                                    ${role.nom} (Niveau ${role.niveau})
+                                </option>
+                            `).join('')}
+                        </select>
+
+                        <select id="new_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                            <option value="">-- Sélectionner un département (optionnel) --</option>
+                            ${state.departements.map(dept => `
+                                <option value="${dept._id}">
+                                    ${dept.nom}
+                                </option>
+                            `).join('')}
+                        </select>
+
+                        <button onclick="createUser()" class="w-full px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition font-medium">
+                            ➕ Créer l'utilisateur
+                        </button>
+                    </div>
                 </div>
 
                 <button onclick="toggleUsersManagement()" class="w-full px-6 py-3 bg-gradient-to-br from-gray-200 to-gray-300 rounded-xl hover:shadow-md transition font-medium">
@@ -380,11 +475,12 @@ function renderRolesManagement() {
 function renderAdvancedStats() {
     if (!state.showAdvancedStats) return '';
 
-    // Calculer les statistiques
+    // Calculer les statistiques détaillées
     const totalDocs = state.documents.length;
     const docsByCategory = {};
     const docsByDepartment = {};
     const docsByUser = {};
+    const docsByMonth = {};
 
     state.documents.forEach(doc => {
         // Par catégorie
@@ -399,113 +495,359 @@ function renderAdvancedStats() {
         // Par utilisateur
         const userName = doc.idUtilisateur || 'Inconnu';
         docsByUser[userName] = (docsByUser[userName] || 0) + 1;
+
+        // Par mois (si date disponible)
+        if (doc.dateCreation) {
+            const date = new Date(doc.dateCreation);
+            const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            docsByMonth[monthYear] = (docsByMonth[monthYear] || 0) + 1;
+        }
     });
 
     const totalUsers = state.allUsersForManagement.length || 0;
-    const totalCategories = state.categories.length;
-    const totalDepartments = state.departements.length;
+    const totalCategories = Object.keys(docsByCategory).length;
+    const totalDepartments = Object.keys(docsByDepartment).length;
+
+    // Calculer les moyennes
+    const docsPerUser = totalUsers > 0 ? (totalDocs / totalUsers).toFixed(1) : 0;
+    const docsPerCategory = totalCategories > 0 ? (totalDocs / totalCategories).toFixed(1) : 0;
+    const docsPerDepartment = totalDepartments > 0 ? (totalDocs / totalDepartments).toFixed(1) : 0;
+
+    // Trouver les top contributeurs
+    const topUser = Object.entries(docsByUser).sort((a, b) => b[1] - a[1])[0];
+    const topCategory = Object.entries(docsByCategory).sort((a, b) => b[1] - a[1])[0];
+    const topDepartment = Object.entries(docsByDepartment).sort((a, b) => b[1] - a[1])[0];
+
+    // Statistiques mensuelles (derniers 6 mois)
+    const monthsArray = Object.entries(docsByMonth).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6);
+
+    // État de l'onglet actuel (si pas défini, mettre 'vue-ensemble')
+    if (!window.currentStatsTab) window.currentStatsTab = 'vue-ensemble';
 
     return `
         <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
              onclick="if(event.target === this) toggleAdvancedStats()">
             <div class="modal-glass rounded-2xl p-8 max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
-                <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-green-600 to-teal-600 bg-clip-text text-transparent">📊 Statistiques avancées</h2>
 
-                <!-- Statistiques générales -->
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                    <div class="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-xl text-white shadow-lg">
-                        <p class="text-sm opacity-90">Total Documents</p>
-                        <p class="text-3xl font-bold mt-1">${totalDocs}</p>
-                    </div>
-                    <div class="bg-gradient-to-br from-purple-500 to-purple-600 p-4 rounded-xl text-white shadow-lg">
-                        <p class="text-sm opacity-90">Utilisateurs</p>
-                        <p class="text-3xl font-bold mt-1">${totalUsers}</p>
-                    </div>
-                    <div class="bg-gradient-to-br from-green-500 to-green-600 p-4 rounded-xl text-white shadow-lg">
-                        <p class="text-sm opacity-90">Catégories</p>
-                        <p class="text-3xl font-bold mt-1">${totalCategories}</p>
-                    </div>
-                    <div class="bg-gradient-to-br from-orange-500 to-orange-600 p-4 rounded-xl text-white shadow-lg">
-                        <p class="text-sm opacity-90">Départements</p>
-                        <p class="text-3xl font-bold mt-1">${totalDepartments}</p>
-                    </div>
+                <!-- En-tête -->
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-3xl font-bold bg-gradient-to-r from-green-600 to-teal-600 bg-clip-text text-transparent">
+                        📊 Tableau de bord statistiques
+                    </h2>
+                    <button onclick="toggleAdvancedStats()" class="text-gray-500 hover:text-gray-700 text-2xl font-bold">
+                        ✕
+                    </button>
                 </div>
 
-                <!-- Documents par catégorie -->
-                <div class="bg-white p-6 rounded-xl shadow-md mb-6 border-2 border-blue-200">
-                    <h3 class="font-bold text-lg mb-4 text-gray-800">📁 Documents par catégorie</h3>
-                    <div class="space-y-2">
-                        ${Object.entries(docsByCategory).map(([cat, count]) => {
-                            const percentage = (count / totalDocs * 100).toFixed(1);
-                            return `
-                                <div>
-                                    <div class="flex justify-between mb-1">
-                                        <span class="text-sm font-medium text-gray-700">${cat}</span>
-                                        <span class="text-sm font-bold text-gray-900">${count} (${percentage}%)</span>
+                <!-- Onglets de navigation -->
+                <div class="flex gap-2 mb-6 border-b-2 border-gray-200 overflow-x-auto">
+                    <button onclick="window.currentStatsTab='vue-ensemble'; render();"
+                            class="px-4 py-2 font-medium whitespace-nowrap transition ${window.currentStatsTab === 'vue-ensemble' ? 'border-b-4 border-green-500 text-green-600' : 'text-gray-600 hover:text-gray-900'}">
+                        📈 Vue d'ensemble
+                    </button>
+                    <button onclick="window.currentStatsTab='categories'; render();"
+                            class="px-4 py-2 font-medium whitespace-nowrap transition ${window.currentStatsTab === 'categories' ? 'border-b-4 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'}">
+                        📁 Par catégorie
+                    </button>
+                    <button onclick="window.currentStatsTab='departements'; render();"
+                            class="px-4 py-2 font-medium whitespace-nowrap transition ${window.currentStatsTab === 'departements' ? 'border-b-4 border-orange-500 text-orange-600' : 'text-gray-600 hover:text-gray-900'}">
+                        🏢 Par département
+                    </button>
+                    <button onclick="window.currentStatsTab='utilisateurs'; render();"
+                            class="px-4 py-2 font-medium whitespace-nowrap transition ${window.currentStatsTab === 'utilisateurs' ? 'border-b-4 border-purple-500 text-purple-600' : 'text-gray-600 hover:text-gray-900'}">
+                        👥 Par utilisateur
+                    </button>
+                    <button onclick="window.currentStatsTab='tendances'; render();"
+                            class="px-4 py-2 font-medium whitespace-nowrap transition ${window.currentStatsTab === 'tendances' ? 'border-b-4 border-pink-500 text-pink-600' : 'text-gray-600 hover:text-gray-900'}">
+                        📅 Tendances mensuelles
+                    </button>
+                </div>
+
+                <!-- Contenu des onglets -->
+                <div class="stats-content">
+                    ${window.currentStatsTab === 'vue-ensemble' ? `
+                        <!-- VUE D'ENSEMBLE -->
+                        <div class="space-y-6">
+                            <!-- Métriques principales -->
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div class="bg-gradient-to-br from-blue-500 to-blue-600 p-5 rounded-xl text-white shadow-lg transform hover:scale-105 transition">
+                                    <p class="text-sm opacity-90 font-medium">📚 Total Documents</p>
+                                    <p class="text-4xl font-bold mt-2">${totalDocs}</p>
+                                </div>
+                                <div class="bg-gradient-to-br from-purple-500 to-purple-600 p-5 rounded-xl text-white shadow-lg transform hover:scale-105 transition">
+                                    <p class="text-sm opacity-90 font-medium">👥 Utilisateurs actifs</p>
+                                    <p class="text-4xl font-bold mt-2">${totalUsers}</p>
+                                </div>
+                                <div class="bg-gradient-to-br from-green-500 to-green-600 p-5 rounded-xl text-white shadow-lg transform hover:scale-105 transition">
+                                    <p class="text-sm opacity-90 font-medium">📁 Catégories utilisées</p>
+                                    <p class="text-4xl font-bold mt-2">${totalCategories}</p>
+                                </div>
+                                <div class="bg-gradient-to-br from-orange-500 to-orange-600 p-5 rounded-xl text-white shadow-lg transform hover:scale-105 transition">
+                                    <p class="text-sm opacity-90 font-medium">🏢 Départements actifs</p>
+                                    <p class="text-4xl font-bold mt-2">${totalDepartments}</p>
+                                </div>
+                            </div>
+
+                            <!-- Moyennes et insights -->
+                            <div class="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-xl border-2 border-indigo-200">
+                                <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                    <span>💡</span> Moyennes et statistiques clés
+                                </h3>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div class="bg-white p-4 rounded-lg shadow-sm">
+                                        <p class="text-sm text-gray-600 mb-1">Documents par utilisateur</p>
+                                        <p class="text-3xl font-bold text-indigo-600">${docsPerUser}</p>
+                                        <p class="text-xs text-gray-500 mt-1">en moyenne</p>
                                     </div>
-                                    <div class="w-full bg-gray-200 rounded-full h-2">
-                                        <div class="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full" style="width: ${percentage}%"></div>
+                                    <div class="bg-white p-4 rounded-lg shadow-sm">
+                                        <p class="text-sm text-gray-600 mb-1">Documents par catégorie</p>
+                                        <p class="text-3xl font-bold text-blue-600">${docsPerCategory}</p>
+                                        <p class="text-xs text-gray-500 mt-1">en moyenne</p>
+                                    </div>
+                                    <div class="bg-white p-4 rounded-lg shadow-sm">
+                                        <p class="text-sm text-gray-600 mb-1">Documents par département</p>
+                                        <p class="text-3xl font-bold text-orange-600">${docsPerDepartment}</p>
+                                        <p class="text-xs text-gray-500 mt-1">en moyenne</p>
                                     </div>
                                 </div>
-                            `;
-                        }).join('')}
-                    </div>
-                </div>
+                            </div>
 
-                <!-- Documents par département -->
-                <div class="bg-white p-6 rounded-xl shadow-md mb-6 border-2 border-green-200">
-                    <h3 class="font-bold text-lg mb-4 text-gray-800">🏢 Documents par département</h3>
-                    <div class="space-y-2">
-                        ${Object.entries(docsByDepartment).map(([dept, count]) => {
-                            const percentage = (count / totalDocs * 100).toFixed(1);
-                            return `
-                                <div>
-                                    <div class="flex justify-between mb-1">
-                                        <span class="text-sm font-medium text-gray-700">${dept}</span>
-                                        <span class="text-sm font-bold text-gray-900">${count} (${percentage}%)</span>
-                                    </div>
-                                    <div class="w-full bg-gray-200 rounded-full h-2">
-                                        <div class="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full" style="width: ${percentage}%"></div>
-                                    </div>
+                            <!-- Top contributeurs -->
+                            <div class="bg-gradient-to-br from-yellow-50 to-orange-50 p-6 rounded-xl border-2 border-yellow-200">
+                                <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                    <span>🏆</span> Top contributeurs
+                                </h3>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    ${topUser ? `
+                                        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-purple-500">
+                                            <p class="text-xs text-gray-500 mb-1">👤 Utilisateur le plus actif</p>
+                                            <p class="text-lg font-bold text-gray-800">@${topUser[0]}</p>
+                                            <p class="text-sm text-purple-600 font-semibold">${topUser[1]} documents</p>
+                                        </div>
+                                    ` : ''}
+                                    ${topCategory ? `
+                                        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500">
+                                            <p class="text-xs text-gray-500 mb-1">📁 Catégorie la plus utilisée</p>
+                                            <p class="text-lg font-bold text-gray-800">${topCategory[0]}</p>
+                                            <p class="text-sm text-blue-600 font-semibold">${topCategory[1]} documents</p>
+                                        </div>
+                                    ` : ''}
+                                    ${topDepartment ? `
+                                        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-orange-500">
+                                            <p class="text-xs text-gray-500 mb-1">🏢 Département le plus actif</p>
+                                            <p class="text-lg font-bold text-gray-800">${topDepartment[0]}</p>
+                                            <p class="text-sm text-orange-600 font-semibold">${topDepartment[1]} documents</p>
+                                        </div>
+                                    ` : ''}
                                 </div>
-                            `;
-                        }).join('')}
-                    </div>
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${window.currentStatsTab === 'categories' ? `
+                        <!-- PAR CATÉGORIE -->
+                        <div class="bg-white p-6 rounded-xl shadow-md border-2 border-blue-200">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                    <span>📁</span> Répartition des documents par catégorie
+                                </h3>
+                                <span class="text-sm text-gray-600 bg-blue-100 px-3 py-1 rounded-full font-medium">
+                                    ${totalCategories} catégories actives
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-6">
+                                Cette section montre comment vos ${totalDocs} documents sont répartis entre les différentes catégories.
+                            </p>
+                            <div class="space-y-3">
+                                ${Object.entries(docsByCategory)
+                                    .sort((a, b) => b[1] - a[1])
+                                    .map(([cat, count], index) => {
+                                        const percentage = (count / totalDocs * 100).toFixed(1);
+                                        const colors = ['blue', 'indigo', 'purple', 'pink', 'cyan', 'teal'];
+                                        const color = colors[index % colors.length];
+                                        return `
+                                            <div class="p-3 bg-gray-50 rounded-lg hover:shadow-md transition">
+                                                <div class="flex justify-between items-center mb-2">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-lg">${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '📄'}</span>
+                                                        <span class="font-semibold text-gray-800">${cat}</span>
+                                                    </div>
+                                                    <div class="text-right">
+                                                        <span class="text-lg font-bold text-${color}-600">${count}</span>
+                                                        <span class="text-sm text-gray-500 ml-2">(${percentage}%)</span>
+                                                    </div>
+                                                </div>
+                                                <div class="w-full bg-gray-200 rounded-full h-3">
+                                                    <div class="bg-gradient-to-r from-${color}-500 to-${color}-600 h-3 rounded-full transition-all duration-500"
+                                                         style="width: ${percentage}%"></div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${window.currentStatsTab === 'departements' ? `
+                        <!-- PAR DÉPARTEMENT -->
+                        <div class="bg-white p-6 rounded-xl shadow-md border-2 border-orange-200">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                    <span>🏢</span> Répartition des documents par département
+                                </h3>
+                                <span class="text-sm text-gray-600 bg-orange-100 px-3 py-1 rounded-full font-medium">
+                                    ${totalDepartments} départements actifs
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-6">
+                                Visualisez la contribution de chaque département à l'archivage des documents.
+                            </p>
+                            <div class="space-y-3">
+                                ${Object.entries(docsByDepartment)
+                                    .sort((a, b) => b[1] - a[1])
+                                    .map(([dept, count], index) => {
+                                        const percentage = (count / totalDocs * 100).toFixed(1);
+                                        const colors = ['orange', 'amber', 'yellow', 'lime', 'emerald', 'teal'];
+                                        const color = colors[index % colors.length];
+                                        return `
+                                            <div class="p-3 bg-gray-50 rounded-lg hover:shadow-md transition">
+                                                <div class="flex justify-between items-center mb-2">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-lg">${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '🏛️'}</span>
+                                                        <span class="font-semibold text-gray-800">${dept}</span>
+                                                    </div>
+                                                    <div class="text-right">
+                                                        <span class="text-lg font-bold text-${color}-600">${count}</span>
+                                                        <span class="text-sm text-gray-500 ml-2">(${percentage}%)</span>
+                                                    </div>
+                                                </div>
+                                                <div class="w-full bg-gray-200 rounded-full h-3">
+                                                    <div class="bg-gradient-to-r from-${color}-500 to-${color}-600 h-3 rounded-full transition-all duration-500"
+                                                         style="width: ${percentage}%"></div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${window.currentStatsTab === 'utilisateurs' ? `
+                        <!-- PAR UTILISATEUR -->
+                        <div class="bg-white p-6 rounded-xl shadow-md border-2 border-purple-200">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                    <span>👥</span> Classement des utilisateurs
+                                </h3>
+                                <span class="text-sm text-gray-600 bg-purple-100 px-3 py-1 rounded-full font-medium">
+                                    Top ${Math.min(15, Object.keys(docsByUser).length)} utilisateurs
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-6">
+                                Les utilisateurs les plus actifs dans l'archivage de documents. Moyenne de ${docsPerUser} documents par utilisateur.
+                            </p>
+                            <div class="space-y-3">
+                                ${Object.entries(docsByUser)
+                                    .sort((a, b) => b[1] - a[1])
+                                    .slice(0, 15)
+                                    .map(([user, count], index) => {
+                                        const percentage = (count / totalDocs * 100).toFixed(1);
+                                        const colors = ['purple', 'violet', 'fuchsia', 'pink', 'rose', 'indigo'];
+                                        const color = colors[index % colors.length];
+                                        return `
+                                            <div class="p-3 bg-gray-50 rounded-lg hover:shadow-md transition">
+                                                <div class="flex justify-between items-center mb-2">
+                                                    <div class="flex items-center gap-3">
+                                                        <span class="text-xl font-bold text-gray-400 w-8 text-center">${index + 1}</span>
+                                                        <span class="text-lg">${index === 0 ? '🏆' : index === 1 ? '🥈' : index === 2 ? '🥉' : '👤'}</span>
+                                                        <span class="font-semibold text-gray-800">@${user}</span>
+                                                    </div>
+                                                    <div class="text-right">
+                                                        <span class="text-lg font-bold text-${color}-600">${count}</span>
+                                                        <span class="text-sm text-gray-500 ml-2">(${percentage}%)</span>
+                                                    </div>
+                                                </div>
+                                                <div class="w-full bg-gray-200 rounded-full h-3">
+                                                    <div class="bg-gradient-to-r from-${color}-500 to-${color}-600 h-3 rounded-full transition-all duration-500"
+                                                         style="width: ${percentage}%"></div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${window.currentStatsTab === 'tendances' ? `
+                        <!-- TENDANCES MENSUELLES -->
+                        <div class="bg-white p-6 rounded-xl shadow-md border-2 border-pink-200">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                    <span>📅</span> Évolution mensuelle de l'archivage
+                                </h3>
+                                <span class="text-sm text-gray-600 bg-pink-100 px-3 py-1 rounded-full font-medium">
+                                    Derniers ${monthsArray.length} mois
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-6">
+                                Suivi de l'activité d'archivage mois par mois. Identifiez les périodes les plus actives.
+                            </p>
+                            ${monthsArray.length > 0 ? `
+                                <div class="space-y-3">
+                                    ${monthsArray.map(([month, count], index) => {
+                                        const [year, monthNum] = month.split('-');
+                                        const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+                                        const monthName = monthNames[parseInt(monthNum) - 1];
+                                        const maxCount = Math.max(...monthsArray.map(m => m[1]));
+                                        const percentage = (count / maxCount * 100).toFixed(1);
+                                        const colors = ['pink', 'rose', 'fuchsia', 'purple', 'violet', 'indigo'];
+                                        const color = colors[index % colors.length];
+                                        return `
+                                            <div class="p-3 bg-gray-50 rounded-lg hover:shadow-md transition">
+                                                <div class="flex justify-between items-center mb-2">
+                                                    <div class="flex items-center gap-3">
+                                                        <span class="text-lg">${index === 0 ? '📌' : '📅'}</span>
+                                                        <div>
+                                                            <span class="font-semibold text-gray-800">${monthName} ${year}</span>
+                                                            ${index === 0 ? '<span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Plus récent</span>' : ''}
+                                                        </div>
+                                                    </div>
+                                                    <div class="text-right">
+                                                        <span class="text-lg font-bold text-${color}-600">${count}</span>
+                                                        <span class="text-sm text-gray-500 ml-1">docs</span>
+                                                    </div>
+                                                </div>
+                                                <div class="w-full bg-gray-200 rounded-full h-3">
+                                                    <div class="bg-gradient-to-r from-${color}-500 to-${color}-600 h-3 rounded-full transition-all duration-500"
+                                                         style="width: ${percentage}%"></div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            ` : `
+                                <div class="text-center py-8 text-gray-500">
+                                    <p class="text-lg">📭</p>
+                                    <p class="mt-2">Aucune donnée mensuelle disponible</p>
+                                </div>
+                            `}
+                        </div>
+                    ` : ''}
                 </div>
 
-                <!-- Documents par utilisateur (top 10) -->
-                <div class="bg-white p-6 rounded-xl shadow-md mb-6 border-2 border-purple-200">
-                    <h3 class="font-bold text-lg mb-4 text-gray-800">👥 Documents par utilisateur (Top 10)</h3>
-                    <div class="space-y-2">
-                        ${Object.entries(docsByUser)
-                            .sort((a, b) => b[1] - a[1])
-                            .slice(0, 10)
-                            .map(([user, count]) => {
-                                const percentage = (count / totalDocs * 100).toFixed(1);
-                                return `
-                                    <div>
-                                        <div class="flex justify-between mb-1">
-                                            <span class="text-sm font-medium text-gray-700">@${user}</span>
-                                            <span class="text-sm font-bold text-gray-900">${count} (${percentage}%)</span>
-                                        </div>
-                                        <div class="w-full bg-gray-200 rounded-full h-2">
-                                            <div class="bg-gradient-to-r from-purple-500 to-purple-600 h-2 rounded-full" style="width: ${percentage}%"></div>
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('')}
-                    </div>
+                <!-- Bouton fermer en bas -->
+                <div class="mt-6 flex gap-3">
+                    <button onclick="toggleAdvancedStats()" class="flex-1 px-6 py-3 bg-gradient-to-br from-gray-200 to-gray-300 rounded-xl hover:shadow-md transition font-medium">
+                        Fermer
+                    </button>
                 </div>
-
-                <button onclick="toggleAdvancedStats()" class="w-full px-6 py-3 bg-gradient-to-br from-gray-200 to-gray-300 rounded-xl hover:shadow-md transition font-medium">
-                    Fermer
-                </button>
             </div>
         </div>
     `;
 }
 
 // Exposer les fonctions globalement
+window.createUser = createUser;
 window.deleteUser = deleteUser;
 window.startEditUser = startEditUser;
 window.cancelEditUser = cancelEditUser;
