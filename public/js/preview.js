@@ -537,9 +537,30 @@ async function openPreview(doc) {
 
             case 'word':
             case 'word-old':
-                content = await previewWord(fullDoc.contenu);
-                previewContent.innerHTML = '';
-                previewContent.appendChild(content);
+                // Utiliser Office Online pour Word (meilleur rendu que Mammoth)
+                const wordFileUrl = `${window.location.origin}/api/office-file/${state.currentUser}/${fullDoc._id}`;
+                const wordViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(wordFileUrl)}`;
+
+                content = `
+                    <div class="h-full flex flex-col">
+                        <div class="bg-blue-50 border-b p-3">
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="text-2xl">📝</span>
+                                <div>
+                                    <span class="text-blue-800 font-medium">${fullDoc.nomFichier}</span>
+                                    <span class="text-gray-400 mx-2">•</span>
+                                    <span class="text-gray-600">Prévisualisation via Microsoft Office Online</span>
+                                </div>
+                            </div>
+                        </div>
+                        <iframe
+                            src="${wordViewerUrl}"
+                            class="flex-1 w-full border-0"
+                            frameborder="0"
+                        ></iframe>
+                    </div>
+                `;
+                previewContent.innerHTML = content;
                 break;
 
             case 'excel':
@@ -556,43 +577,27 @@ async function openPreview(doc) {
 
             case 'powerpoint':
             case 'powerpoint-old':
-                // Utiliser Google Docs Viewer pour PowerPoint
+                // Utiliser Office Online pour PowerPoint (plus fiable que Google)
                 const pptFileUrl = `${window.location.origin}/api/office-file/${state.currentUser}/${fullDoc._id}`;
-                const pptViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(pptFileUrl)}&embedded=true`;
+                const pptViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(pptFileUrl)}`;
 
                 content = `
-                    <div class="h-full flex flex-col bg-gradient-to-br from-orange-50 to-red-50">
-                        <div class="bg-white border-b p-3">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-2xl">📽️</span>
-                                    <div>
-                                        <p class="font-bold text-gray-800">${fullDoc.nomFichier}</p>
-                                        <p class="text-xs text-gray-500">Prévisualisation PowerPoint via Google Docs Viewer</p>
-                                    </div>
-                                </div>
-                                <div class="flex gap-2">
-                                    <button onclick="downloadDoc(previewState.currentDoc)" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
-                                        📥 Télécharger
-                                    </button>
-                                    ${isEditable && isEditable(fullDoc) ? `
-                                    <button onclick="openEditor(previewState.currentDoc)" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm">
-                                        ✏️ Éditer
-                                    </button>
-                                    ` : ''}
+                    <div class="h-full flex flex-col">
+                        <div class="bg-orange-50 border-b p-3">
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="text-2xl">📽️</span>
+                                <div>
+                                    <span class="text-orange-800 font-medium">${fullDoc.nomFichier}</span>
+                                    <span class="text-gray-400 mx-2">•</span>
+                                    <span class="text-gray-600">Prévisualisation via Microsoft Office Online</span>
                                 </div>
                             </div>
                         </div>
-                        <div class="flex-1 bg-white">
-                            <iframe
-                                src="${pptViewerUrl}"
-                                class="w-full h-full border-0"
-                                frameborder="0">
-                            </iframe>
-                        </div>
-                        <div class="bg-gray-100 border-t p-2 text-center text-xs text-gray-600">
-                            💡 Prévisualisation en lecture seule • Utilisez "Éditer" pour modifier
-                        </div>
+                        <iframe
+                            src="${pptViewerUrl}"
+                            class="flex-1 w-full border-0"
+                            frameborder="0"
+                        ></iframe>
                     </div>
                 `;
                 previewContent.innerHTML = content;

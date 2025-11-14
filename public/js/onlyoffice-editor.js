@@ -5,9 +5,11 @@
 // Configuration OnlyOffice
 const OnlyOfficeConfig = {
     // URL du Document Server OnlyOffice
-    // Par défaut: serveur de démonstration OnlyOffice (pour tests)
-    // En production: remplacer par votre propre serveur OnlyOffice
-    documentServerUrl: 'https://documentserver.onlyoffice.com',
+    // DÉSACTIVÉ PAR DÉFAUT : Le serveur de démo OnlyOffice n'est plus accessible
+    // Pour activer: Installez votre propre serveur OnlyOffice et décommentez la ligne ci-dessous
+    // documentServerUrl: 'http://localhost', // ou votre URL OnlyOffice
+    documentServerUrl: null, // Désactivé
+    enabled: false, // OnlyOffice désactivé par défaut
 
     // Types de documents supportés
     supportedFormats: {
@@ -43,6 +45,32 @@ function getOnlyOfficeDocType(fileName) {
 
 // Ouvrir l'éditeur OnlyOffice
 async function openOnlyOfficeEditor(doc) {
+    // Vérifier si OnlyOffice est activé
+    if (!OnlyOfficeConfig.enabled || !OnlyOfficeConfig.documentServerUrl) {
+        console.log('OnlyOffice désactivé - Utilisation des alternatives');
+
+        // Basculer vers une alternative selon le type de fichier
+        const ext = doc.nomFichier.toLowerCase().split('.').pop();
+        if (ext === 'xlsx' || ext === 'xls') {
+            // Pour Excel, utiliser l'éditeur local
+            if (typeof openLocalEditor === 'function') {
+                openLocalEditor(doc);
+            } else {
+                showNotification('OnlyOffice désactivé. Veuillez télécharger le fichier.', 'warning');
+                if (typeof downloadDoc === 'function') downloadDoc(doc);
+            }
+        } else {
+            // Pour Word/PowerPoint, proposer les alternatives
+            showNotification('OnlyOffice désactivé. Utilisation du visualiseur Microsoft Office...', 'info');
+            if (typeof openOffice365Editor === 'function') {
+                openOffice365Editor(doc);
+            } else {
+                if (typeof downloadDoc === 'function') downloadDoc(doc);
+            }
+        }
+        return;
+    }
+
     try {
         const docType = getOnlyOfficeDocType(doc.nomFichier);
 
@@ -289,6 +317,12 @@ async function initOnlyOfficeEditor(doc, docType) {
 // Charger l'API OnlyOffice dynamiquement
 function loadOnlyOfficeAPI() {
     return new Promise((resolve, reject) => {
+        // Vérifier si OnlyOffice est activé
+        if (!OnlyOfficeConfig.enabled || !OnlyOfficeConfig.documentServerUrl) {
+            reject(new Error('OnlyOffice désactivé'));
+            return;
+        }
+
         // Vérifier si déjà chargé
         if (typeof DocsAPI !== 'undefined') {
             resolve();
@@ -303,8 +337,9 @@ function loadOnlyOfficeAPI() {
         const timeout = setTimeout(() => {
             script.onerror = null;
             script.onload = null;
-            document.head.removeChild(script);
-            console.error('❌ Timeout lors du chargement OnlyOffice API');
+            if (script.parentNode) {
+                document.head.removeChild(script);
+            }
             reject(new Error('Serveur OnlyOffice non disponible (timeout)'));
         }, 10000);
 
@@ -315,16 +350,12 @@ function loadOnlyOfficeAPI() {
                 console.log('✅ OnlyOffice API chargée');
                 resolve();
             } else {
-                console.error('❌ OnlyOffice API chargée mais DocsAPI non disponible');
                 reject(new Error('OnlyOffice API non initialisée'));
             }
         };
 
         script.onerror = () => {
             clearTimeout(timeout);
-            console.error('❌ Impossible de charger OnlyOffice API');
-            console.warn('💡 Le serveur OnlyOffice de démonstration n\'est plus accessible');
-            console.warn('💡 Solutions: 1) Installer votre propre serveur OnlyOffice, 2) Utiliser les alternatives intégrées');
             reject(new Error('Serveur OnlyOffice non accessible'));
         };
 

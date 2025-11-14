@@ -10,7 +10,7 @@ const EditorConfig = {
         description: 'Éditeur collaboratif complet (nécessite serveur)',
         supports: ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp'],
         color: 'blue',
-        available: false, // Sera vérifié dynamiquement
+        available: false, // Désactivé par défaut (serveur démo non accessible)
         priority: 1
     },
     office365: {
@@ -60,26 +60,17 @@ const multiEditorState = {
 
 // Vérifier la disponibilité d'OnlyOffice
 async function checkOnlyOfficeAvailability() {
-    try {
-        if (typeof DocsAPI !== 'undefined') {
-            EditorConfig.onlyoffice.available = true;
-            return true;
-        }
+    // OnlyOffice désactivé par défaut car le serveur de démo n'est plus accessible
+    // Pour activer OnlyOffice, configurez votre propre serveur et changez available: true
 
-        // Essayer de charger OnlyOffice
-        const response = await fetch('https://documentserver.onlyoffice.com/web-apps/apps/api/documents/api.js', {
-            method: 'HEAD',
-            mode: 'no-cors'
-        });
-
-        // Si pas d'erreur, considérer comme disponible
+    if (typeof DocsAPI !== 'undefined') {
         EditorConfig.onlyoffice.available = true;
         return true;
-    } catch (error) {
-        console.warn('OnlyOffice non disponible:', error);
-        EditorConfig.onlyoffice.available = false;
-        return false;
     }
+
+    // Ne pas essayer de charger depuis le serveur de démo (génère des erreurs)
+    EditorConfig.onlyoffice.available = false;
+    return false;
 }
 
 // Obtenir les éditeurs compatibles pour un fichier
@@ -481,6 +472,37 @@ function createEditorModal(editorId, doc) {
 
 // Fonction pour remplacer openEditor par défaut
 function openEditor(doc) {
+    // Ouverture DIRECTE sans menu pour une meilleure expérience utilisateur
+    const ext = doc.nomFichier.toLowerCase().split('.').pop();
+
+    // Pour Excel : Ouvrir directement l'éditeur local (le plus rapide et performant)
+    if (ext === 'xlsx' || ext === 'xls') {
+        console.log('📊 Ouverture directe éditeur Excel local');
+        openLocalEditor(doc);
+        return;
+    }
+
+    // Pour Word : Ouvrir directement le visualiseur Microsoft Office
+    if (ext === 'docx' || ext === 'doc') {
+        console.log('📝 Ouverture directe visualiseur Word (Office Online)');
+        openOffice365Editor(doc);
+        return;
+    }
+
+    // Pour PowerPoint : Ouvrir directement le visualiseur Microsoft Office
+    if (ext === 'pptx' || ext === 'ppt') {
+        console.log('📽️ Ouverture directe visualiseur PowerPoint (Office Online)');
+        openOffice365Editor(doc);
+        return;
+    }
+
+    // Pour les autres formats : Afficher le menu de sélection
+    console.log('❓ Format non reconnu, affichage du menu');
+    showEditorSelector(doc);
+}
+
+// Fonction alternative pour afficher le menu de sélection (si besoin)
+function openEditorWithMenu(doc) {
     showEditorSelector(doc);
 }
 
