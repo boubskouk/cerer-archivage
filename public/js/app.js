@@ -743,6 +743,14 @@ function isEditableOfficeFile(fileName) {
     return ext.endsWith('.xlsx') || ext.endsWith('.xls');
 }
 
+// Vérifier si un fichier est un document Office (Word, Excel, PowerPoint)
+function isOfficeDocument(fileName) {
+    if (!fileName) return false;
+    const ext = fileName.toLowerCase().split('.').pop();
+    const officeExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp'];
+    return officeExtensions.includes(ext);
+}
+
 // Éditer un document Excel
 async function editExcelDocument(doc) {
     try {
@@ -2776,11 +2784,11 @@ function render() {
                                 <span class="text-xl">📥</span> Télécharger
                             </button>
 
-                            <!-- Éditer : Fichiers Excel uniquement -->
-                            ${state.selectedDoc && isEditableOfficeFile(state.selectedDoc.nomFichier) ? `
-                                <button onclick="editExcelDocument(state.selectedDoc)"
+                            <!-- Éditer : Fichiers Office (Word, Excel, PowerPoint) -->
+                            ${state.selectedDoc && isOfficeDocument(state.selectedDoc.nomFichier) ? `
+                                <button onclick="openEditor(state.selectedDoc)"
                                         class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
-                                    <span class="text-xl">✏️</span> Éditer Excel
+                                    <span class="text-xl">✏️</span> Éditer
                                 </button>
                             ` : ''}
 

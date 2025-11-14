@@ -87,14 +87,19 @@ async function openOnlyOfficeEditor(doc) {
                     <div class="flex items-center gap-2 text-sm">
                         <div class="flex items-center gap-1">
                             <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                            <span class="text-green-800 font-medium">OnlyOffice Éditeur</span>
+                            <span class="text-green-800 font-medium">Chargement OnlyOffice...</span>
                         </div>
-                        <span class="text-gray-400">•</span>
-                        <span class="text-gray-600">Sauvegarde automatique activée</span>
                     </div>
                 </div>
 
-                <div id="onlyoffice-editor-container" class="flex-1 bg-gray-100"></div>
+                <div id="onlyoffice-editor-container" class="flex-1 bg-gray-100">
+                    <div class="flex items-center justify-center h-full">
+                        <div class="text-center">
+                            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                            <p class="text-gray-600">Connexion au serveur OnlyOffice...</p>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="p-2 border-t bg-gray-50 text-center text-xs text-gray-500">
                     Propulsé par OnlyOffice Document Server
@@ -121,7 +126,27 @@ async function openOnlyOfficeEditor(doc) {
 
     } catch (error) {
         console.error('Erreur ouverture OnlyOffice:', error);
-        showNotification('Erreur lors de l\'ouverture de l\'éditeur OnlyOffice', 'error');
+
+        // Si OnlyOffice échoue, proposer des alternatives
+        const ext = doc.nomFichier.toLowerCase().split('.').pop();
+
+        // Fermer le modal OnlyOffice
+        closeOnlyOfficeEditor();
+
+        // Proposer une alternative selon le type de fichier
+        if (ext === 'xlsx' || ext === 'xls') {
+            showNotification('OnlyOffice non disponible. Utilisation de l\'éditeur Excel intégré...', 'info');
+            // Ouvrir avec l'éditeur Excel intégré si disponible
+            if (typeof openExcelEditor === 'function') {
+                openExcelEditor(doc);
+            } else {
+                showNotification('Aucun éditeur disponible. Veuillez télécharger le fichier.', 'error');
+                downloadDoc(doc);
+            }
+        } else {
+            showNotification('OnlyOffice non disponible. Téléchargement du fichier...', 'warning');
+            downloadDoc(doc);
+        }
     }
 }
 
@@ -274,14 +299,33 @@ function loadOnlyOfficeAPI() {
         script.src = `${OnlyOfficeConfig.documentServerUrl}/web-apps/apps/api/documents/api.js`;
         script.async = true;
 
+        // Timeout de 10 secondes
+        const timeout = setTimeout(() => {
+            script.onerror = null;
+            script.onload = null;
+            document.head.removeChild(script);
+            console.error('❌ Timeout lors du chargement OnlyOffice API');
+            reject(new Error('Serveur OnlyOffice non disponible (timeout)'));
+        }, 10000);
+
         script.onload = () => {
-            console.log('✅ OnlyOffice API chargée');
-            resolve();
+            clearTimeout(timeout);
+            // Vérifier que DocsAPI est bien défini
+            if (typeof DocsAPI !== 'undefined') {
+                console.log('✅ OnlyOffice API chargée');
+                resolve();
+            } else {
+                console.error('❌ OnlyOffice API chargée mais DocsAPI non disponible');
+                reject(new Error('OnlyOffice API non initialisée'));
+            }
         };
 
         script.onerror = () => {
+            clearTimeout(timeout);
             console.error('❌ Impossible de charger OnlyOffice API');
-            reject(new Error('OnlyOffice API non disponible'));
+            console.warn('💡 Le serveur OnlyOffice de démonstration n\'est plus accessible');
+            console.warn('💡 Solutions: 1) Installer votre propre serveur OnlyOffice, 2) Utiliser les alternatives intégrées');
+            reject(new Error('Serveur OnlyOffice non accessible'));
         };
 
         document.head.appendChild(script);

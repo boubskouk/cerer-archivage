@@ -45,13 +45,38 @@ function getFileType(mimeType, fileName) {
 
 // Convertir data URL en ArrayBuffer
 function dataURLToArrayBuffer(dataURL) {
-    const base64 = dataURL.split(',')[1];
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+    try {
+        // Vérifier que le dataURL est valide
+        if (!dataURL || typeof dataURL !== 'string') {
+            throw new Error('DataURL invalide ou manquant');
+        }
+
+        // Vérifier que c'est bien un data URL
+        if (!dataURL.startsWith('data:')) {
+            throw new Error('Le contenu doit commencer par "data:"');
+        }
+
+        const parts = dataURL.split(',');
+        if (parts.length !== 2) {
+            throw new Error('Format data URL incorrect');
+        }
+
+        const base64 = parts[1];
+        if (!base64) {
+            throw new Error('Contenu base64 manquant');
+        }
+
+        // Décoder le base64
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+    } catch (error) {
+        console.error('Erreur conversion dataURL:', error);
+        throw new Error(`Impossible de convertir le data URL: ${error.message}`);
     }
-    return bytes.buffer;
 }
 
 // Convertir data URL en Blob
@@ -279,6 +304,15 @@ async function previewExcel(dataURL) {
     }
 
     try {
+        // Vérifier que le dataURL est valide avant de continuer
+        if (!dataURL || typeof dataURL !== 'string') {
+            throw new Error('Contenu du fichier manquant ou invalide');
+        }
+
+        if (!dataURL.startsWith('data:')) {
+            throw new Error('Format de contenu incorrect (data URL attendu)');
+        }
+
         const arrayBuffer = dataURLToArrayBuffer(dataURL);
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
@@ -522,45 +556,42 @@ async function openPreview(doc) {
 
             case 'powerpoint':
             case 'powerpoint-old':
+                // Utiliser Google Docs Viewer pour PowerPoint
+                const pptFileUrl = `${window.location.origin}/api/office-file/${state.currentUser}/${fullDoc._id}`;
+                const pptViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(pptFileUrl)}&embedded=true`;
+
                 content = `
-                    <div class="flex items-center justify-center h-full bg-gradient-to-br from-orange-50 to-red-50">
-                        <div class="text-center p-8 max-w-lg">
-                            <div class="text-6xl mb-4">📽️</div>
-                            <h3 class="text-2xl font-bold text-gray-800 mb-3">Présentation PowerPoint</h3>
-                            <p class="text-gray-600 mb-6">
-                                La prévisualisation PowerPoint n'est pas disponible dans le navigateur.
-                                Vous pouvez télécharger ou éditer le fichier.
-                            </p>
-                            <div class="bg-white rounded-lg p-6 mb-6 shadow-lg">
-                                <div class="grid grid-cols-2 gap-4 text-sm text-left">
+                    <div class="h-full flex flex-col bg-gradient-to-br from-orange-50 to-red-50">
+                        <div class="bg-white border-b p-3">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-2xl">📽️</span>
                                     <div>
-                                        <p class="text-gray-500">Fichier:</p>
-                                        <p class="font-semibold text-gray-800">${fullDoc.nomFichier}</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-gray-500">Taille:</p>
-                                        <p class="font-semibold text-gray-800">${(fullDoc.taille / 1024).toFixed(2)} KB</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-gray-500">Type:</p>
-                                        <p class="font-semibold text-gray-800">PowerPoint</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-gray-500">Format:</p>
-                                        <p class="font-semibold text-gray-800">${fullDoc.nomFichier.split('.').pop().toUpperCase()}</p>
+                                        <p class="font-bold text-gray-800">${fullDoc.nomFichier}</p>
+                                        <p class="text-xs text-gray-500">Prévisualisation PowerPoint via Google Docs Viewer</p>
                                     </div>
                                 </div>
+                                <div class="flex gap-2">
+                                    <button onclick="downloadDoc(previewState.currentDoc)" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
+                                        📥 Télécharger
+                                    </button>
+                                    ${isEditable && isEditable(fullDoc) ? `
+                                    <button onclick="openEditor(previewState.currentDoc)" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm">
+                                        ✏️ Éditer
+                                    </button>
+                                    ` : ''}
+                                </div>
                             </div>
-                            <div class="flex gap-3 justify-center">
-                                <button onclick="downloadDoc(previewState.currentDoc)" class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium">
-                                    📥 Télécharger
-                                </button>
-                                ${isEditable && isEditable(fullDoc) ? `
-                                <button onclick="openEditor(previewState.currentDoc)" class="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition font-medium">
-                                    ✏️ Éditer
-                                </button>
-                                ` : ''}
-                            </div>
+                        </div>
+                        <div class="flex-1 bg-white">
+                            <iframe
+                                src="${pptViewerUrl}"
+                                class="w-full h-full border-0"
+                                frameborder="0">
+                            </iframe>
+                        </div>
+                        <div class="bg-gray-100 border-t p-2 text-center text-xs text-gray-600">
+                            💡 Prévisualisation en lecture seule • Utilisez "Éditer" pour modifier
                         </div>
                     </div>
                 `;
