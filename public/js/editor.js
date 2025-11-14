@@ -72,6 +72,20 @@ async function openEditor(doc) {
 
 async function openExcelEditor(doc) {
     try {
+        // Vérifier que le document est valide
+        if (!doc || !doc._id) {
+            console.error('Document invalide passé à openExcelEditor:', doc);
+            showNotification('Erreur: Document invalide', 'error');
+            return;
+        }
+
+        // S'assurer que editorState.currentDoc est défini
+        if (!editorState.currentDoc) {
+            editorState.currentDoc = doc;
+            editorState.docType = 'excel';
+            editorState.changes = {};
+        }
+
         // Récupérer les données du fichier Excel
         const response = await apiCall(`/office/read-excel/${doc._id}`);
 
@@ -259,6 +273,13 @@ function updateChangesCounter() {
 
 // Enregistrer les modifications Excel
 async function saveExcelChanges() {
+    // Vérifier que le document est bien chargé
+    if (!editorState.currentDoc || !editorState.currentDoc._id) {
+        console.error('Erreur: Document non chargé dans editorState');
+        showNotification('Erreur: Document non trouvé. Veuillez réouvrir l\'éditeur.', 'error');
+        return;
+    }
+
     const changeCount = Object.keys(editorState.changes).length;
 
     if (changeCount === 0) {
@@ -269,8 +290,10 @@ async function saveExcelChanges() {
     try {
         // Désactiver le bouton
         const saveBtn = document.getElementById('save-excel-btn');
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<span>⏳ Enregistrement...</span>';
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span>⏳ Enregistrement...</span>';
+        }
 
         // Envoyer les modifications
         const response = await apiCall(`/office/edit-excel/${editorState.currentDoc._id}`, 'POST', {

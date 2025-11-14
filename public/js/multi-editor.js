@@ -350,6 +350,14 @@ function openLocalEditor(doc) {
     const ext = doc.nomFichier.toLowerCase().split('.').pop();
 
     if (ext === 'xlsx' || ext === 'xls') {
+        // Initialiser l'état de l'éditeur (requis pour openExcelEditor)
+        if (typeof editorState !== 'undefined') {
+            editorState.isOpen = true;
+            editorState.currentDoc = doc;
+            editorState.docType = 'excel';
+            editorState.changes = {};
+        }
+
         // Utiliser l'éditeur Excel existant
         if (typeof openExcelEditor === 'function') {
             openExcelEditor(doc);
