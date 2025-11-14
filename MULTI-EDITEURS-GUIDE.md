@@ -57,20 +57,16 @@ Le système d'archivage C.E.R.E.R intègre désormais **plusieurs éditeurs et v
 
 ---
 
-### 3. 📄 **Google Docs Viewer**
+### 3. 📄 **Google Docs Viewer** ⚠️ (Désactivé)
 - **Type** : Visualiseur Google universel
 - **Formats** : .docx, .doc, .xlsx, .xls, .pptx, .ppt, .pdf
-- **Fonctionnalités** :
-  - ✅ Lecture seule
-  - ✅ Très fiable
-  - ✅ Compatible avec de nombreux formats
-  - ✅ Rapide
-- **Prérequis** : Connexion Internet
+- **Statut** : ❌ **Non disponible**
+- **Raison** : Google nécessite maintenant une authentification OAuth2
 
-**Quand l'utiliser** :
-- Pour une visualisation simple et rapide
-- Quand les autres options ne fonctionnent pas
-- Pour les PDFs également
+**Alternatives recommandées** :
+- **Microsoft Office Online** pour une visualisation fidèle
+- **Zoho Office** pour une alternative fiable
+- **Éditeur Local** pour Excel
 
 ---
 
@@ -108,13 +104,13 @@ Le système d'archivage C.E.R.E.R intègre désormais **plusieurs éditeurs et v
 
 ## 📊 Tableau comparatif
 
-| Éditeur | Word | Excel | PowerPoint | Édition | Vitesse | Internet requis |
-|---------|------|-------|------------|---------|---------|-----------------|
-| **OnlyOffice** | ✅ | ✅ | ✅ | ✅ Complète | ⚡⚡ | ⚠️ (si serveur distant) |
-| **Office Online** | ✅ | ✅ | ✅ | ❌ Lecture seule | ⚡⚡⚡ | ✅ Oui |
-| **Google Viewer** | ✅ | ✅ | ✅ | ❌ Lecture seule | ⚡⚡⚡ | ✅ Oui |
-| **Éditeur Local** | ❌ | ✅ | ❌ | ✅ Complète | ⚡⚡⚡⚡ | ❌ Non |
-| **Zoho Office** | ✅ | ✅ | ✅ | ❌ Lecture seule | ⚡⚡ | ✅ Oui |
+| Éditeur | Word | Excel | PowerPoint | Édition | Vitesse | Internet requis | Disponible |
+|---------|------|-------|------------|---------|---------|-----------------|------------|
+| **OnlyOffice** | ✅ | ✅ | ✅ | ✅ Complète | ⚡⚡ | ⚠️ (si serveur distant) | ⚠️ Si configuré |
+| **Office Online** | ✅ | ✅ | ✅ | ❌ Lecture seule | ⚡⚡⚡ | ✅ Oui | ✅ Oui |
+| **Google Viewer** | ✅ | ✅ | ✅ | ❌ Lecture seule | ⚡⚡⚡ | ✅ Oui | ❌ Non (OAuth requis) |
+| **Éditeur Local** | ❌ | ✅ | ❌ | ✅ Complète | ⚡⚡⚡⚡ | ❌ Non | ✅ Oui |
+| **Zoho Office** | ✅ | ✅ | ✅ | ❌ Lecture seule | ⚡⚡ | ✅ Oui | ✅ Oui |
 
 ---
 

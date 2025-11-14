@@ -25,10 +25,10 @@ const EditorConfig = {
     google: {
         name: 'Google Docs Viewer',
         icon: '📄',
-        description: 'Visualiseur Google (lecture seule)',
+        description: 'Visualiseur Google (nécessite authentification)',
         supports: ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'pdf'],
         color: 'green',
-        available: true,
+        available: false, // Désactivé car nécessite OAuth2
         priority: 3
     },
     local: {
@@ -315,29 +315,31 @@ function openOffice365Editor(doc) {
 function openGoogleEditor(doc) {
     const modal = createEditorModal('google', doc);
 
-    const fileUrl = `${window.location.origin}/api/office-file/${state.currentUser}/${doc._id}`;
-    const encodedUrl = encodeURIComponent(fileUrl);
-
-    // Google Docs Viewer
-    const viewerUrl = `https://docs.google.com/viewer?url=${encodedUrl}&embedded=true`;
-
     const container = modal.querySelector('.editor-container');
     container.innerHTML = `
-        <div class="h-full flex flex-col">
-            <div class="bg-green-50 border-b p-3">
-                <div class="flex items-center gap-2 text-sm">
-                    <span class="text-green-800 font-medium">📄 Google Docs Viewer</span>
-                    <span class="text-gray-400">•</span>
-                    <span class="text-gray-600">Lecture seule</span>
+        <div class="h-full flex flex-col items-center justify-center bg-gradient-to-br from-red-50 to-orange-50 p-8">
+            <div class="max-w-md text-center">
+                <div class="text-6xl mb-4">🔒</div>
+                <h3 class="text-xl font-bold text-gray-800 mb-2">
+                    Google Docs Viewer non disponible
+                </h3>
+                <p class="text-gray-600 mb-4">
+                    Google nécessite maintenant une authentification OAuth2 pour utiliser leur visualiseur.
+                </p>
+                <div class="bg-blue-50 border border-blue-200 rounded p-4 text-sm text-left mb-6">
+                    <p class="font-semibold text-blue-800 mb-2">💡 Alternatives disponibles :</p>
+                    <ul class="text-blue-700 space-y-1">
+                        <li>• <strong>Microsoft Office Online</strong> : Visualisation fidèle</li>
+                        <li>• <strong>Zoho Office</strong> : Visualisation fiable</li>
+                        <li>• <strong>Éditeur Local</strong> : Édition Excel rapide</li>
+                    </ul>
                 </div>
-            </div>
-            <iframe
-                src="${viewerUrl}"
-                class="flex-1 w-full border-0"
-                frameborder="0"
-            ></iframe>
-            <div class="bg-gray-100 border-t p-2 text-center text-xs text-gray-600">
-                💡 Visualisation via Google Docs Viewer (lecture seule)
+                <button
+                    onclick="document.getElementById('google-editor-modal').remove(); showEditorSelector(multiEditorState.currentDoc)"
+                    class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+                >
+                    🔄 Choisir un autre éditeur
+                </button>
             </div>
         </div>
     `;
