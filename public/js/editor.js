@@ -28,6 +28,11 @@ function isEditable(doc) {
         return 'excel-old';
     }
 
+    // CSV → Éditeur intégré
+    if (type === 'text/csv' || ext === 'csv') {
+        return 'csv';
+    }
+
     // Word (moderne et ancien) → OnlyOffice
     if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || ext === 'docx' ||
         type === 'application/msword' || ext === 'doc') {
@@ -60,6 +65,9 @@ async function openEditor(doc) {
     if (editableType === 'excel') {
         // Excel moderne (.xlsx) → Éditeur intégré
         await openExcelEditor(doc);
+    } else if (editableType === 'csv') {
+        // CSV → Éditeur CSV intégré
+        await openCSVEditor(doc);
     } else if (editableType === 'excel-old' || editableType === 'word' || editableType === 'powerpoint') {
         // Excel ancien (.xls), Word, PowerPoint → OnlyOffice
         await openWordEditor(doc);
@@ -583,3 +591,319 @@ style.textContent = `
     }
 `;
 document.head.appendChild(style);
+
+// ============================================
+// ÉDITEUR CSV
+// ============================================
+
+async function openCSVEditor(doc) {
+    try {
+        // Vérifier que le document est valide
+        if (!doc || !doc._id) {
+            console.error('Document invalide passé à openCSVEditor:', doc);
+            showNotification('Erreur: Document invalide', 'error');
+            return;
+        }
+
+        // Récupérer le contenu CSV
+        const fullDoc = await getDocument(state.currentUser, doc._id);
+
+        // Extraire le contenu CSV depuis le data URL
+        let csvContent;
+        if (fullDoc.contenu.startsWith('data:')) {
+            const base64Data = fullDoc.contenu.split(',')[1];
+            csvContent = atob(base64Data);
+        } else {
+            csvContent = fullDoc.contenu;
+        }
+
+        // Parser le CSV
+        const rows = parseCSV(csvContent);
+
+        // Créer le modal
+        const modal = document.createElement('div');
+        modal.id = 'csv-editor-modal';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75';
+
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg w-11/12 h-5/6 flex flex-col">
+                <!-- Header -->
+                <div class="flex items-center justify-between p-4 border-b bg-gradient-to-r from-green-500 to-teal-600">
+                    <div class="flex-1 min-w-0">
+                        <h2 class="text-xl font-bold text-white truncate">📊 Éditeur CSV - ${fullDoc.titre}</h2>
+                        <p class="text-sm text-green-100 truncate">${fullDoc.nomFichier}</p>
+                    </div>
+                    <div class="flex items-center gap-2 ml-4">
+                        <button id="csv-add-row-btn" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                            Ajouter ligne
+                        </button>
+                        <button id="csv-save-btn" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Enregistrer
+                        </button>
+                        <button id="csv-close-btn" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition">
+                            ✕ Fermer
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Content -->
+                <div class="flex-1 overflow-auto p-4 bg-gray-50">
+                    <div id="csv-grid" class="bg-white rounded-lg shadow-md overflow-x-auto"></div>
+                </div>
+
+                <!-- Footer -->
+                <div class="p-3 border-t bg-gray-100">
+                    <div class="flex items-center justify-between text-sm text-gray-600">
+                        <span>💡 Double-cliquez sur une cellule pour éditer • Cliquez sur 🗑️ pour supprimer une ligne</span>
+                        <span id="csv-row-count">${rows.length} lignes</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Rendre la grille CSV
+        renderCSVGrid(rows);
+
+        // Bouton ajouter ligne
+        document.getElementById('csv-add-row-btn').addEventListener('click', () => {
+            const grid = getCurrentCSVGrid();
+            const newRow = new Array(grid[0]?.length || 3).fill('');
+            grid.push(newRow);
+            renderCSVGrid(grid);
+            document.getElementById('csv-row-count').textContent = `${grid.length} lignes`;
+        });
+
+        // Bouton enregistrer
+        document.getElementById('csv-save-btn').addEventListener('click', async () => {
+            await saveCSVDocument(fullDoc._id);
+        });
+
+        // Bouton fermer
+        document.getElementById('csv-close-btn').addEventListener('click', () => {
+            modal.remove();
+            editorState.isOpen = false;
+        });
+
+        // Fermer en cliquant à l'extérieur
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+                editorState.isOpen = false;
+            }
+        });
+
+    } catch (error) {
+        console.error('Erreur ouverture éditeur CSV:', error);
+        showNotification('Erreur lors de l\'ouverture de l\'éditeur CSV', 'error');
+    }
+}
+
+// Parser un contenu CSV
+function parseCSV(csvText) {
+    const lines = csvText.split('\n');
+    const rows = [];
+
+    for (const line of lines) {
+        if (!line.trim()) continue;
+
+        // Simple parser CSV (gère les virgules et guillemets basiques)
+        const row = [];
+        let cell = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === '"') {
+                inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+                row.push(cell.trim());
+                cell = '';
+            } else {
+                cell += char;
+            }
+        }
+        row.push(cell.trim());
+        rows.push(row);
+    }
+
+    return rows;
+}
+
+// Rendre la grille CSV
+function renderCSVGrid(rows) {
+    const gridContainer = document.getElementById('csv-grid');
+    if (!gridContainer) return;
+
+    let html = '<table class="w-full border-collapse">';
+
+    // En-tête
+    if (rows.length > 0) {
+        html += '<thead><tr class="bg-green-500 text-white">';
+        rows[0].forEach((cell, colIndex) => {
+            html += `<th class="border border-gray-300 px-4 py-2 text-left font-semibold">
+                <input type="text"
+                       value="${escapeHtml(cell)}"
+                       class="csv-header-cell w-full bg-transparent text-white font-semibold"
+                       data-row="0"
+                       data-col="${colIndex}">
+            </th>`;
+        });
+        html += '</tr></thead>';
+    }
+
+    // Corps
+    html += '<tbody>';
+    for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+        html += `<tr class="hover:bg-gray-50">`;
+        rows[rowIndex].forEach((cell, colIndex) => {
+            html += `<td class="border border-gray-300 px-2 py-1">
+                <input type="text"
+                       value="${escapeHtml(cell)}"
+                       class="csv-cell w-full px-2 py-1"
+                       data-row="${rowIndex}"
+                       data-col="${colIndex}">
+            </td>`;
+        });
+        html += `<td class="border border-gray-300 px-2 py-1 text-center">
+            <button onclick="deleteCSVRow(${rowIndex})"
+                    class="text-red-500 hover:text-red-700 transition"
+                    title="Supprimer cette ligne">
+                🗑️
+            </button>
+        </td>`;
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+
+    gridContainer.innerHTML = html;
+
+    // Ajouter les écouteurs d'événements
+    document.querySelectorAll('.csv-cell, .csv-header-cell').forEach(input => {
+        input.addEventListener('change', () => {
+            updateCSVCell(input);
+        });
+    });
+}
+
+// Récupérer la grille CSV actuelle
+function getCurrentCSVGrid() {
+    const rows = [];
+    const inputs = document.querySelectorAll('.csv-cell, .csv-header-cell');
+
+    inputs.forEach(input => {
+        const row = parseInt(input.dataset.row);
+        const col = parseInt(input.dataset.col);
+
+        if (!rows[row]) rows[row] = [];
+        rows[row][col] = input.value;
+    });
+
+    return rows;
+}
+
+// Mettre à jour une cellule CSV
+function updateCSVCell(input) {
+    // La valeur est déjà dans l'input, rien de plus à faire
+    console.log(`Cellule mise à jour: [${input.dataset.row}, ${input.dataset.col}] = "${input.value}"`);
+}
+
+// Supprimer une ligne CSV
+function deleteCSVRow(rowIndex) {
+    const grid = getCurrentCSVGrid();
+    grid.splice(rowIndex, 1);
+    renderCSVGrid(grid);
+    document.getElementById('csv-row-count').textContent = `${grid.length} lignes`;
+}
+
+// Exposer la fonction globalement
+window.deleteCSVRow = deleteCSVRow;
+
+// Sauvegarder le document CSV
+async function saveCSVDocument(docId) {
+    try {
+        const grid = getCurrentCSVGrid();
+
+        // Convertir la grille en CSV
+        const csvContent = grid.map(row => {
+            return row.map(cell => {
+                // Échapper les cellules contenant des virgules ou des guillemets
+                if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
+                    return `"${cell.replace(/"/g, '""')}"`;
+                }
+                return cell;
+            }).join(',');
+        }).join('\n');
+
+        // Convertir en data URL
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const reader = new FileReader();
+
+        reader.onload = async (e) => {
+            const dataUrl = e.target.result;
+
+            // Enregistrer via l'API
+            const saveBtn = document.getElementById('csv-save-btn');
+            saveBtn.disabled = true;
+            saveBtn.textContent = '⏳ Enregistrement...';
+
+            try {
+                await apiCall(`/documents/${docId}`, 'PUT', {
+                    contenu: dataUrl,
+                    taille: blob.size
+                });
+
+                showNotification('✅ Document CSV enregistré avec succès');
+                await loadData();
+
+                saveBtn.textContent = '✅ Enregistré';
+                setTimeout(() => {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = `
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Enregistrer
+                    `;
+                }, 1000);
+
+            } catch (error) {
+                console.error('Erreur sauvegarde CSV:', error);
+                showNotification('Erreur lors de l\'enregistrement', 'error');
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = `
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Enregistrer
+                `;
+            }
+        };
+
+        reader.readAsDataURL(blob);
+
+    } catch (error) {
+        console.error('Erreur lors de la sauvegarde:', error);
+        showNotification('Erreur lors de l\'enregistrement', 'error');
+    }
+}
+
+// Fonction utilitaire pour échapper le HTML
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return String(text).replace(/[&<>"']/g, m => map[m]);
+}

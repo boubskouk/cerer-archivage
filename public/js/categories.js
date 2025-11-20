@@ -31,9 +31,18 @@ async function addCategory() {
 // Supprimer une catégorie
 async function deleteCategoryHandler(catId) {
     const count = state.documents.filter(d => d.categorie === catId).length;
-    
+
     if (count > 0) {
-        if (!confirm(`${count} document(s) seront déplacés vers "Autre". Continuer?`)) {
+        const confirmed = await customConfirm({
+            title: 'Supprimer cette catégorie',
+            message: `${count} document(s) seront automatiquement déplacés vers "Autre".\n\nVoulez-vous continuer ?`,
+            confirmText: 'Oui, continuer',
+            cancelText: 'Non, annuler',
+            type: 'warning',
+            icon: '⚠️'
+        });
+
+        if (!confirmed) {
             return;
         }
     }

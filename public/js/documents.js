@@ -42,7 +42,16 @@ async function saveDocument(doc) {
 
 // Supprimer un document
 async function deleteDoc(id) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce document?')) {
+    const confirmed = await customConfirm({
+        title: 'Supprimer ce document',
+        message: 'Êtes-vous sûr de vouloir supprimer ce document définitivement ?',
+        confirmText: 'Oui, supprimer',
+        cancelText: 'Non, annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) {
         return;
     }
 
@@ -59,17 +68,35 @@ async function deleteDoc(id) {
 // Supprimer tous les documents
 async function deleteAllDocuments() {
     const count = state.documents.length;
-    
+
     if (count === 0) {
         showNotification('Aucun document à supprimer', 'error');
         return;
     }
 
-    if (!confirm(`⚠️ ATTENTION ⚠️\n\nVous allez supprimer ${count} document(s)!\n\nCette action est IRRÉVERSIBLE.\n\nContinuer?`)) {
+    const confirmed1 = await customConfirm({
+        title: '⚠️ ATTENTION - Suppression Massive',
+        message: `Vous allez supprimer ${count} document(s) !\n\nCette action est IRRÉVERSIBLE.\n\nVoulez-vous continuer ?`,
+        confirmText: 'Oui, continuer',
+        cancelText: 'Non, annuler',
+        type: 'danger',
+        icon: '⚠️'
+    });
+
+    if (!confirmed1) {
         return;
     }
 
-    if (!confirm(`🚨 DERNIÈRE CONFIRMATION 🚨\n\nTOUS vos ${count} documents seront DÉFINITIVEMENT supprimés!\n\nÊtes-vous VRAIMENT sûr(e)?`)) {
+    const confirmed2 = await customConfirm({
+        title: '🚨 DERNIÈRE CONFIRMATION',
+        message: `TOUS vos ${count} documents seront DÉFINITIVEMENT supprimés !\n\nÊtes-vous VRAIMENT sûr(e) ?`,
+        confirmText: 'OUI, SUPPRIMER TOUT',
+        cancelText: 'NON, ANNULER',
+        type: 'danger',
+        icon: '🚨'
+    });
+
+    if (!confirmed2) {
         return;
     }
 
@@ -198,7 +225,16 @@ async function importData(e) {
                 return;
             }
 
-            if (!confirm(`Importer ${docs.length} document(s)?`)) {
+            const importConfirmed = await customConfirm({
+                title: 'Importer des documents',
+                message: `Voulez-vous importer ${docs.length} document(s) dans votre base de données ?`,
+                confirmText: 'Oui, importer',
+                cancelText: 'Annuler',
+                type: 'info',
+                icon: '📥'
+            });
+
+            if (!importConfirmed) {
                 return;
             }
 

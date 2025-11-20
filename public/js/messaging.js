@@ -214,26 +214,26 @@ function renderMessaging() {
                 <!-- Tabs modernes -->
                 <div class="flex gap-2 flex-wrap">
                     <button onclick="switchMessagingView('inbox')"
-                            class="px-6 py-3 rounded-xl font-semibold transition flex items-center gap-2 ${messagingState.currentView === 'inbox' ? 'bg-white text-blue-600 shadow-lg' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                            class="px-6 py-3 rounded-xl font-bold transition flex items-center gap-2 ${messagingState.currentView === 'inbox' ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-gray-900 shadow-2xl scale-110 border-4 border-white' : 'bg-white/10 hover:bg-white/20 text-white'}">
                         <span class="text-xl">📥</span>
-                        <span>Réception</span>
-                        ${messagingState.unreadCount > 0 ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full ml-1">${messagingState.unreadCount}</span>` : ''}
+                        <span class="text-base">Réception</span>
+                        ${messagingState.unreadCount > 0 ? `<span class="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full ml-1 shadow-lg animate-pulse">${messagingState.unreadCount}</span>` : ''}
                     </button>
                     <button onclick="switchMessagingView('sent')"
-                            class="px-6 py-3 rounded-xl font-semibold transition flex items-center gap-2 ${messagingState.currentView === 'sent' ? 'bg-white text-purple-600 shadow-lg' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                            class="px-6 py-3 rounded-xl font-bold transition flex items-center gap-2 ${messagingState.currentView === 'sent' ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-gray-900 shadow-2xl scale-110 border-4 border-white' : 'bg-white/10 hover:bg-white/20 text-white'}">
                         <span class="text-xl">📤</span>
-                        <span>Envoyés</span>
+                        <span class="text-base">Envoyés</span>
                     </button>
                     <button onclick="switchMessagingView('shared-docs')"
-                            class="px-6 py-3 rounded-xl font-semibold transition flex items-center gap-2 ${messagingState.currentView === 'shared-docs' ? 'bg-white text-teal-600 shadow-lg' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                            class="px-6 py-3 rounded-xl font-bold transition flex items-center gap-2 ${messagingState.currentView === 'shared-docs' ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-gray-900 shadow-2xl scale-110 border-4 border-white' : 'bg-white/10 hover:bg-white/20 text-white'}">
                         <span class="text-xl">📑</span>
-                        <span>Docs partagés</span>
-                        ${messagingState.sharedDocuments.length > 0 ? `<span class="bg-teal-500 text-white text-xs font-bold px-2 py-1 rounded-full ml-1">${messagingState.sharedDocuments.length}</span>` : ''}
+                        <span class="text-base">Docs partagés</span>
+                        ${messagingState.sharedDocuments.length > 0 ? `<span class="bg-teal-600 text-white text-xs font-bold px-2 py-1 rounded-full ml-1 shadow-lg">${messagingState.sharedDocuments.length}</span>` : ''}
                     </button>
                     <button onclick="switchMessagingView('compose')"
-                            class="px-6 py-3 rounded-xl font-semibold transition flex items-center gap-2 ${messagingState.currentView === 'compose' ? 'bg-white text-green-600 shadow-lg' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                            class="px-6 py-3 rounded-xl font-bold transition flex items-center gap-2 ${messagingState.currentView === 'compose' ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-gray-900 shadow-2xl scale-110 border-4 border-white' : 'bg-white/10 hover:bg-white/20 text-white'}">
                         <span class="text-xl">✏️</span>
-                        <span>Nouveau</span>
+                        <span class="text-base">Nouveau</span>
                     </button>
                 </div>
             </div>
@@ -277,33 +277,33 @@ function renderInbox() {
     return `
         <div class="space-y-3">
             <!-- En-tête avec compteur et info -->
-            <div class="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border-2 border-blue-200 mb-4">
+            <div class="bg-gradient-to-r from-blue-900 to-purple-900 p-5 rounded-xl border-3 border-blue-400 mb-4 shadow-xl">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <div class="bg-blue-500 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl">
+                        <div class="bg-yellow-400 w-14 h-14 rounded-full flex items-center justify-center text-gray-900 font-bold text-2xl shadow-lg">
                             📥
                         </div>
                         <div>
-                            <h3 class="text-lg font-bold text-gray-800">Messages reçus</h3>
-                            <p class="text-sm text-gray-600">
+                            <h3 class="text-2xl font-bold text-white mb-1">Messages reçus</h3>
+                            <p class="text-base text-yellow-300 font-bold">
                                 ${messagingState.receivedMessages.length} message${messagingState.receivedMessages.length > 1 ? 's' : ''}
-                                <span class="text-blue-600 font-semibold">(20 derniers)</span>
+                                <span class="text-white font-bold">(20 derniers)</span>
                             </p>
                         </div>
                     </div>
                     <div class="flex items-center gap-2">
                         ${messagingState.unreadCount > 0 ? `
-                            <div class="bg-gradient-to-r from-red-500 to-pink-500 text-white px-4 py-2 rounded-full font-bold shadow-lg">
+                            <div class="bg-gradient-to-r from-red-600 to-pink-600 text-white px-5 py-3 rounded-full font-bold shadow-2xl text-lg animate-pulse border-2 border-white">
                                 ${messagingState.unreadCount} non lu${messagingState.unreadCount > 1 ? 's' : ''}
                             </div>
                         ` : `
-                            <div class="bg-green-100 text-green-700 px-4 py-2 rounded-full font-semibold">
+                            <div class="bg-green-500 text-white px-5 py-3 rounded-full font-bold text-lg border-2 border-white shadow-lg">
                                 ✓ Tous lus
                             </div>
                         `}
                         ${messagingState.receivedMessages.length > 0 ? `
                             <button onclick="deleteAllReceivedMessages()"
-                                    class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold text-sm">
+                                    class="px-5 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-bold text-base shadow-lg border-2 border-white">
                                 🗑️ Tout supprimer
                             </button>
                         ` : ''}
@@ -313,28 +313,28 @@ function renderInbox() {
 
             <!-- Liste des messages -->
             ${messagingState.receivedMessages.map((msg, index) => `
-                <div class="message-item ${!msg.lu ? 'border-l-4 border-blue-500 bg-blue-50' : 'border-l-4 border-gray-200 bg-white'} hover:shadow-lg rounded-xl p-4 cursor-pointer transition-all duration-200 hover:scale-[1.02]" onclick="openMessage('${msg._id}', 'received')">
-                    <div class="flex items-start justify-between mb-2">
+                <div class="message-item ${!msg.lu ? 'border-l-4 border-blue-500 bg-gradient-to-r from-blue-100 to-purple-100' : 'border-l-4 border-gray-300 bg-gradient-to-r from-gray-50 to-gray-100'} hover:shadow-2xl rounded-xl p-5 cursor-pointer transition-all duration-200 hover:scale-[1.02] border-2 ${!msg.lu ? 'border-blue-400' : 'border-gray-300'}" onclick="openMessage('${msg._id}', 'received')">
+                    <div class="flex items-start justify-between mb-3">
                         <div class="flex items-center gap-3 flex-1">
-                            <div class="${!msg.lu ? 'bg-gradient-to-br from-blue-500 to-purple-500' : 'bg-gradient-to-br from-gray-400 to-gray-500'} w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-md">
+                            <div class="${!msg.lu ? 'bg-gradient-to-br from-blue-600 to-purple-600' : 'bg-gradient-to-br from-gray-600 to-gray-700'} w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg border-2 border-white">
                                 ${msg.from.charAt(0).toUpperCase()}
                             </div>
                             <div class="flex-1">
                                 <div class="flex items-center gap-2 mb-1">
-                                    <span class="font-bold text-gray-900 text-base">${msg.fromName || msg.from}</span>
-                                    ${!msg.lu ? '<span class="px-2 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs rounded-full font-bold shadow animate-pulse">NOUVEAU</span>' : ''}
-                                    <span class="text-xs text-gray-400 ml-auto">#${index + 1}</span>
+                                    <span class="font-bold text-gray-900 text-lg">${msg.fromName || msg.from}</span>
+                                    ${!msg.lu ? '<span class="px-3 py-1 bg-gradient-to-r from-red-500 to-pink-500 text-white text-xs rounded-full font-bold shadow-lg animate-pulse border-2 border-white">NOUVEAU</span>' : ''}
+                                    <span class="text-sm text-blue-900 font-bold ml-auto">#${index + 1}</span>
                                 </div>
-                                <p class="text-xs text-gray-500 flex items-center gap-1">
+                                <p class="text-sm text-blue-900 font-semibold flex items-center gap-1">
                                     <span>📅</span>
                                     <span>${formatDate(msg.dateEnvoi)}</span>
                                 </p>
                             </div>
                         </div>
                     </div>
-                    <div class="ml-15 pl-1">
-                        <h4 class="font-bold text-gray-900 mb-1 text-base">${msg.subject || '(Sans sujet)'}</h4>
-                        <p class="text-sm text-gray-600 line-clamp-2">${(msg.body || msg.message || '').substring(0, 150)}${(msg.body || msg.message || '').length > 150 ? '...' : ''}</p>
+                    <div class="ml-17 pl-1">
+                        <h4 class="font-bold text-gray-900 mb-2 text-lg">${msg.subject || '(Sans sujet)'}</h4>
+                        <p class="text-base text-gray-800 font-medium line-clamp-2">${(msg.body || msg.message || '').substring(0, 150)}${(msg.body || msg.message || '').length > 150 ? '...' : ''}</p>
                     </div>
                 </div>
             `).join('')}
@@ -373,29 +373,29 @@ function renderSentMessages() {
     return `
         <div class="space-y-3">
             <!-- En-tête avec compteur et actions -->
-            <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-xl border-2 border-purple-200 mb-4">
+            <div class="bg-gradient-to-r from-purple-900 to-pink-900 p-5 rounded-xl border-3 border-purple-400 mb-4 shadow-xl">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <div class="bg-gradient-to-br from-purple-500 to-pink-500 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                        <div class="bg-yellow-400 w-14 h-14 rounded-full flex items-center justify-center text-gray-900 font-bold text-2xl shadow-lg">
                             📤
                         </div>
                         <div>
-                            <h3 class="text-lg font-bold text-gray-800">Messages envoyés</h3>
-                            <p class="text-sm text-gray-600">
-                                <span class="font-semibold text-purple-600">Historique:</span> ${messagingState.sentMessages.length} message${messagingState.sentMessages.length > 1 ? 's' : ''}
-                                <span class="text-purple-600 font-semibold">(20 derniers)</span>
+                            <h3 class="text-2xl font-bold text-white mb-1">Messages envoyés</h3>
+                            <p class="text-base text-yellow-300 font-bold">
+                                <span class="font-bold">Historique:</span> ${messagingState.sentMessages.length} message${messagingState.sentMessages.length > 1 ? 's' : ''}
+                                <span class="text-white font-bold">(20 derniers)</span>
                             </p>
                         </div>
                     </div>
                     <div class="flex items-center gap-2">
                         ${messagingState.sentMessages.length > 0 ? `
                             <button onclick="deleteAllSentMessages()"
-                                    class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold text-sm">
+                                    class="px-5 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-bold text-base shadow-lg border-2 border-white">
                                 🗑️ Tout supprimer
                             </button>
                         ` : ''}
                         <button onclick="switchMessagingView('compose')"
-                                class="px-5 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition font-bold flex items-center gap-2">
+                                class="px-5 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:shadow-2xl transition font-bold flex items-center gap-2 shadow-lg border-2 border-white">
                             <span class="text-xl">✏️</span>
                             <span>Nouveau</span>
                         </button>
@@ -404,40 +404,40 @@ function renderSentMessages() {
             </div>
 
             <!-- Historique des 20 derniers messages envoyés -->
-            <div class="bg-gradient-to-r from-blue-50 to-purple-50 p-3 rounded-lg border-l-4 border-purple-500 mb-3">
-                <p class="text-sm text-gray-700 font-semibold">
+            <div class="bg-gradient-to-r from-blue-900 to-purple-900 p-4 rounded-lg border-l-4 border-purple-400 mb-3 shadow-lg">
+                <p class="text-base text-white font-bold">
                     📊 Traçabilité : Historique complet des 20 derniers messages envoyés
                 </p>
             </div>
 
             <!-- Liste des messages -->
             ${messagingState.sentMessages.map((msg, index) => `
-                <div class="message-item border-l-4 border-purple-400 bg-gradient-to-r from-purple-50 to-white hover:shadow-lg rounded-xl p-4 cursor-pointer transition-all duration-200 hover:scale-[1.02]" onclick="openMessage('${msg._id}', 'sent')">
-                    <div class="flex items-start justify-between mb-2">
+                <div class="message-item border-l-4 border-purple-400 bg-gradient-to-r from-purple-100 to-pink-100 hover:shadow-2xl rounded-xl p-5 cursor-pointer transition-all duration-200 hover:scale-[1.02] border-2 border-purple-300" onclick="openMessage('${msg._id}', 'sent')">
+                    <div class="flex items-start justify-between mb-3">
                         <div class="flex items-center gap-3 flex-1">
-                            <div class="bg-gradient-to-br from-purple-500 to-pink-500 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-md relative">
+                            <div class="bg-gradient-to-br from-purple-600 to-pink-600 w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg border-2 border-white relative">
                                 ${msg.to.charAt(0).toUpperCase()}
-                                <div class="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-white"></div>
+                                <div class="absolute -bottom-1 -right-1 bg-green-500 w-5 h-5 rounded-full border-2 border-white"></div>
                             </div>
                             <div class="flex-1">
                                 <div class="flex items-center gap-2 mb-1">
-                                    <span class="text-gray-600 text-xs font-medium">Destinataire:</span>
-                                    <span class="font-bold text-gray-900 text-base">${msg.toName || msg.to}</span>
-                                    <span class="text-xs text-gray-400 ml-auto">#${index + 1}</span>
+                                    <span class="text-purple-900 text-sm font-bold">Destinataire:</span>
+                                    <span class="font-bold text-gray-900 text-lg">${msg.toName || msg.to}</span>
+                                    <span class="text-sm text-purple-900 font-bold ml-auto">#${index + 1}</span>
                                 </div>
-                                <p class="text-xs text-gray-500 flex items-center gap-1">
+                                <p class="text-sm text-purple-900 font-semibold flex items-center gap-1">
                                     <span>📅</span>
                                     <span>Envoyé ${formatDate(msg.dateEnvoi)}</span>
                                 </p>
                             </div>
                         </div>
                     </div>
-                    <div class="ml-15 pl-1">
-                        <h4 class="font-bold text-gray-900 mb-1 text-base">📝 ${msg.subject || '(Sans sujet)'}</h4>
-                        <p class="text-sm text-gray-600 line-clamp-2">${(msg.body || msg.message || '').substring(0, 150)}${(msg.body || msg.message || '').length > 150 ? '...' : ''}</p>
+                    <div class="ml-17 pl-1">
+                        <h4 class="font-bold text-gray-900 mb-2 text-lg">📝 ${msg.subject || '(Sans sujet)'}</h4>
+                        <p class="text-base text-gray-800 font-medium line-clamp-2">${(msg.body || msg.message || '').substring(0, 150)}${(msg.body || msg.message || '').length > 150 ? '...' : ''}</p>
                     </div>
-                    <div class="mt-2 flex items-center gap-2">
-                        <span class="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-semibold">✓ Envoyé</span>
+                    <div class="mt-3 flex items-center gap-2">
+                        <span class="px-3 py-1 bg-green-500 text-white text-sm rounded-full font-bold border-2 border-white shadow">✓ Envoyé</span>
                     </div>
                 </div>
             `).join('')}
@@ -472,23 +472,23 @@ function renderSharedDocuments() {
     return `
         <div class="space-y-3">
             <!-- En-tête avec compteur -->
-            <div class="bg-gradient-to-r from-teal-50 to-cyan-50 p-4 rounded-xl border-2 border-teal-200 mb-4">
+            <div class="bg-gradient-to-r from-teal-900 to-cyan-900 p-5 rounded-xl border-3 border-teal-400 mb-4 shadow-xl">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <div class="bg-gradient-to-br from-teal-500 to-cyan-500 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                        <div class="bg-yellow-400 w-14 h-14 rounded-full flex items-center justify-center text-gray-900 font-bold text-2xl shadow-lg">
                             📑
                         </div>
                         <div>
-                            <h3 class="text-lg font-bold text-gray-800">Documents que vous avez partagés</h3>
-                            <p class="text-sm text-gray-600">
-                                <span class="font-semibold text-teal-600">Historique:</span> ${messagingState.sharedDocuments.length} partage${messagingState.sharedDocuments.length > 1 ? 's' : ''}
-                                <span class="text-teal-600 font-semibold">(50 derniers)</span>
+                            <h3 class="text-2xl font-bold text-white mb-1">Documents que vous avez partagés</h3>
+                            <p class="text-base text-yellow-300 font-bold">
+                                <span class="font-bold">Historique:</span> ${messagingState.sharedDocuments.length} partage${messagingState.sharedDocuments.length > 1 ? 's' : ''}
+                                <span class="text-white font-bold">(50 derniers)</span>
                             </p>
                         </div>
                     </div>
                     ${messagingState.sharedDocuments.length > 0 ? `
                         <button onclick="deleteAllSharedDocuments()"
-                                class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold text-sm">
+                                class="px-5 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-bold text-base shadow-lg border-2 border-white">
                             🗑️ Tout supprimer
                         </button>
                     ` : ''}
@@ -496,26 +496,26 @@ function renderSharedDocuments() {
             </div>
 
             <!-- Info traçabilité -->
-            <div class="bg-gradient-to-r from-blue-50 to-teal-50 p-3 rounded-lg border-l-4 border-teal-500 mb-3">
-                <p class="text-sm text-gray-700 font-semibold">
+            <div class="bg-gradient-to-r from-blue-900 to-teal-900 p-4 rounded-lg border-l-4 border-teal-400 mb-3 shadow-lg">
+                <p class="text-base text-white font-bold">
                     📊 Traçabilité complète : Historique de tous les documents que vous avez partagés avec d'autres utilisateurs
                 </p>
             </div>
 
             <!-- Liste des documents partagés -->
             ${messagingState.sharedDocuments.map((doc, index) => `
-                <div class="border-l-4 border-teal-400 bg-gradient-to-r from-teal-50 to-white hover:shadow-lg rounded-xl p-4 transition-all duration-200 hover:scale-[1.02]">
+                <div class="border-l-4 border-teal-400 bg-gradient-to-r from-teal-100 to-cyan-100 hover:shadow-2xl rounded-xl p-5 transition-all duration-200 hover:scale-[1.02] border-2 border-teal-300">
                     <div class="flex items-start justify-between mb-3">
                         <div class="flex items-center gap-3 flex-1">
-                            <div class="bg-gradient-to-br from-teal-500 to-cyan-500 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-md">
+                            <div class="bg-gradient-to-br from-teal-600 to-cyan-600 w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg border-2 border-white">
                                 📄
                             </div>
                             <div class="flex-1">
                                 <div class="flex items-center gap-2 mb-1">
-                                    <h4 class="font-bold text-gray-900 text-base">${doc.documentTitle || 'Sans titre'}</h4>
-                                    <span class="text-xs text-gray-400 ml-auto">#${index + 1}</span>
+                                    <h4 class="font-bold text-gray-900 text-lg">${doc.documentTitle || 'Sans titre'}</h4>
+                                    <span class="text-sm text-teal-900 font-bold ml-auto">#${index + 1}</span>
                                 </div>
-                                <p class="text-xs text-gray-500 flex items-center gap-1">
+                                <p class="text-sm text-teal-900 font-semibold flex items-center gap-1">
                                     <span>📋</span>
                                     <span>ID: ${doc.documentIdDocument || 'N/A'}</span>
                                 </p>
@@ -524,29 +524,29 @@ function renderSharedDocuments() {
                     </div>
 
                     <!-- Informations de partage -->
-                    <div class="ml-15 pl-1 space-y-2">
-                        <div class="bg-white rounded-lg p-3 border border-gray-200">
-                            <p class="text-sm text-gray-700 mb-2">
-                                <span class="font-semibold text-teal-600">Partagé avec:</span>
-                                <span class="font-bold text-gray-900 ml-1">${doc.sharedWithName || doc.sharedWith}</span>
+                    <div class="ml-17 pl-1 space-y-2">
+                        <div class="bg-gradient-to-r from-blue-900 to-teal-900 rounded-lg p-4 border-2 border-teal-400 shadow-lg">
+                            <p class="text-base text-white font-bold mb-2">
+                                <span class="text-yellow-300">Partagé avec:</span>
+                                <span class="text-white ml-1">${doc.sharedWithName || doc.sharedWith}</span>
                             </p>
-                            <div class="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                            <div class="grid grid-cols-2 gap-2 text-sm text-white font-semibold">
                                 <div>
-                                    <span class="text-gray-500">Rôle:</span>
-                                    <span class="font-semibold ml-1">${doc.sharedWithRole}</span>
+                                    <span class="text-yellow-300">Rôle:</span>
+                                    <span class="ml-1">${doc.sharedWithRole}</span>
                                 </div>
                                 <div>
-                                    <span class="text-gray-500">Département:</span>
-                                    <span class="font-semibold ml-1">${doc.sharedWithDept}</span>
+                                    <span class="text-yellow-300">Département:</span>
+                                    <span class="ml-1">${doc.sharedWithDept}</span>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="flex items-center gap-2 text-xs text-gray-500">
-                            <span class="px-2 py-1 bg-teal-100 text-teal-700 rounded-full font-semibold">
+                        <div class="flex items-center gap-2 text-sm">
+                            <span class="px-3 py-1 bg-teal-600 text-white rounded-full font-bold border-2 border-white shadow">
                                 📅 ${formatDate(doc.sharedAt)}
                             </span>
-                            <span class="px-2 py-1 bg-green-100 text-green-700 rounded-full font-semibold">
+                            <span class="px-3 py-1 bg-green-600 text-white rounded-full font-bold border-2 border-white shadow">
                                 ✓ Partagé
                             </span>
                         </div>

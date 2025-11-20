@@ -34,13 +34,18 @@ async function apiCall(endpoint, method = 'GET', data = null) {
         const result = await response.json();
 
         if (!response.ok) {
-            throw new Error(result.message || 'Erreur lors de la requête');
+            const error = new Error(result.message || 'Erreur lors de la requête');
+            error.response = result; // Garder les détails de la réponse
+            throw error;
         }
 
         return result;
     } catch (error) {
         console.error('Erreur API:', error);
-        showNotification(error.message, 'error');
+        // Ne pas afficher de notification pour les documents verrouillés
+        if (!error.response || !error.response.locked) {
+            showNotification(error.message, 'error');
+        }
         throw error;
     }
 }
@@ -55,7 +60,17 @@ async function getDocuments(userId, full = false) {
 }
 
 async function getDocument(userId, docId) {
-    return await apiCall(`/documents/${userId}/${docId}`);
+    try {
+        return await apiCall(`/documents/${userId}/${docId}`);
+    } catch (error) {
+        // Si c'est une erreur de verrouillage, afficher un modal spécifique
+        if (error.response && error.response.locked) {
+            if (typeof showLockedDocumentModal === 'function') {
+                showLockedDocumentModal(error.response.lockedBy);
+            }
+        }
+        throw error;
+    }
 }
 
 async function createDocument(userId, documentData) {

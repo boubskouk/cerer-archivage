@@ -9,12 +9,13 @@
 }
 
 /* ============================================
-   BACKGROUND
+   BACKGROUND - MODE SOMBRE
    ============================================ */
 
 body {
-    background: linear-gradient(135deg, #f8fafc 0%, #e0f2fe 50%, #dcfce7 100%) !important;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%) !important;
     background-attachment: fixed !important;
+    color: white !important;
 }
 
 /* ============================================
@@ -22,11 +23,12 @@ body {
    ============================================ */
 
 .header-glass {
-    background: rgba(255, 255, 255, 0.95) !important;
+    background: rgba(30, 41, 59, 0.95) !important;
     backdrop-filter: blur(12px) !important;
-    border-bottom: 2px solid rgba(14, 165, 233, 0.2) !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+    border-bottom: 2px solid rgba(14, 165, 233, 0.3) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
     padding: 0 !important;
+    color: white !important;
 }
 
 /* Logo minimaliste */
@@ -129,8 +131,12 @@ main {
     position: relative !important;
     overflow: hidden !important;
     transition: all 0.3s ease !important;
-    background: white !important;
-    border: 1px solid #e2e8f0 !important;
+    background: linear-gradient(135deg, rgba(30, 58, 138, 0.9) 0%, rgba(29, 78, 216, 0.8) 100%) !important;
+    border: 2px solid rgba(96, 165, 250, 0.6) !important;
+    color: black !important;
+    padding: 1rem !important;
+    min-height: auto !important;
+    max-height: 250px !important;
 }
 
 /* Barre colorée au hover */
@@ -198,9 +204,10 @@ main {
    ============================================ */
 
 .modal-glass {
-    background: rgba(255, 255, 255, 0.95) !important;
+    background: rgba(30, 41, 59, 0.95) !important;
     backdrop-filter: blur(20px) !important;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15) !important;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5) !important;
+    color: white !important;
 }
 
 /* ============================================
@@ -751,4 +758,541 @@ html {
 
 * {
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* ============================================
+   MÉTADONNÉES ULTRA-VISIBLES
+   ============================================ */
+
+/* Tous les textes petits dans les cartes de documents */
+.doc-card small,
+.doc-card .text-sm,
+.doc-card .text-xs,
+.doc-card .text-gray-500,
+.doc-card .text-gray-600,
+.doc-card .text-gray-700 {
+    color: #000000 !important;
+    font-weight: 600 !important;
+    font-size: 0.8rem !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    padding: 0.2rem 0.4rem !important;
+    border-radius: 0.25rem !important;
+    display: inline-block !important;
+}
+
+/* Dates et timestamps */
+.doc-card .date,
+.doc-card .timestamp,
+.doc-card [class*="date"],
+.doc-card time {
+    color: #000000 !important;
+    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 0.25rem !important;
+    display: inline-block !important;
+}
+
+/* Métadonnées générales */
+.doc-card .metadata,
+.doc-card .document-info,
+.doc-card [class*="meta"] {
+    color: #000000 !important;
+    font-weight: 500 !important;
+    font-size: 0.8rem !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    padding: 0.3rem 0.5rem !important;
+    border-radius: 0.25rem !important;
+    display: block !important;
+    margin: 0.15rem 0 !important;
+}
+
+/* Badges de catégories et départements */
+.doc-card .badge,
+.doc-card .category-badge,
+.doc-card .department-badge,
+.doc-card [class*="badge"] {
+    color: #000000 !important;
+    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 0.25rem !important;
+    display: inline-block !important;
+}
+
+/* Informations de l'auteur/créateur */
+.doc-card .author,
+.doc-card .creator,
+.doc-card [class*="author"],
+.doc-card [class*="creator"] {
+    color: #000000 !important;
+    font-weight: 500 !important;
+    font-size: 0.75rem !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 0.25rem !important;
+    display: inline-block !important;
+}
+
+/* Taille de fichier */
+.doc-card .file-size,
+.doc-card .size,
+.doc-card [class*="size"] {
+    color: #000000 !important;
+    font-weight: 500 !important;
+    font-size: 0.75rem !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 0.25rem !important;
+    display: inline-block !important;
+}
+
+/* Type de document */
+.doc-card .doc-type,
+.doc-card .type,
+.doc-card .file-type {
+    color: #000000 !important;
+    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 0.25rem !important;
+    display: inline-block !important;
+    text-transform: uppercase !important;
+}
+
+/* Statut du document (verrouillé, partagé, etc.) */
+.doc-card .status,
+.doc-card [class*="status"] {
+    color: #000000 !important;
+    font-weight: 600 !important;
+    font-size: 0.7rem !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 0.25rem !important;
+    display: inline-block !important;
+    text-transform: uppercase !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Améliorer la visibilité des paragraphes dans les cartes */
+.doc-card p,
+.doc-card div:not([class*="bg-"]):not([class*="flex"]) {
+    color: #000000 !important;
+    font-weight: 500 !important;
+    line-height: 1.4 !important;
+    font-size: 0.85rem !important;
+}
+
+/* Titres dans les cartes */
+.doc-card h3,
+.doc-card .font-bold {
+    color: #000000 !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    margin-bottom: 0.5rem !important;
+}
+
+/* Espacement réduit */
+.doc-card .space-y-2 > * + * {
+    margin-top: 0.3rem !important;
+}
+
+.doc-card .mb-3,
+.doc-card .my-3 {
+    margin-bottom: 0.5rem !important;
+}
+
+/* Grille compacte avec plus de colonnes */
+main .grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)) !important;
+    gap: 0.75rem !important;
+}
+
+/* ============================================
+   DOCUMENTS VERROUILLÉS - INDICATEURS VISUELS
+   ============================================ */
+
+/* Carte de document verrouillé */
+.doc-card.locked {
+    border: 3px solid #f59e0b !important;
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.4) !important;
+    position: relative !important;
+}
+
+.doc-card.locked::after {
+    content: '🔒';
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    font-size: 3rem;
+    opacity: 0.15;
+    pointer-events: none;
+}
+
+/* ============================================
+   MODE SOMBRE GLOBAL
+   ============================================ */
+
+/* Éliminer tous les fonds blancs */
+.bg-white,
+[class*="bg-white"],
+.bg-gray-50,
+.bg-gray-100 {
+    background: rgba(30, 41, 59, 0.9) !important;
+    color: white !important;
+}
+
+/* Textes en blanc pour tous les éléments */
+h1, h2, h3, h4, h5, h6 {
+    color: white !important;
+}
+
+p, span, div, label {
+    color: white !important;
+}
+
+/* Inputs et selects en mode sombre */
+input, select, textarea {
+    background: rgba(51, 65, 85, 0.9) !important;
+    color: white !important;
+    border: 2px solid rgba(96, 165, 250, 0.5) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Boutons du header */
+header button,
+header a {
+    color: white !important;
+}
+
+/* ============================================
+   PAGE DE CONNEXION - INPUTS VISIBLES
+   ============================================ */
+
+/* Formulaire de connexion et inscription */
+#login_username,
+#login_password,
+#reg_nom,
+#reg_email,
+#reg_username,
+#reg_password,
+#reg_password_confirm,
+#reg_role,
+#reg_departement,
+#reg_admin_password {
+    background: rgba(51, 65, 85, 0.95) !important;
+    color: white !important;
+    border: 2px solid rgba(96, 165, 250, 0.6) !important;
+    font-size: 1rem !important;
+    font-weight: 500 !important;
+}
+
+/* Placeholder visible */
+#login_username::placeholder,
+#login_password::placeholder,
+#reg_nom::placeholder,
+#reg_email::placeholder,
+#reg_username::placeholder,
+#reg_password::placeholder,
+#reg_password_confirm::placeholder,
+#reg_admin_password::placeholder {
+    color: rgba(255, 255, 255, 0.7) !important;
+    font-weight: 400 !important;
+}
+
+/* Focus sur les champs de connexion */
+#login_username:focus,
+#login_password:focus,
+#reg_nom:focus,
+#reg_email:focus,
+#reg_username:focus,
+#reg_password:focus,
+#reg_password_confirm:focus,
+#reg_role:focus,
+#reg_departement:focus,
+#reg_admin_password:focus {
+    background: rgba(71, 85, 105, 1) !important;
+    border-color: rgba(96, 165, 250, 1) !important;
+    outline: none !important;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.2) !important;
+}
+
+/* Options des selects */
+#reg_role option,
+#reg_departement option {
+    background: rgba(51, 65, 85, 1) !important;
+    color: white !important;
+}
+
+/* ============================================
+   MENU SIDEBAR - TOUS LES BOUTONS VISIBLES
+   ============================================ */
+
+/* Sidebar menu */
+.sidebar-menu {
+    background: rgba(30, 41, 59, 0.98) !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+/* Header du menu */
+.sidebar-menu h2 {
+    color: white !important;
+    background: linear-gradient(135deg, #3b82f6 0%, #10b981 100%) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+}
+
+/* Bouton fermer (X) */
+.sidebar-menu button[onclick="toggleMenu()"] {
+    color: white !important;
+    background: rgba(239, 68, 68, 0.2) !important;
+    padding: 0.5rem !important;
+    border-radius: 0.5rem !important;
+    font-weight: bold !important;
+}
+
+.sidebar-menu button[onclick="toggleMenu()"]:hover {
+    background: rgba(239, 68, 68, 0.4) !important;
+}
+
+/* Tous les boutons du menu */
+.sidebar-menu button,
+.sidebar-menu label {
+    color: white !important;
+    font-weight: 600 !important;
+    background: rgba(51, 65, 85, 0.5) !important;
+    border: 1px solid rgba(96, 165, 250, 0.3) !important;
+    margin-bottom: 0.5rem !important;
+}
+
+.sidebar-menu button:hover,
+.sidebar-menu label:hover {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.3) 0%, rgba(16, 185, 129, 0.3) 100%) !important;
+    border-color: rgba(96, 165, 250, 0.6) !important;
+    transform: translateX(-4px) !important;
+}
+
+/* Bouton supprimer en rouge */
+.sidebar-menu button[onclick="deleteAllDocuments()"] {
+    background: rgba(239, 68, 68, 0.2) !important;
+    border-color: rgba(239, 68, 68, 0.5) !important;
+    color: #fca5a5 !important;
+}
+
+.sidebar-menu button[onclick="deleteAllDocuments()"]:hover {
+    background: rgba(239, 68, 68, 0.4) !important;
+    color: white !important;
+}
+
+/* Info utilisateur */
+.sidebar-menu .bg-gradient-to-br {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(16, 185, 129, 0.2) 100%) !important;
+    border: 1px solid rgba(96, 165, 250, 0.4) !important;
+}
+
+.sidebar-menu .bg-gradient-to-br p {
+    color: white !important;
+}
+
+/* Badge de messages non lus */
+.sidebar-menu .bg-red-500 {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    color: white !important;
+    font-weight: 700 !important;
+}
+
+/* Bordures */
+.sidebar-menu .border-gray-200 {
+    border-color: rgba(96, 165, 250, 0.3) !important;
+}
+
+/* ============================================
+   MODAL DE PARTAGE - MODE SOMBRE ULTRA-VISIBLE
+   ============================================ */
+
+/* Modal de partage */
+.share-modal {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(20, 30, 50, 0.98) 100%) !important;
+    border: 3px solid rgba(59, 130, 246, 0.8) !important;
+    box-shadow: 0 0 40px rgba(59, 130, 246, 0.5) !important;
+}
+
+/* Labels dans la modal de partage */
+.share-modal label {
+    color: white !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+}
+
+/* Input de recherche dans le partage */
+.share-search-input {
+    background: rgba(20, 30, 50, 0.95) !important;
+    color: white !important;
+    font-weight: 600 !important;
+    border: 2px solid rgba(59, 130, 246, 0.8) !important;
+}
+
+.share-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.5) !important;
+    font-weight: 500 !important;
+}
+
+.share-search-input:focus {
+    background: rgba(30, 45, 70, 1) !important;
+    border-color: rgba(96, 165, 250, 1) !important;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5) !important;
+    outline: none !important;
+}
+
+/* Bordures épaissies */
+.share-modal .border-3 {
+    border-width: 3px !important;
+}
+
+/* Cartes utilisateurs */
+.share-modal label.flex {
+    transition: all 0.3s ease !important;
+}
+
+.share-modal label.flex:hover {
+    transform: translateX(-4px) scale(1.02) !important;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Checkbox plus visible */
+.share-modal input[type="checkbox"] {
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+    cursor: pointer !important;
+    accent-color: #10b981 !important;
+}
+
+/* ============================================
+   FILTRES DE DATE - FOND NOIR
+   ============================================ */
+
+/* Tous les champs de type date */
+input[type="date"] {
+    background: rgba(15, 23, 42, 0.98) !important;
+    color: white !important;
+    border: 2px solid rgba(96, 165, 250, 0.6) !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+    padding: 0.75rem 1rem !important;
+    border-radius: 0.5rem !important;
+}
+
+/* Icône calendrier en blanc */
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.2) !important;
+    cursor: pointer !important;
+    width: 1.2rem !important;
+    height: 1.2rem !important;
+}
+
+/* Texte placeholder et valeurs en blanc */
+input[type="date"]::-webkit-datetime-edit-text,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-year-field {
+    color: white !important;
+    font-weight: 600 !important;
+}
+
+/* Placeholder avant sélection */
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Focus sur les dates */
+input[type="date"]:focus {
+    background: rgba(30, 41, 59, 1) !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3) !important;
+    outline: none !important;
+}
+
+/* Hover sur les dates */
+input[type="date"]:hover {
+    border-color: rgba(96, 165, 250, 0.9) !important;
+    background: rgba(30, 41, 59, 0.98) !important;
+}
+
+/* ============================================
+   PAGE DE CONNEXION - TEXTES ULTRA VISIBLES
+   ============================================ */
+
+/* Forcer la visibilité des textes de la page de connexion */
+.gradient-bg h1,
+.gradient-bg h2,
+.gradient-bg p,
+.gradient-bg label,
+.gradient-bg button {
+    color: #1e3a8a !important;
+    font-weight: 700 !important;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Sous-titre spécifique */
+.gradient-bg .text-blue-900 {
+    color: #1e3a8a !important;
+    font-weight: 900 !important;
+    font-size: 1rem !important;
+    text-shadow: 0 2px 4px rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Titres de sections (Connexion, Créer un compte) */
+.gradient-bg h2 {
+    color: #1e3a8a !important;
+    font-size: 1.5rem !important;
+    font-weight: 900 !important;
+    text-shadow: 0 2px 4px rgba(255, 255, 255, 0.8) !important;
+    margin-bottom: 1rem !important;
+}
+
+/* ============================================
+   BOUTONS DE NAVIGATION - STYLE ACTIF/INACTIF
+   ============================================ */
+
+/* Styles de base pour tous les boutons de navigation */
+.nav-btn {
+    transition: all 0.3s ease !important;
+    font-weight: 700 !important;
+    border-radius: 0.75rem !important;
+    padding: 0.75rem 1.5rem !important;
+    font-size: 0.875rem !important;
+    cursor: pointer !important;
+}
+
+/* Bouton ACTIF - gradient jaune-orange très visible */
+.nav-btn-active {
+    background: linear-gradient(135deg, #fbbf24 0%, #f97316 100%) !important;
+    color: #000000 !important;
+    box-shadow: 0 20px 40px rgba(251, 191, 36, 0.6), 0 0 0 4px white !important;
+    transform: scale(1.15) !important;
+    border: 4px solid white !important;
+    font-weight: 900 !important;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Bouton INACTIF - gris clair */
+.nav-btn-inactive {
+    background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%) !important;
+    color: #374151 !important;
+    border: 2px solid #d1d5db !important;
+    font-weight: 600 !important;
+}
+
+/* Hover sur bouton inactif */
+.nav-btn-inactive:hover {
+    background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
 }

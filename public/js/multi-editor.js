@@ -278,26 +278,137 @@ function openOffice365Editor(doc) {
     // Microsoft Office Online Viewer
     const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
 
+    // Déterminer le type de fichier
+    const ext = doc.nomFichier.toLowerCase().split('.').pop();
+    const isWord = ext === 'docx' || ext === 'doc';
+    const isPowerPoint = ext === 'pptx' || ext === 'ppt';
+
     const container = modal.querySelector('.editor-container');
-    container.innerHTML = `
-        <div class="h-full flex flex-col">
-            <div class="bg-blue-50 border-b p-3">
-                <div class="flex items-center gap-2 text-sm">
-                    <span class="text-blue-800 font-medium">🌐 Microsoft Office Online</span>
-                    <span class="text-gray-400">•</span>
-                    <span class="text-gray-600">Visualisation fidèle au format Office</span>
+
+    // Pour Word et PowerPoint, afficher une interface de téléchargement/upload
+    if (isWord || isPowerPoint) {
+        const docType = isWord ? 'Word' : 'PowerPoint';
+        const icon = isWord ? '📝' : '📽️';
+
+        // Stocker le document dans multiEditorState pour les callbacks
+        multiEditorState.currentDoc = doc;
+
+        container.innerHTML = `
+            <div class="h-full flex flex-col">
+                <div class="bg-blue-50 border-b p-3">
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="text-blue-800 font-medium">${icon} Document ${docType}</span>
+                        <span class="text-gray-400">•</span>
+                        <span class="text-gray-600">Édition via Microsoft ${docType}</span>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-auto p-6">
+                    <!-- Aperçu via Office Online -->
+                    <div class="mb-6">
+                        <h3 class="text-lg font-bold text-gray-800 mb-3">👁️ Aperçu du document</h3>
+                        <div class="border-2 border-gray-200 rounded-lg overflow-hidden" style="height: 400px;">
+                            <iframe
+                                src="${viewerUrl}"
+                                class="w-full h-full border-0"
+                                frameborder="0"
+                            ></iframe>
+                        </div>
+                    </div>
+
+                    <!-- Section d'édition -->
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-xl border-2 border-blue-200">
+                        <h3 class="text-lg font-bold text-gray-800 mb-3">✏️ Modifier ce document</h3>
+                        <p class="text-gray-700 mb-4">
+                            Pour modifier ce document ${docType}, téléchargez-le, modifiez-le avec Microsoft ${docType},
+                            puis rechargez la version modifiée.
+                        </p>
+
+                        <div class="grid md:grid-cols-2 gap-4 mb-4">
+                            <div class="bg-white p-4 rounded-lg border-2 border-blue-300">
+                                <div class="text-3xl mb-2">⬇️</div>
+                                <h4 class="font-bold text-gray-800 mb-2">1. Télécharger</h4>
+                                <p class="text-sm text-gray-600 mb-3">Téléchargez le document sur votre ordinateur</p>
+                                <button
+                                    id="download-word-btn-${doc._id}"
+                                    class="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium">
+                                    📥 Télécharger ${doc.nomFichier}
+                                </button>
+                            </div>
+
+                            <div class="bg-white p-4 rounded-lg border-2 border-green-300">
+                                <div class="text-3xl mb-2">⬆️</div>
+                                <h4 class="font-bold text-gray-800 mb-2">2. Recharger la version modifiée</h4>
+                                <p class="text-sm text-gray-600 mb-3">Après modification, rechargez le document</p>
+                                <input
+                                    type="file"
+                                    id="word-upload-input-${doc._id}"
+                                    accept=".${ext}"
+                                    class="hidden"
+                                    onchange="handleWordDocumentUpload(event, '${doc._id}')"
+                                />
+                                <button
+                                    onclick="document.getElementById('word-upload-input-${doc._id}').click()"
+                                    class="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition font-medium">
+                                    📤 Recharger le document modifié
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+                            <div class="flex items-start gap-3">
+                                <span class="text-2xl">💡</span>
+                                <div class="text-sm">
+                                    <p class="font-semibold text-yellow-800 mb-1">Conseil :</p>
+                                    <p class="text-yellow-700">
+                                        Ouvrez le document téléchargé avec Microsoft ${docType}, faites vos modifications,
+                                        enregistrez-le, puis rechargez-le ici pour mettre à jour l'archive.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-100 border-t p-3 text-center text-xs text-gray-600">
+                    💡 Aperçu via Microsoft Office Online • Édition via Microsoft ${docType}
                 </div>
             </div>
-            <iframe
-                src="${viewerUrl}"
-                class="flex-1 w-full border-0"
-                frameborder="0"
-            ></iframe>
-            <div class="bg-gray-100 border-t p-2 text-center text-xs text-gray-600">
-                💡 Visualisation via Microsoft Office Online
+        `;
+
+        // Ajouter l'écouteur d'événements pour le bouton de téléchargement
+        setTimeout(() => {
+            const downloadBtn = document.getElementById(`download-word-btn-${doc._id}`);
+            if (downloadBtn) {
+                downloadBtn.addEventListener('click', () => {
+                    if (multiEditorState.currentDoc) {
+                        downloadDoc(multiEditorState.currentDoc);
+                    }
+                });
+            }
+        }, 0);
+    } else {
+        // Pour les autres types (si jamais), afficher juste le visualiseur
+        container.innerHTML = `
+            <div class="h-full flex flex-col">
+                <div class="bg-blue-50 border-b p-3">
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="text-blue-800 font-medium">🌐 Microsoft Office Online</span>
+                        <span class="text-gray-400">•</span>
+                        <span class="text-gray-600">Visualisation fidèle au format Office</span>
+                    </div>
+                </div>
+                <iframe
+                    src="${viewerUrl}"
+                    class="flex-1 w-full border-0"
+                    frameborder="0"
+                ></iframe>
+                <div class="bg-gray-100 border-t p-2 text-center text-xs text-gray-600">
+                    💡 Visualisation via Microsoft Office Online
+                </div>
             </div>
-        </div>
-    `;
+        `;
+    }
 }
 
 // ============================================
@@ -505,6 +616,71 @@ function openEditor(doc) {
 function openEditorWithMenu(doc) {
     showEditorSelector(doc);
 }
+
+// Gérer le rechargement d'un document Word/PowerPoint modifié
+async function handleWordDocumentUpload(event, docId) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+        // Vérifier la taille du fichier (max 50 Mo)
+        if (file.size > 50 * 1024 * 1024) {
+            showNotification('❌ Le fichier est trop volumineux (max 50 Mo)', 'error');
+            return;
+        }
+
+        // Afficher une notification de chargement
+        showNotification('📤 Rechargement du document en cours...', 'info');
+
+        // Convertir le fichier en base64
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const contenu = e.target.result;
+
+                // Mettre à jour le document via l'API
+                const response = await apiCall(`/documents/${state.currentUser}/${docId}`, 'PUT', {
+                    contenu: contenu,
+                    taille: file.size
+                });
+
+                showNotification('✅ Document mis à jour avec succès !', 'success');
+
+                // Recharger les données et fermer le modal
+                await loadData();
+
+                // Fermer le modal
+                const modal = document.getElementById('office365-editor-modal');
+                if (modal) modal.remove();
+
+                // Réafficher le document mis à jour
+                const updatedDoc = state.documents.find(d => d._id === docId);
+                if (updatedDoc) {
+                    setTimeout(() => {
+                        openOffice365Editor(updatedDoc);
+                    }, 500);
+                }
+
+            } catch (error) {
+                console.error('Erreur lors de la mise à jour:', error);
+                showNotification('❌ Erreur lors de la mise à jour du document', 'error');
+            }
+        };
+
+        reader.onerror = () => {
+            showNotification('❌ Erreur lors de la lecture du fichier', 'error');
+        };
+
+        reader.readAsDataURL(file);
+
+    } catch (error) {
+        console.error('Erreur:', error);
+        showNotification('❌ Erreur lors du rechargement du document', 'error');
+    }
+}
+
+// Exposer la fonction globalement
+window.handleWordDocumentUpload = handleWordDocumentUpload;
 
 console.log('✅ Gestionnaire multi-éditeurs chargé');
 console.log('📝 Éditeurs disponibles:', Object.keys(EditorConfig).join(', '));

@@ -1,51 +1,38 @@
+# Dépendances
 node_modules/
+package-lock.json
+
+# Variables d'environnement
 .env
+.env.local
+.env.*.local
+
+# Fichiers temporaires
+nul
+*.tmp
+
+# Logs
+logs/
 *.log
-.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Fichiers de test
-test-*.js
-*-test.js
+# Fichiers Windows
+*.bat
+Thumbs.db
+Desktop.ini
 
-# Scripts de migration et maintenance
-migration.js
-fix-*.js
-create-test-users.js
-update-*.js
-show-*.js
+# Scripts d'archive
+scripts_archive/
 
-# Fichiers de backup
-*.backup
-*-backup-*.js
-server-backup-*.js
-
-# Documentation locale (conserver uniquement README.md si nécessaire)
-CHANGELOG-*.md
-DEMARRAGE-*.md
-DESIGN-*.md
-EXIGENCES-*.md
-FORMULAIRE-*.md
-GUIDE-*.md
-INDEX-*.md
-NOUVELLES-*.md
-PLAN-*.md
-RECAP-*.md
-
-# Configuration locale
-.claude/
-
-# Fichiers temporaires et guides
-public/js/1
-public/js/Guide*.txt
-public/js/*-mcd.js
-public/js/*.backup-*
-
-# IDE
+# Fichiers IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
-Thumbs.db
+# Claude settings
+.claude/settings.local.json
+
