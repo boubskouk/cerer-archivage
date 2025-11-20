@@ -27,6 +27,9 @@ const { sendWelcomeEmail } = require('./services/emailService');
 
 const app = express();
 
+// ✅ CONFIGURATION: Trust proxy (nécessaire derrière reverse proxy comme Render, Heroku, etc.)
+app.set('trust proxy', 1);
+
 // Configuration
 const PORT = process.env.PORT || 4000;
 
