@@ -37,16 +37,8 @@ async function createUser() {
             idDepartement: idDepartement || null
         });
 
-        await toggleUsersManagement(); // Recharger la liste
         showNotification('✅ Utilisateur créé avec succès');
-
-        // Réinitialiser le formulaire
-        document.getElementById('new_user_username').value = '';
-        document.getElementById('new_user_password').value = '';
-        document.getElementById('new_user_nom').value = '';
-        document.getElementById('new_user_email').value = '';
-        document.getElementById('new_user_role').value = '';
-        document.getElementById('new_user_dept').value = '';
+        await toggleUsersManagement(); // Recharger la liste (efface automatiquement le formulaire)
     } catch (error) {
         console.error('Erreur création utilisateur:', error);
     }
@@ -252,21 +244,23 @@ function renderUsersManagement() {
                                        class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
                                 <input id="edit_user_email" type="email" value="${user.email}" placeholder="Email"
                                        class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
-                                <select id="edit_user_role" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                <select id="edit_user_role" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm" onchange="toggleDepartmentField('edit_user_dept_container', this.value)">
                                     ${state.roles.map(role => `
-                                        <option value="${role._id}" ${user.idRole === role._id ? 'selected' : ''}>
+                                        <option value="${role._id}" data-niveau="${role.niveau}" ${user.idRole === role._id ? 'selected' : ''}>
                                             ${role.nom} (Niveau ${role.niveau})
                                         </option>
                                     `).join('')}
                                 </select>
-                                <select id="edit_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
-                                    <option value="" ${!user.idDepartement ? 'selected' : ''}>-- Aucun département --</option>
-                                    ${state.departements.map(dept => `
-                                        <option value="${dept._id}" ${user.idDepartement === dept._id ? 'selected' : ''}>
-                                            ${dept.nom}
-                                        </option>
-                                    `).join('')}
-                                </select>
+                                <div id="edit_user_dept_container" ${user.niveau === 1 ? 'style="display:none;"' : ''}>
+                                    <select id="edit_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                        <option value="" ${!user.idDepartement ? 'selected' : ''}>-- Aucun département --</option>
+                                        ${state.departements.map(dept => `
+                                            <option value="${dept._id}" ${user.idDepartement === dept._id ? 'selected' : ''}>
+                                                ${dept.nom}
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                </div>
                                 <div class="flex gap-2">
                                     <button onclick="saveEditUser()" class="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-medium">
                                         ✅ Enregistrer
@@ -278,28 +272,28 @@ function renderUsersManagement() {
                             </div>
                         ` : `
                             <!-- Mode affichage -->
-                            <div class="p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border-2 border-purple-200 hover:shadow-md transition">
+                            <div class="p-4 bg-white rounded-xl border-2 border-purple-300 hover:shadow-lg transition">
                                 <div class="flex items-center justify-between">
                                     <div class="flex-1">
                                         <div class="flex items-center gap-3 mb-2">
                                             <span class="text-2xl">👤</span>
                                             <div>
                                                 <h3 class="font-bold text-gray-900">${user.nom}</h3>
-                                                <p class="text-sm text-gray-600">@${user.username}</p>
+                                                <p class="text-sm text-gray-700">@${user.username}</p>
                                             </div>
                                         </div>
                                         <div class="grid grid-cols-2 gap-2 text-xs">
                                             <div>
-                                                <span class="text-gray-500">Email:</span>
-                                                <span class="font-semibold ml-1">${user.email}</span>
+                                                <span class="text-gray-600 font-medium">Email:</span>
+                                                <span class="font-semibold ml-1 text-gray-900">${user.email}</span>
                                             </div>
                                             <div>
-                                                <span class="text-gray-500">Rôle:</span>
-                                                <span class="font-semibold ml-1">${user.role} (Niveau ${user.niveau})</span>
+                                                <span class="text-gray-600 font-medium">Rôle:</span>
+                                                <span class="font-semibold ml-1 text-gray-900">${user.role} (Niveau ${user.niveau})</span>
                                             </div>
                                             <div>
-                                                <span class="text-gray-500">Département:</span>
-                                                <span class="font-semibold ml-1">${user.departement}</span>
+                                                <span class="text-gray-600 font-medium">Département:</span>
+                                                <span class="font-semibold ml-1 text-gray-900">${user.departement}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -327,8 +321,8 @@ function renderUsersManagement() {
                 </div>
 
                 <!-- Formulaire d'ajout d'utilisateur -->
-                <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-xl border-2 border-purple-300 mb-4">
-                    <h3 class="font-bold text-gray-800 mb-3">➕ Créer un nouvel utilisateur</h3>
+                <div class="bg-white p-4 rounded-xl border-2 border-purple-300 mb-4 shadow-sm">
+                    <h3 class="font-bold text-gray-900 mb-3">➕ Créer un nouvel utilisateur</h3>
                     <div class="space-y-3">
                         <input id="new_user_username" type="text" placeholder="Nom d'utilisateur (3+ caractères)"
                                class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
@@ -348,23 +342,25 @@ function renderUsersManagement() {
                         <input id="new_user_email" type="email" placeholder="Email"
                                class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
 
-                        <select id="new_user_role" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                        <select id="new_user_role" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm" onchange="toggleDepartmentField('new_user_dept_container', this.value)">
                             <option value="">-- Sélectionner un rôle --</option>
                             ${state.roles.map(role => `
-                                <option value="${role._id}">
+                                <option value="${role._id}" data-niveau="${role.niveau}">
                                     ${role.nom} (Niveau ${role.niveau})
                                 </option>
                             `).join('')}
                         </select>
 
-                        <select id="new_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
-                            <option value="">-- Sélectionner un département (optionnel) --</option>
-                            ${state.departements.map(dept => `
-                                <option value="${dept._id}">
-                                    ${dept.nom}
-                                </option>
-                            `).join('')}
-                        </select>
+                        <div id="new_user_dept_container">
+                            <select id="new_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                <option value="">-- Sélectionner un département (optionnel) --</option>
+                                ${state.departements.map(dept => `
+                                    <option value="${dept._id}">
+                                        ${dept.nom}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
 
                         <button onclick="createUser()" class="w-full px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition font-medium">
                             ➕ Créer l'utilisateur
@@ -846,6 +842,27 @@ function renderAdvancedStats() {
     `;
 }
 
+// Fonction pour masquer/afficher le champ département selon le niveau du rôle
+function toggleDepartmentField(containerId, roleId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Trouver le rôle sélectionné
+    const roleSelect = event.target;
+    const selectedOption = roleSelect.options[roleSelect.selectedIndex];
+    const niveau = selectedOption ? parseInt(selectedOption.getAttribute('data-niveau')) : null;
+
+    // Masquer le département si niveau 1, sinon afficher
+    if (niveau === 1) {
+        container.style.display = 'none';
+        // Réinitialiser la valeur du département
+        const deptSelect = container.querySelector('select');
+        if (deptSelect) deptSelect.value = '';
+    } else {
+        container.style.display = 'block';
+    }
+}
+
 // Exposer les fonctions globalement
 window.createUser = createUser;
 window.deleteUser = deleteUser;
@@ -861,3 +878,4 @@ window.saveEditRole = saveEditRole;
 window.renderUsersManagement = renderUsersManagement;
 window.renderRolesManagement = renderRolesManagement;
 window.renderAdvancedStats = renderAdvancedStats;
+window.toggleDepartmentField = toggleDepartmentField;

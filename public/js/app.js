@@ -83,7 +83,8 @@ let formData = {
     date: new Date().toISOString().split('T')[0],
     departementArchivage: '', // Département d'archivage
     description: '',
-    tags: ''
+    tags: '',
+    locked: false // Verrouillage du document (niveau 1 uniquement)
 };
 
 // ===== FONCTIONS API =====
@@ -111,10 +112,10 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 
 // ===== GESTION DES SESSIONS =====
 
-// Sauvegarder la session dans localStorage
+// Sauvegarder la session dans sessionStorage (expire à la fermeture du navigateur)
 function saveSession(username, userInfo) {
     try {
-        localStorage.setItem('cerer_session', JSON.stringify({
+        sessionStorage.setItem('cerer_session', JSON.stringify({
             username,
             userInfo,
             timestamp: Date.now()
@@ -124,10 +125,10 @@ function saveSession(username, userInfo) {
     }
 }
 
-// Restaurer la session depuis localStorage
+// Restaurer la session depuis sessionStorage
 async function restoreSession() {
     try {
-        const sessionData = localStorage.getItem('cerer_session');
+        const sessionData = sessionStorage.getItem('cerer_session');
         if (!sessionData) {
             state.isCheckingSession = false;
             return false;
@@ -172,7 +173,7 @@ async function restoreSession() {
 // Nettoyer la session
 function clearSession() {
     try {
-        localStorage.removeItem('cerer_session');
+        sessionStorage.removeItem('cerer_session');
     } catch (error) {
         console.error('Erreur nettoyage session:', error);
     }
@@ -362,6 +363,36 @@ async function deleteDoc(id) {
     state.selectedDoc = null;
     await loadData();
     showNotification('✅ Document supprimé');
+}
+
+// Verrouiller/Déverrouiller un document (niveau 1 uniquement)
+async function toggleDocumentLock(docId) {
+    try {
+        const result = await apiCall(`/documents/${state.currentUser}/${docId}/toggle-lock`, 'POST');
+
+        if (result.success) {
+            // Mettre à jour le document dans l'état
+            const doc = state.documents.find(d => d._id === docId);
+            if (doc) {
+                doc.locked = result.locked;
+                doc.lockedBy = result.lockedBy;
+            }
+
+            // Mettre à jour le document sélectionné si c'est lui
+            if (state.selectedDoc && state.selectedDoc._id === docId) {
+                state.selectedDoc.locked = result.locked;
+                state.selectedDoc.lockedBy = result.lockedBy;
+            }
+
+            showNotification(result.locked ? '🔒 Document verrouillé' : '🔓 Document déverrouillé');
+            render();
+        } else {
+            showNotification(result.message || 'Erreur lors du verrouillage', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur toggleDocumentLock:', error);
+        showNotification('Erreur lors du verrouillage', 'error');
+    }
 }
 
 async function deleteAllDocuments() {
@@ -703,7 +734,8 @@ async function handleFileUpload(e) {
         date: new Date().toISOString().split('T')[0],
         departementArchivage: '',
         description: '',
-        tags: ''
+        tags: '',
+        locked: false
     };
     showNotification('✅ Ajouté!');
     render();
@@ -760,12 +792,12 @@ async function editExcelDocument(doc) {
                 <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in">
                     <div class="flex justify-between items-start mb-6">
                         <h2 class="text-3xl font-bold text-gray-800">✏️ Éditer le tableur Excel</h2>
-                        <button onclick="closeEditExcelModal()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                        <button onclick="closeEditExcelModal()" class="text-2xl text-red-600 hover:text-red-800 font-bold transition">✖</button>
                     </div>
 
                     <div class="mb-6 bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
                         <p class="text-gray-700"><strong>📊 Fichier:</strong> ${doc.nomFichier}</p>
-                        <p class="text-sm text-gray-600 mt-2">Modifiez les cellules ci-dessous. Format: <code>A1</code>, <code>B2</code>, etc.</p>
+                        <p class="text-sm text-blue-900 font-semibold mt-2">Modifiez les cellules ci-dessous. Format: <code>A1</code>, <code>B2</code>, etc.</p>
                     </div>
 
                     <div id="cellEditsContainer" class="space-y-3 mb-6">
@@ -884,7 +916,7 @@ async function createExcelReport() {
                 <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in">
                     <div class="flex justify-between items-start mb-6">
                         <h2 class="text-3xl font-bold text-gray-800">📊 Créer un rapport Excel</h2>
-                        <button onclick="closeCreateExcelModal()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                        <button onclick="closeCreateExcelModal()" class="text-2xl text-red-600 hover:text-red-800 font-bold transition">✖</button>
                     </div>
 
                     <div class="space-y-4 mb-6">
@@ -1747,12 +1779,12 @@ function render() {
                             <div class="logo-icon" style="display: none;">🗄️</div>
                         </div>
                         <h1 class="logo-text mb-2">Archivage C.E.R.E.R</h1>
-                        <p class="text-gray-600 font-medium">Système de gestion documentaire</p>
+                        <p class="text-blue-900 font-bold">Système de gestion documentaire</p>
                     </div>
                     
                     ${state.showRegister ? `
                         <div class="space-y-3">
-                            <h2 class="text-xl font-semibold text-gray-700 mb-2">Créer un compte</h2>
+                            <h2 class="text-xl font-bold text-blue-900 mb-2">Créer un compte</h2>
 
                             <input id="reg_nom" type="text" placeholder="Nom complet"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
@@ -1767,7 +1799,7 @@ function render() {
                                 <input id="reg_password" type="password" placeholder="Mot de passe (4+ caractères)"
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
                                 <button type="button" onclick="togglePasswordVisibility('reg_password')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
                                     <span id="reg_password_icon">👁️</span>
                                 </button>
                             </div>
@@ -1776,7 +1808,7 @@ function render() {
                                 <input id="reg_password_confirm" type="password" placeholder="Confirmer le mot de passe"
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
                                 <button type="button" onclick="togglePasswordVisibility('reg_password_confirm')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
                                     <span id="reg_password_confirm_icon">👁️</span>
                                 </button>
                             </div>
@@ -1799,14 +1831,14 @@ function render() {
                                         </option>
                                     `).join('')}
                                 </select>
-                                <p class="text-xs text-gray-500 mt-1">Les administrateurs de niveau 1 n'ont pas de département spécifique</p>
+                                <p class="text-xs text-blue-800 font-semibold mt-1">Les administrateurs de niveau 1 n'ont pas de département spécifique</p>
                             </div>
 
                             <div class="relative">
                                 <input id="reg_admin_password" type="password" placeholder="Mot de passe administrateur"
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
                                 <button type="button" onclick="togglePasswordVisibility('reg_admin_password')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
                                     <span id="reg_admin_password_icon">👁️</span>
                                 </button>
                             </div>
@@ -1816,13 +1848,13 @@ function render() {
                                 Créer le compte
                             </button>
                             <button onclick="toggleRegister()"
-                                    class="w-full text-gray-600 hover:text-gray-800 py-2">
+                                    class="w-full text-blue-800 font-bold hover:text-blue-900 py-2">
                                 ← Retour à la connexion
                             </button>
                         </div>
                     ` : `
                         <div class="space-y-4">
-                            <h2 class="text-xl font-semibold text-gray-700">Connexion</h2>
+                            <h2 class="text-xl font-bold text-blue-900">Connexion</h2>
                             <input id="login_username" type="text" placeholder="Nom d'utilisateur"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern"
                                    onkeypress="if(event.key==='Enter') handleLogin()">
@@ -1831,7 +1863,7 @@ function render() {
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern"
                                        onkeypress="if(event.key==='Enter') handleLogin()">
                                 <button type="button" onclick="togglePasswordVisibility('login_password')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
                                     <span id="login_password_icon">👁️</span>
                                 </button>
                             </div>
@@ -1839,13 +1871,13 @@ function render() {
                                     class="w-full btn-primary text-white py-3 rounded-xl font-semibold transition btn-shine">
                                 Se connecter
                             </button>
-                            <button onclick="toggleRegister()" 
-                                    class="w-full text-sm text-gray-600 hover:text-gray-800 py-2">
+                            <button onclick="toggleRegister()"
+                                    class="w-full text-sm text-blue-800 font-bold hover:text-blue-900 py-2">
                                 Créer un nouveau compte
                             </button>
-                            
+
                             <div class="mt-6 pt-4 border-t border-gray-200">
-                                <p class="text-center text-xs text-gray-500">
+                                <p class="text-center text-xs text-blue-900 font-semibold">
                                     Logiciel d'archivage développé par le service informatique du C.E.R.E.R
                                 </p>
                             </div>
@@ -1870,25 +1902,25 @@ function render() {
                             <img src="/logo_white.png" alt="Logo C.E.R.E.R" class="w-10 h-10" style="filter: drop-shadow(0 2px 4px rgba(59, 130, 246, 0.3));">
                             <div>
                                 <h1 class="logo-text" style="font-size: 1rem;">C.E.R.E.R</h1>
-                                <p class="text-xs text-gray-600">Bonjour, <strong>${state.currentUser}</strong></p>
+                                <p class="text-xs text-blue-900 font-bold">Bonjour, <strong>${state.currentUser}</strong></p>
                             </div>
                         </div>
                         <div class="flex gap-2">
                             <button onclick="toggleUploadForm()"
-                                    class="px-4 py-2 btn-primary text-white rounded-lg hover:shadow-lg transition text-sm font-semibold">
+                                    class="nav-btn ${state.showUploadForm ? 'nav-btn-active' : 'nav-btn-inactive'}">
                                 ➕ Ajouter
                             </button>
                             <button onclick="toggleMessagingSection()"
-                                    class="px-4 py-2 ${state.showMessagingSection ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white' : 'bg-gradient-to-br from-gray-100 to-gray-200'} rounded-lg hover:shadow-lg transition text-sm font-semibold relative">
+                                    class="nav-btn ${state.showMessagingSection ? 'nav-btn-active' : 'nav-btn-inactive'} relative">
                                 📬 Boîte de réception
                                 ${state.unreadCount > 0 ? `
-                                    <span class="absolute -top-2 -right-2 px-2 py-1 bg-red-600 text-white text-xs font-bold rounded-full animate-pulse">
+                                    <span class="absolute -top-2 -right-2 px-2 py-1 bg-red-600 text-white text-xs font-bold rounded-full animate-pulse border-2 border-white shadow-lg">
                                         ${state.unreadCount}
                                     </span>
                                 ` : ''}
                             </button>
                             <button onclick="toggleFilters()"
-                                    class="px-4 py-2 ${state.showFilters ? 'bg-gradient-to-br from-blue-500 to-green-500 text-white' : 'bg-gradient-to-br from-gray-100 to-gray-200'} rounded-lg hover:shadow-lg transition text-sm font-semibold">
+                                    class="nav-btn ${state.showFilters ? 'nav-btn-active' : 'nav-btn-inactive'}">
                                 🔍 Filtres
                             </button>
                             <button onclick="toggleMenu()"
@@ -2003,15 +2035,15 @@ function render() {
                                 
                                 <div class="flex gap-3 flex-wrap">
                                     <div class="flex-1 min-w-[150px]">
-                                        <label class="block text-xs text-gray-700 font-medium mb-1">Date de début</label>
-                                        <input type="date" value="${state.tempDateFrom}" 
-                                               onchange="updateTempDateFrom(this.value)" 
+                                        <label class="block text-xs text-blue-900 font-bold mb-1">📅 Date de début</label>
+                                        <input type="date" value="${state.tempDateFrom}"
+                                               onchange="updateTempDateFrom(this.value)"
                                                class="w-full px-3 py-2 border-2 rounded-lg text-sm input-modern" />
                                     </div>
                                     <div class="flex-1 min-w-[150px]">
-                                        <label class="block text-xs text-gray-700 font-medium mb-1">Date de fin</label>
-                                        <input type="date" value="${state.tempDateTo}" 
-                                               onchange="updateTempDateTo(this.value)" 
+                                        <label class="block text-xs text-blue-900 font-bold mb-1">📅 Date de fin</label>
+                                        <input type="date" value="${state.tempDateTo}"
+                                               onchange="updateTempDateTo(this.value)"
                                                class="w-full px-3 py-2 border-2 rounded-lg text-sm input-modern" />
                                     </div>
                                 </div>
@@ -2058,14 +2090,25 @@ function render() {
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     ${filteredDocs.map(doc => `
                         <div onclick="showDocDetail('${doc._id}')"
-                             class="doc-card p-5 rounded-2xl shadow-md cursor-pointer animate-fade-in hover:shadow-xl transition-shadow">
+                             class="doc-card p-5 rounded-2xl shadow-md cursor-pointer animate-fade-in hover:shadow-xl transition-shadow ${doc.locked ? 'locked' : ''}">
                             <div class="flex justify-between items-start mb-3">
                                 <h3 class="font-bold text-gray-800 flex-1 text-lg">${doc.titre}</h3>
-                                <span class="text-3xl">${getCategoryIcon(doc.categorie)}</span>
+                                <div class="flex items-center gap-2">
+                                    ${doc.locked ? '<span class="text-2xl" title="Document verrouillé">🔒</span>' : ''}
+                                    <span class="text-3xl">${getCategoryIcon(doc.categorie)}</span>
+                                </div>
                             </div>
                             <span class="category-badge inline-block px-3 py-1 text-sm rounded-full ${getCategoryColor(doc.categorie)} font-medium mb-3">
                                 ${getCategoryName(doc.categorie)}
                             </span>
+                            ${doc.locked ? `
+                                <div class="mb-2 px-2 py-1 bg-gradient-to-r from-red-100 to-orange-100 border-2 border-red-400 rounded-lg">
+                                    <p class="text-xs font-bold text-red-700 flex items-center gap-1">
+                                        🔒 VERROUILLÉ
+                                        ${doc.lockedBy ? `par ${doc.lockedBy.nomComplet}` : ''}
+                                    </p>
+                                </div>
+                            ` : ''}
                             <div class="mt-3 space-y-2 border-t pt-3">
                                 ${doc.idDocument ? `
                                 <p class="text-sm text-blue-600 font-semibold flex items-center gap-2">
@@ -2089,7 +2132,7 @@ function render() {
                 ${filteredDocs.length === 0 ? `
                     <div class="text-center py-20 animate-fade-in">
                         <div class="text-6xl mb-4">🔭</div>
-                        <p class="text-gray-500 text-xl mb-6">Aucun document trouvé</p>
+                        <p class="text-blue-900 font-bold text-xl mb-6">Aucun document trouvé</p>
                         <button onclick="toggleUploadForm()" 
                                 class="px-8 py-4 btn-primary text-white rounded-xl hover:shadow-lg transition font-semibold text-lg">
                             ➕ Ajouter un document
@@ -2102,7 +2145,7 @@ function render() {
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 backdrop-blur-sm" onclick="toggleMenu()"></div>
                 <div class="fixed right-0 top-0 h-screen w-80 sidebar-menu shadow-2xl z-50 animate-slide-in flex flex-col">
                     <div class="flex-shrink-0 p-6 pb-4 border-b border-gray-200">
-                        <button onclick="toggleMenu()" class="absolute top-4 right-4 text-2xl text-gray-600 hover:text-gray-800">✖</button>
+                        <button onclick="toggleMenu()" class="absolute top-4 right-4 text-2xl text-red-600 hover:text-red-800 font-bold">✖</button>
                         <h2 class="text-2xl font-bold bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">Menu</h2>
                     </div>
                     <div class="flex-1 overflow-y-auto p-6 pt-4">
@@ -2110,7 +2153,7 @@ function render() {
                         ${state.currentUserInfo ? `
                             <div class="mb-4 p-3 bg-gradient-to-br from-blue-50 to-green-50 rounded-xl">
                                 <p class="text-sm font-semibold text-gray-700">${state.currentUserInfo.nom}</p>
-                                <p class="text-xs text-gray-600">Niveau ${state.currentUserInfo.niveau} - ${state.currentUserInfo.role}</p>
+                                <p class="text-xs text-blue-900 font-bold">Niveau ${state.currentUserInfo.niveau} - ${state.currentUserInfo.role}</p>
                             </div>
                         ` : ''}
 
@@ -2125,9 +2168,6 @@ function render() {
                                 </button>
                                 <button onclick="toggleUsersManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 rounded-xl transition font-medium">
                                     👥 Gérer les utilisateurs
-                                </button>
-                                <button onclick="toggleRolesManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-indigo-50 hover:to-blue-50 rounded-xl transition font-medium">
-                                    🎭 Gérer les rôles
                                 </button>
                                 <button onclick="toggleAdvancedStats()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-green-50 hover:to-teal-50 rounded-xl transition font-medium">
                                     📊 Statistiques avancées
@@ -2205,6 +2245,22 @@ function render() {
                             <input type="text" placeholder="Tags (séparés par des virgules)" value="${formData.tags}"
                                    oninput="updateFormData('tags', this.value)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+
+                            ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                                <div class="flex items-center gap-3 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl border-2 border-yellow-400">
+                                    <input type="checkbox"
+                                           id="lockDocument"
+                                           ${formData.locked ? 'checked' : ''}
+                                           onchange="updateFormData('locked', this.checked)"
+                                           class="w-5 h-5 accent-orange-500 cursor-pointer">
+                                    <label for="lockDocument" class="cursor-pointer font-bold text-white flex items-center gap-2" style="color: white !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);">
+                                        <span class="text-xl">${formData.locked ? '🔒' : '🔓'}</span>
+                                        ${formData.locked ? 'Document verrouillé' : 'Verrouiller ce document'}
+                                        <span class="text-xs text-yellow-300 font-bold">(niveau 1 uniquement)</span>
+                                    </label>
+                                </div>
+                            ` : ''}
+
                             <label class="block w-full px-6 py-4 btn-primary text-white rounded-xl text-center cursor-pointer hover:shadow-lg font-semibold transition">
                                 🔎 Choisir un fichier
                                 <input type="file" onchange="handleFileUpload(event)" class="hidden">
@@ -2793,7 +2849,12 @@ function render() {
                             ` : ''}
 
                             ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
-                                <!-- NIVEAU 1 : Télécharger, Partager et Supprimer N'IMPORTE QUEL document -->
+                                <!-- NIVEAU 1 : Télécharger, Verrouiller, Partager et Supprimer N'IMPORTE QUEL document -->
+                                <button onclick="toggleDocumentLock('${state.selectedDoc._id}')"
+                                        class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-yellow-500 to-orange-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
+                                    <span class="text-xl">${state.selectedDoc.locked ? '🔒' : '🔓'}</span>
+                                    ${state.selectedDoc.locked ? 'Déverrouiller' : 'Verrouiller'}
+                                </button>
                                 <button onclick="openShareModal('${state.selectedDoc._id}')"
                                         class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2">
                                     <span class="text-xl">📤</span> Partager
@@ -2839,66 +2900,82 @@ function render() {
             ` : ''}
 
             ${state.showShareModal ? `
-                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                <div class="fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
                      onclick="if(event.target === this) closeShareModal()">
-                    <div class="modal-glass rounded-2xl p-8 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
-                        <div class="flex justify-between items-start mb-6">
-                            <h2 class="text-3xl font-bold text-gray-800">📤 Partager le document</h2>
-                            <button onclick="closeShareModal()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                    <div class="modal-glass share-modal rounded-2xl p-8 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                        <!-- Header -->
+                        <div class="flex justify-between items-start mb-6 pb-4 border-b-2 border-blue-500">
+                            <div>
+                                <h2 class="text-3xl font-bold text-white mb-2">📤 Partager le document</h2>
+                                <p class="text-white text-lg">Document: <span class="text-blue-400 font-bold">${state.selectedDoc ? state.selectedDoc.titre : ''}</span></p>
+                            </div>
+                            <button onclick="closeShareModal()"
+                                    class="text-3xl text-white hover:text-red-500 transition bg-red-900 hover:bg-red-800 px-3 py-1 rounded-lg font-bold">✖</button>
                         </div>
 
-                        <div class="mb-6">
-                            <p class="text-gray-600 mb-2">Document: <strong>${state.selectedDoc ? state.selectedDoc.titre : ''}</strong></p>
-                            <p class="text-sm text-gray-500">Sélectionnez les utilisateurs avec qui partager ce document</p>
-                        </div>
+                        <p class="text-white text-base mb-6 font-medium">
+                            🔍 Sélectionnez les utilisateurs avec qui partager ce document
+                        </p>
 
                         ${state.shareAvailableUsers.length === 0 ? `
                             <div class="text-center py-8">
-                                <div class="text-4xl mb-3">👥</div>
-                                <p class="text-gray-600">Chargement des utilisateurs...</p>
+                                <div class="text-6xl mb-3">👥</div>
+                                <p class="text-white text-xl font-semibold">Chargement des utilisateurs...</p>
                             </div>
                         ` : `
-                            <!-- ✅ NOUVEAU: Barre de recherche -->
-                            <div class="mb-4">
+                            <!-- Barre de recherche -->
+                            <div class="mb-6">
+                                <label class="block text-white font-bold mb-2 text-sm">🔎 RECHERCHER UN UTILISATEUR</label>
                                 <input type="text"
-                                       placeholder="🔍 Rechercher un utilisateur (nom, email, département)..."
+                                       placeholder="Nom, email, département..."
                                        value="${state.shareSearchTerm}"
                                        oninput="updateShareSearch(this.value)"
-                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
+                                       class="share-search-input w-full px-5 py-4 border-3 border-blue-500 rounded-xl text-lg font-semibold">
                             </div>
 
-                            <!-- ✅ NOUVEAU: Bouton Tout sélectionner / Tout désélectionner -->
-                            <div class="mb-4 flex items-center justify-between bg-blue-50 p-3 rounded-xl">
-                                <span class="text-sm text-gray-700">
-                                    ${state.shareSelectedUsers.length} utilisateur(s) sélectionné(s) sur ${getFilteredShareUsers().length}
-                                </span>
+                            <!-- Compteur et bouton Tout sélectionner -->
+                            <div class="mb-6 flex items-center justify-between bg-gradient-to-r from-blue-900 to-blue-800 p-5 rounded-xl border-3 border-blue-400 shadow-lg">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-4xl">✅</span>
+                                    <div>
+                                        <p class="text-white font-bold text-xl">${state.shareSelectedUsers.length} sélectionné(s)</p>
+                                        <p class="text-blue-200 text-sm">sur ${getFilteredShareUsers().length} utilisateur(s)</p>
+                                    </div>
+                                </div>
                                 <button onclick="toggleSelectAll()"
-                                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium text-sm">
+                                        class="px-6 py-3 bg-white text-blue-900 rounded-xl hover:bg-blue-100 transition font-bold text-base shadow-lg">
                                     ${state.shareSelectedUsers.length === getFilteredShareUsers().length ? '❌ Tout désélectionner' : '✅ Tout sélectionner'}
                                 </button>
                             </div>
 
                             <!-- Liste des utilisateurs -->
-                            <div class="space-y-2 max-h-96 overflow-y-auto mb-6 border-2 border-gray-200 rounded-xl p-2">
-                                ${getFilteredShareUsers().length === 0 ? `
-                                    <div class="text-center py-8 text-gray-500">
-                                        <div class="text-4xl mb-2">🔍</div>
-                                        <p>Aucun utilisateur trouvé</p>
-                                    </div>
-                                ` : getFilteredShareUsers().map(user => `
-                                    <label class="flex items-center gap-3 p-4 bg-white rounded-xl hover:shadow-md transition cursor-pointer border-2 ${state.shareSelectedUsers.includes(user.username) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}">
-                                        <input type="checkbox"
-                                               ${state.shareSelectedUsers.includes(user.username) ? 'checked' : ''}
-                                               onchange="toggleUserSelection('${user.username}')"
-                                               class="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500">
-                                        <div class="flex-1">
-                                            <div class="font-semibold text-gray-800">${user.nom}</div>
-                                            <div class="text-sm text-gray-600">
-                                                ${user.email} • ${user.departement}
-                                            </div>
+                            <div class="mb-6">
+                                <label class="block text-white font-bold mb-3 text-sm">👥 LISTE DES UTILISATEURS</label>
+                                <div class="space-y-3 max-h-96 overflow-y-auto border-3 border-blue-500 rounded-xl p-3 bg-black">
+                                    ${getFilteredShareUsers().length === 0 ? `
+                                        <div class="text-center py-12 text-white">
+                                            <div class="text-6xl mb-3">🔍</div>
+                                            <p class="text-xl font-bold">Aucun utilisateur trouvé</p>
                                         </div>
-                                    </label>
-                                `).join('')}
+                                    ` : getFilteredShareUsers().map(user => `
+                                        <label class="flex items-center gap-4 p-4 rounded-xl hover:scale-102 transition cursor-pointer border-2 ${state.shareSelectedUsers.includes(user.username) ? 'border-green-400 bg-gradient-to-r from-green-900 to-green-800 shadow-lg' : 'border-gray-600 bg-gradient-to-r from-gray-800 to-gray-700'}">
+                                            <input type="checkbox"
+                                                   ${state.shareSelectedUsers.includes(user.username) ? 'checked' : ''}
+                                                   onchange="toggleUserSelection('${user.username}')"
+                                                   class="w-6 h-6 accent-green-500 rounded cursor-pointer">
+                                            <div class="flex-1">
+                                                <div class="font-bold text-white text-lg mb-1">${user.nom}</div>
+                                                <div class="text-base text-white font-medium">
+                                                    📧 ${user.email}
+                                                </div>
+                                                <div class="text-base text-blue-300 font-semibold">
+                                                    🏢 ${user.departement}
+                                                </div>
+                                            </div>
+                                            ${state.shareSelectedUsers.includes(user.username) ? '<span class="text-3xl">✅</span>' : '<span class="text-3xl opacity-30">⬜</span>'}
+                                        </label>
+                                    `).join('')}
+                                </div>
                             </div>
 
                             <!-- Boutons d'action -->
@@ -3089,6 +3166,16 @@ function togglePasswordVisibility(inputId) {
 
 // Initialisation
 async function initApp() {
+    // Nettoyer l'ancien localStorage (migration vers sessionStorage)
+    try {
+        if (localStorage.getItem('cerer_session')) {
+            localStorage.removeItem('cerer_session');
+            console.log('✅ Migration localStorage → sessionStorage effectuée');
+        }
+    } catch (error) {
+        console.error('Erreur migration storage:', error);
+    }
+
     // Afficher le loader de vérification de session
     render();
 

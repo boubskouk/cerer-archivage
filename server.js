@@ -15,6 +15,16 @@ const fs = require('fs');
 const bcrypt = require('bcrypt'); // SÉCURITÉ: Hachage des mots de passe
 const OfficeEditor = require('./office-editor'); // Module d'édition Office
 
+// ✅ NOUVEAU: Modules de sécurité
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
+const { body, validationResult } = require('express-validator');
+const security = require('./security-config');
+
+// ✅ NOUVEAU: Validation domaines universitaires et envoi email
+const { validateUniversityEmail } = require('./config/allowedDomains');
+const { sendWelcomeEmail } = require('./services/emailService');
+
 const app = express();
 
 // Configuration
@@ -40,9 +50,28 @@ let shareHistoryCollection;
 // ============================================
 // MIDDLEWARE
 // ============================================
+
+// ✅ SÉCURITÉ: Headers de sécurité avec Helmet
+app.use(security.helmetConfig);
+
+// ✅ SÉCURITÉ: Compression des réponses
+app.use(security.compressionConfig);
+
+// CORS et parsing
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// ✅ SÉCURITÉ: Protection contre les injections NoSQL
+app.use(security.sanitizeConfig);
+
+// ✅ SÉCURITÉ: Logger les requêtes HTTP
+app.use(security.requestLogger);
+
+// ✅ SÉCURITÉ: Rate limiting général (100 requêtes/15min)
+app.use('/api/', security.generalLimiter);
+
+// Fichiers statiques
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================
@@ -257,9 +286,36 @@ async function connectDB(retryCount = 0) {
         await documentsCollection.createIndex({ idUtilisateur: 1, dateAjout: -1 });
         await documentsCollection.createIndex({ idDepartement: 1 });
         await usersCollection.createIndex({ username: 1 }, { unique: true });
+        await usersCollection.createIndex({ email: 1 }, { unique: true }); // ✅ Email unique
 
         console.log('✅ Connexion à MongoDB réussie');
         console.log(`📊 Base de données: ${DB_NAME}`);
+
+        // ✅ SÉCURITÉ: Configuration des sessions sécurisées avec MongoDB
+        app.use(session({
+            secret: process.env.SESSION_SECRET || 'changez_ce_secret_en_production',
+            resave: false,
+            saveUninitialized: false,
+            rolling: true, // Renouvelle le cookie à chaque requête
+            store: MongoStore.create({
+                client: client,
+                dbName: DB_NAME,
+                collectionName: 'sessions',
+                ttl: 3600, // TTL court de 1 heure dans MongoDB
+                crypto: {
+                    secret: process.env.SESSION_CRYPTO_SECRET || 'changez_ce_secret_aussi'
+                },
+                touchAfter: 60 // Mise à jour toutes les 60 secondes si activité
+            }),
+            cookie: {
+                secure: process.env.NODE_ENV === 'production', // HTTPS uniquement en production
+                httpOnly: true, // Pas accessible en JavaScript côté client
+                // Ne pas définir maxAge pour faire un cookie de session
+                sameSite: 'strict' // Protection CSRF
+            },
+            name: 'sessionId' // Cacher que c'est Express
+        }));
+        console.log('✅ Sessions sécurisées configurées avec MongoDB');
 
         await initializeDefaultData();
 
@@ -383,15 +439,16 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Login
-app.post('/api/login', async (req, res) => {
+// Login - ✅ SÉCURITÉ: Rate limiting strict (5 tentatives/15min)
+app.post('/api/login', security.loginLimiter, async (req, res) => {
     try {
         const { username, password } = req.body;
-        
+
         if (!username || !password) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Username et password requis' 
+            security.logLoginFailure(username || 'unknown', req.ip, req.headers['user-agent'], 'missing_credentials');
+            return res.status(400).json({
+                success: false,
+                message: 'Username et password requis'
             });
         }
         
@@ -399,6 +456,7 @@ app.post('/api/login', async (req, res) => {
         const user = await usersCollection.findOne({ username });
 
         if (!user) {
+            security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'user_not_found');
             return res.status(401).json({
                 success: false,
                 message: 'Identifiants incorrects'
@@ -430,6 +488,7 @@ app.post('/api/login', async (req, res) => {
         }
 
         if (!isValidPassword) {
+            security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'wrong_password');
             return res.status(401).json({
                 success: false,
                 message: 'Identifiants incorrects'
@@ -440,9 +499,25 @@ app.post('/api/login', async (req, res) => {
         const role = await rolesCollection.findOne({ _id: user.idRole });
         const departement = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
 
+        // ✅ NOUVEAU: Vérifier si c'est la première connexion
+        const isFirstLogin = user.firstLogin === true;
+
+        // Si c'est la première connexion, marquer comme non-première
+        if (isFirstLogin) {
+            await usersCollection.updateOne(
+                { _id: user._id },
+                { $set: { firstLogin: false, datePremiereConnexion: new Date() } }
+            );
+            console.log(`🎉 Première connexion de ${username}`);
+        }
+
+        // ✅ SÉCURITÉ: Logger la connexion réussie
+        security.logLoginSuccess(username, req.ip, req.headers['user-agent']);
+
         res.json({
             success: true,
             username,
+            firstLogin: isFirstLogin, // ✅ NOUVEAU: Indiquer si c'est la première connexion
             user: {
                 username: user.username,
                 nom: user.nom,
@@ -503,42 +578,117 @@ app.post('/api/verify-session', async (req, res) => {
     }
 });
 
-// Register
-app.post('/api/register', async (req, res) => {
+// Register - ✅ SÉCURITÉ: Validation stricte des entrées
+app.post('/api/register', [
+    // Validation username
+    body('username')
+        .trim()
+        .notEmpty().withMessage('Username requis')
+        .isLength({ min: 3, max: 50 }).withMessage('Username: 3-50 caractères')
+        .matches(/^[a-zA-Z0-9_-]+$/).withMessage('Username: uniquement lettres, chiffres, _ et -'),
+
+    // Validation password
+    body('password')
+        .notEmpty().withMessage('Mot de passe requis')
+        .isLength({ min: 4 }).withMessage('Mot de passe: minimum 4 caractères'),
+
+    // Validation nom
+    body('nom')
+        .trim()
+        .notEmpty().withMessage('Nom requis')
+        .isLength({ min: 2, max: 100 }).withMessage('Nom: 2-100 caractères')
+        .escape(),
+
+    // ✅ VALIDATION EMAIL STRICTE + DOMAINE UNIVERSITAIRE
+    body('email')
+        .trim()
+        .notEmpty().withMessage('Email requis')
+        .isEmail().withMessage('Email invalide (format attendu: exemple@domaine.com)')
+        .normalizeEmail() // Normalise l'email (lowercase, supprime espaces)
+        .isLength({ max: 255 }).withMessage('Email trop long (max 255 caractères)')
+        .matches(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)
+            .withMessage('Format email invalide')
+        .custom(async (email) => {
+            // ✅ NOUVEAU: Vérifier que le domaine est autorisé (universités sénégalaises)
+            const domainValidation = validateUniversityEmail(email);
+            if (!domainValidation.valid) {
+                const errorMsg = domainValidation.suggestion
+                    ? `${domainValidation.error}. Vouliez-vous dire: ${domainValidation.suggestion}?`
+                    : domainValidation.error;
+                throw new Error(errorMsg);
+            }
+
+            // Vérifier si l'email existe déjà
+            const existingUser = await usersCollection.findOne({ email: email.toLowerCase() });
+            if (existingUser) {
+                throw new Error('Cet email est déjà utilisé');
+            }
+            return true;
+        })
+], async (req, res) => {
     try {
-        const { username, password, nom, email, idRole, idDepartement } = req.body;
-        
-        if (!username || !password || !nom || !email) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Données manquantes' 
+        // ✅ SÉCURITÉ: Vérifier les erreurs de validation
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            const errorMessages = errors.array().map(err => err.msg).join(', ');
+            return res.status(400).json({
+                success: false,
+                message: errorMessages,
+                errors: errors.array()
             });
         }
-        
+
+        const { username, password, nom, email, idRole, idDepartement } = req.body;
+
+        // ✅ NOUVEAU: Sauvegarder le mot de passe en clair pour l'email (avant hachage)
+        const plaintextPassword = password;
+
+        // ✅ NOUVEAU: Récupérer le nom de l'université pour l'email
+        const domainValidation = validateUniversityEmail(email);
+        const universityName = domainValidation.valid ? domainValidation.university : null;
+
         const exists = await usersCollection.findOne({ username });
         if (exists) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Utilisateur existe déjà' 
+            return res.status(400).json({
+                success: false,
+                message: 'Utilisateur existe déjà'
             });
         }
-        
+
         // Rôle et département par défaut si non spécifiés
         let roleId = idRole;
         let deptId = idDepartement;
 
         if (!roleId) {
             const defaultRole = await rolesCollection.findOne({ libelle: 'tertiaire' });
+            if (!defaultRole) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Rôle par défaut introuvable. Veuillez spécifier un rôle.'
+                });
+            }
             roleId = defaultRole._id;
         }
 
         // Vérifier le niveau du rôle pour déterminer si un département est nécessaire
         const selectedRole = await rolesCollection.findOne({ _id: new ObjectId(roleId) });
-        const isNiveau1 = selectedRole && selectedRole.niveau === 1;
+        if (!selectedRole) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rôle invalide'
+            });
+        }
+        const isNiveau1 = selectedRole.niveau === 1;
 
         // Pour les utilisateurs de niveau 1, pas de département
         if (!isNiveau1 && !deptId) {
             const defaultDept = await departementsCollection.findOne({ nom: 'Direction' });
+            if (!defaultDept) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Département par défaut introuvable. Veuillez spécifier un département.'
+                });
+            }
             deptId = defaultDept._id;
         }
 
@@ -550,9 +700,10 @@ app.post('/api/register', async (req, res) => {
             username,
             password: hashedPassword, // ✅ Mot de passe sécurisé
             nom,
-            email,
+            email: email.toLowerCase().trim(), // ✅ Email normalisé (lowercase)
             idRole: new ObjectId(roleId),
-            dateCreation: new Date()
+            dateCreation: new Date(),
+            firstLogin: true // ✅ NOUVEAU: Marquer comme première connexion
         };
 
         // Ajouter le département seulement si ce n'est pas un niveau 1
@@ -563,7 +714,7 @@ app.post('/api/register', async (req, res) => {
         }
 
         await usersCollection.insertOne(newUser);
-        
+
         // Créer les catégories par défaut
         const defaultCategories = [
             { id: 'factures', nom: 'Factures', couleur: 'bg-blue-100 text-blue-800', icon: '🧾' },
@@ -571,11 +722,34 @@ app.post('/api/register', async (req, res) => {
             { id: 'fiscalite', nom: 'Fiscalité', couleur: 'bg-green-100 text-green-800', icon: '💰' },
             { id: 'autre', nom: 'Autre', couleur: 'bg-gray-100 text-gray-800', icon: '📄' }
         ];
-        
+
         for (const cat of defaultCategories) {
             await categoriesCollection.insertOne({ idUtilisateur: username, ...cat });
         }
-        
+
+        // ✅ NOUVEAU: Envoyer l'email de bienvenue avec les identifiants
+        try {
+            const emailResult = await sendWelcomeEmail({
+                nom,
+                username,
+                password: plaintextPassword, // Mot de passe en clair (avant hachage)
+                email: email.toLowerCase().trim(),
+                university: universityName
+            });
+
+            if (emailResult.success) {
+                console.log(`✅ Email de bienvenue envoyé à ${email}`);
+            } else {
+                // L'email n'a pas pu être envoyé, mais on ne bloque pas la création
+                console.warn(`⚠️  Email non envoyé à ${email}: ${emailResult.error}`);
+                console.warn('   L\'utilisateur a été créé, mais sans notification par email');
+            }
+        } catch (emailError) {
+            // Erreur lors de l'envoi, mais on continue
+            console.error(`❌ Erreur envoi email pour ${email}:`, emailError.message);
+            console.warn('   L\'utilisateur a été créé malgré l\'échec de l\'email');
+        }
+
         res.json({ success: true });
         
     } catch (error) {
@@ -717,14 +891,96 @@ app.post('/api/users/:username/reset-password', async (req, res) => {
     }
 });
 
+// ✅ NOUVEAU: Changement de mot de passe par l'utilisateur (avec vérification ancien mot de passe)
+app.post('/api/users/:username/change-password', [
+    body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
+    body('newPassword').isLength({ min: 4 }).withMessage('Le nouveau mot de passe doit contenir au moins 4 caractères')
+], async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: errors.array().map(err => err.msg).join(', ')
+            });
+        }
+
+        const { username } = req.params;
+        const { currentPassword, newPassword } = req.body;
+
+        // Récupérer l'utilisateur
+        const user = await usersCollection.findOne({ username });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Vérifier l'ancien mot de passe
+        const isBcryptHash = /^\$2[aby]\$/.test(user.password);
+        let isValidPassword = false;
+
+        if (isBcryptHash) {
+            isValidPassword = await bcrypt.compare(currentPassword, user.password);
+        } else {
+            isValidPassword = (currentPassword === user.password);
+        }
+
+        if (!isValidPassword) {
+            return res.status(401).json({
+                success: false,
+                message: 'Mot de passe actuel incorrect'
+            });
+        }
+
+        // Hasher le nouveau mot de passe
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Mettre à jour le mot de passe
+        await usersCollection.updateOne(
+            { username },
+            { $set: {
+                password: hashedPassword,
+                updatedAt: new Date(),
+                passwordChangedAt: new Date()
+            }}
+        );
+
+        console.log(`🔑 Mot de passe changé pour: ${username}`);
+
+        res.json({
+            success: true,
+            message: 'Mot de passe changé avec succès'
+        });
+
+    } catch (error) {
+        console.error('Erreur changement mot de passe:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
 // ============================================
 // ROUTES DOCUMENTS (avec permissions)
 // ============================================
 
-// Ajouter un document
-app.post('/api/documents', async (req, res) => {
+// Ajouter un document - ✅ SÉCURITÉ: Rate limiting (10 uploads/heure)
+app.post('/api/documents', security.uploadLimiter, [
+    body('userId').trim().notEmpty().isLength({ min: 3, max: 50 }),
+    body('titre').trim().notEmpty().isLength({ min: 3, max: 200 }).escape(),
+    body('nomFichier').trim().notEmpty().isLength({ max: 255 }),
+    body('description').optional().trim().isLength({ max: 2000 }).escape(),
+    body('tags').optional().trim().isLength({ max: 500 })
+], async (req, res) => {
     try {
-        const { userId, titre, categorie, date, description, tags, nomFichier, taille, type, contenu, departementArchivage } = req.body;
+        // ✅ SÉCURITÉ: Vérifier les erreurs de validation
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Données invalides',
+                errors: errors.array()
+            });
+        }
+
+        const { userId, titre, categorie, date, description, tags, nomFichier, taille, type, contenu, departementArchivage, locked } = req.body;
         
         if (!userId || !titre || !nomFichier) {
             return res.status(400).json({
@@ -818,7 +1074,15 @@ app.post('/api/documents', async (req, res) => {
             dernierTelechargement: null,
             historiqueTelechargements: [],
             derniereConsultation: null,
-            historiqueConsultations: []
+            historiqueConsultations: [],
+            // ✅ Verrouillage du document (niveau 1 uniquement)
+            locked: locked === true && role && role.niveau === 1 ? true : false,
+            lockedBy: locked === true && role && role.niveau === 1 ? {
+                utilisateur: userId,
+                nomComplet: user.nom,
+                email: user.email,
+                date: new Date()
+            } : null
         };
         
         const result = await documentsCollection.insertOne(document);
@@ -882,8 +1146,22 @@ app.get('/api/documents/:userId/:docId', async (req, res) => {
             return res.status(404).json({ message: 'Document non trouvé' });
         }
 
-        // Enregistrer la consultation
+        // Vérifier si le document est verrouillé
         const user = await usersCollection.findOne({ username: userId });
+        if (document.locked) {
+            // Seuls les utilisateurs niveau 1 peuvent accéder aux documents verrouillés
+            const role = user ? await rolesCollection.findOne({ _id: new ObjectId(user.idRole) }) : null;
+            if (!role || role.niveau !== 1) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Document verrouillé',
+                    locked: true,
+                    lockedBy: document.lockedBy
+                });
+            }
+        }
+
+        // Enregistrer la consultation
         if (user) {
             const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
             const departement = user.idDepartement ? await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) }) : null;
@@ -1235,6 +1513,70 @@ app.get('/api/documents/:userId/:docId/shared-users', async (req, res) => {
 
     } catch (error) {
         console.error('Erreur récupération utilisateurs partagés:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Verrouiller/Déverrouiller un document (niveau 1 uniquement)
+app.post('/api/documents/:userId/:docId/toggle-lock', async (req, res) => {
+    try {
+        const { userId, docId } = req.params;
+
+        // Vérifier que l'utilisateur est de niveau 1
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé'
+            });
+        }
+
+        const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
+        if (!role || role.niveau !== 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Seuls les administrateurs niveau 1 peuvent verrouiller/déverrouiller des documents'
+            });
+        }
+
+        // Récupérer le document
+        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé'
+            });
+        }
+
+        // Inverser l'état de verrouillage
+        const newLockedState = !document.locked;
+
+        const updateData = {
+            locked: newLockedState,
+            lockedBy: newLockedState ? {
+                utilisateur: userId,
+                nomComplet: user.nom,
+                email: user.email,
+                date: new Date()
+            } : null
+        };
+
+        await documentsCollection.updateOne(
+            { _id: new ObjectId(docId) },
+            { $set: updateData }
+        );
+
+        console.log(`🔒 Document ${docId} ${newLockedState ? 'verrouillé' : 'déverrouillé'} par ${userId}`);
+
+        res.json({
+            success: true,
+            message: newLockedState ? 'Document verrouillé' : 'Document déverrouillé',
+            locked: newLockedState,
+            lockedBy: updateData.lockedBy
+        });
+
+    } catch (error) {
+        console.error('Erreur verrouillage/déverrouillage document:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
@@ -3091,7 +3433,17 @@ app.post('/api/onlyoffice/callback/:docId', async (req, res) => {
     }
 });
 
-// Route catch-all
+// ============================================
+// GESTIONNAIRES D'ERREURS (À LA FIN, APRÈS TOUTES LES ROUTES)
+// ============================================
+
+// ✅ SÉCURITÉ: Logger les erreurs
+app.use(security.errorLogger);
+
+// ✅ SÉCURITÉ: Gestionnaire d'erreurs global
+app.use(security.errorHandler);
+
+// Route catch-all (doit être APRÈS le gestionnaire d'erreurs)
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
