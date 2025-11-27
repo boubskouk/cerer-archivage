@@ -445,8 +445,17 @@ async function openOfficeOnlineEditor(doc) {
         showNotification('💡 Office Online sauvegarde automatiquement vos modifications', 'info');
     });
 
-    document.getElementById('close-editor-btn').addEventListener('click', () => {
-        if (confirm('Fermer l\'éditeur Office Online? Les modifications sont déjà sauvegardées.')) {
+    document.getElementById('close-editor-btn').addEventListener('click', async () => {
+        const confirmed = await customConfirm({
+            title: 'Fermer l\'éditeur',
+            message: 'Fermer l\'éditeur Office Online?\n\nLes modifications sont automatiquement sauvegardées.',
+            confirmText: 'Oui, fermer',
+            cancelText: 'Continuer l\'édition',
+            type: 'info',
+            icon: '📝'
+        });
+
+        if (confirmed) {
             closeEditor();
             loadData(); // Recharger pour voir les changements
         }
@@ -544,7 +553,16 @@ function handleEditorEscape(e) {
         const changeCount = Object.keys(editorState.changes).length;
 
         if (changeCount > 0) {
-            if (confirm(`Vous avez ${changeCount} modification${changeCount > 1 ? 's' : ''} non enregistrée${changeCount > 1 ? 's' : ''}.\n\nVoulez-vous vraiment fermer sans enregistrer?`)) {
+            const confirmed = await customConfirm({
+                title: 'Fermer sans enregistrer ?',
+                message: `Vous avez ${changeCount} modification${changeCount > 1 ? 's' : ''} non enregistrée${changeCount > 1 ? 's' : ''}.\n\nVoulez-vous vraiment fermer sans enregistrer?`,
+                confirmText: 'Oui, fermer',
+                cancelText: 'Continuer l\'édition',
+                type: 'warning',
+                icon: '⚠️'
+            });
+
+            if (confirmed) {
                 closeEditor();
             }
         } else {

@@ -111,7 +111,16 @@ async function getSharedDocuments() {
 
 // Supprimer tous les messages reçus
 async function deleteAllReceivedMessages() {
-    if (!confirm('Voulez-vous vraiment supprimer TOUS les messages reçus ? Cette action est irréversible.')) {
+    const confirmed = await customConfirm({
+        title: 'Supprimer tous les messages reçus',
+        message: 'Voulez-vous vraiment supprimer TOUS les messages reçus ?\n\nCette action est IRRÉVERSIBLE.',
+        confirmText: 'Oui, tout supprimer',
+        cancelText: 'Annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) {
         return;
     }
 
@@ -136,7 +145,16 @@ async function deleteAllReceivedMessages() {
 
 // Supprimer tous les messages envoyés
 async function deleteAllSentMessages() {
-    if (!confirm('Voulez-vous vraiment supprimer TOUS les messages envoyés ? Cette action est irréversible.')) {
+    const confirmed = await customConfirm({
+        title: 'Supprimer tous les messages envoyés',
+        message: 'Voulez-vous vraiment supprimer TOUS les messages envoyés ?\n\nCette action est IRRÉVERSIBLE.',
+        confirmText: 'Oui, tout supprimer',
+        cancelText: 'Annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) {
         return;
     }
 
@@ -161,7 +179,16 @@ async function deleteAllSentMessages() {
 
 // Supprimer tout l'historique de partage
 async function deleteAllSharedDocuments() {
-    if (!confirm('Voulez-vous vraiment supprimer TOUT l\'historique de partage de documents ? Cette action est irréversible.')) {
+    const confirmed = await customConfirm({
+        title: 'Supprimer tout l\'historique de partage',
+        message: 'Voulez-vous vraiment supprimer TOUT l\'historique de partage de documents ?\n\nCette action est IRRÉVERSIBLE.',
+        confirmText: 'Oui, tout supprimer',
+        cancelText: 'Annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) {
         return;
     }
 
@@ -594,17 +621,31 @@ function renderComposeForm() {
                     <div class="relative mb-2">
                         <input type="text" id="message-to-search" placeholder="🔍 Rechercher un utilisateur..."
                                oninput="filterMessageRecipients(this.value)"
+                               onfocus="showRecipientsList()"
                                class="w-full px-4 py-3 pr-10 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition bg-white text-base">
                         <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xl">🔍</span>
                     </div>
 
-                    <!-- Liste déroulante -->
-                    <select id="message-to" required
-                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition bg-white text-base font-medium"
-                            size="5">
-                        <option value="">-- Choisir un destinataire --</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-2">💡 Tapez pour filtrer la liste</p>
+                    <!-- Utilisateur sélectionné -->
+                    <div id="selected-recipient" class="hidden mb-3 p-4 bg-gradient-to-r from-green-100 to-blue-100 border-2 border-green-400 rounded-xl">
+                        <p class="text-sm font-bold text-gray-700 mb-1">✓ Destinataire sélectionné :</p>
+                        <p id="selected-recipient-text" class="text-lg font-bold text-gray-900"></p>
+                        <button type="button" onclick="clearRecipientSelection()"
+                                class="mt-2 px-3 py-1 bg-red-500 text-white rounded-lg text-sm font-semibold hover:bg-red-600 transition">
+                            ✕ Changer
+                        </button>
+                    </div>
+
+                    <!-- Liste déroulante cliquable -->
+                    <div id="recipients-list-container" class="mb-2">
+                        <select id="message-to" required
+                                onchange="selectRecipientFromList()"
+                                class="w-full px-4 py-3 border-2 border-blue-400 rounded-xl focus:border-blue-600 focus:ring-2 focus:ring-blue-300 outline-none transition bg-white text-base font-medium cursor-pointer hover:border-blue-500 shadow-md"
+                                size="8">
+                            <option value="">-- Cliquez pour sélectionner --</option>
+                        </select>
+                    </div>
+                    <p class="text-xs text-blue-700 mt-2 font-semibold">💡 Tapez pour filtrer, puis cliquez sur un nom pour sélectionner</p>
                 </div>
 
                 <!-- Sujet -->
@@ -899,9 +940,63 @@ function filterMessageRecipients(searchTerm) {
     }
 }
 
+// Afficher la liste des destinataires
+function showRecipientsList() {
+    const container = document.getElementById('recipients-list-container');
+    if (container) {
+        container.style.display = 'block';
+    }
+}
+
+// Sélectionner un destinataire depuis la liste
+function selectRecipientFromList() {
+    const select = document.getElementById('message-to');
+    const selectedDiv = document.getElementById('selected-recipient');
+    const selectedText = document.getElementById('selected-recipient-text');
+    const container = document.getElementById('recipients-list-container');
+    const searchInput = document.getElementById('message-to-search');
+
+    if (!select || !selectedDiv || !selectedText) return;
+
+    const selectedOption = select.options[select.selectedIndex];
+
+    if (selectedOption && selectedOption.value) {
+        // Afficher l'utilisateur sélectionné
+        selectedText.textContent = selectedOption.textContent;
+        selectedDiv.classList.remove('hidden');
+
+        // Masquer la liste
+        if (container) container.style.display = 'none';
+
+        // Effacer le champ de recherche
+        if (searchInput) searchInput.value = '';
+
+        showNotification('✓ Destinataire sélectionné : ' + selectedOption.textContent, 'success');
+    }
+}
+
+// Effacer la sélection du destinataire
+function clearRecipientSelection() {
+    const select = document.getElementById('message-to');
+    const selectedDiv = document.getElementById('selected-recipient');
+    const container = document.getElementById('recipients-list-container');
+    const searchInput = document.getElementById('message-to-search');
+
+    if (select) select.selectedIndex = 0;
+    if (selectedDiv) selectedDiv.classList.add('hidden');
+    if (container) container.style.display = 'block';
+    if (searchInput) {
+        searchInput.value = '';
+        searchInput.focus();
+    }
+}
+
 // Exposer les fonctions nécessaires dans le scope global
 window.replyToMessage = replyToMessage;
 window.sendMessage = sendMessage;
 window.deleteMessage = deleteMessage;
 window.markMessageAsRead = markMessageAsRead;
 window.filterMessageRecipients = filterMessageRecipients;
+window.showRecipientsList = showRecipientsList;
+window.selectRecipientFromList = selectRecipientFromList;
+window.clearRecipientSelection = clearRecipientSelection;

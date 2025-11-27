@@ -10,6 +10,23 @@ const modalState = {
     reject: null
 };
 
+// Fonction globale pour fermer les modals (définie au début pour être toujours disponible)
+window.closeCustomModal = function(confirmed = false) {
+    const overlay = document.getElementById('custom-modal-overlay');
+    if (overlay) {
+        overlay.classList.add('animate-fade-out');
+        setTimeout(() => {
+            overlay.remove();
+        }, 200);
+    }
+
+    // Si un résolveur existe, l'appeler
+    if (window._customModalResolver) {
+        window._customModalResolver(confirmed);
+        delete window._customModalResolver;
+    }
+};
+
 // ============================================
 // MODAL DE CONFIRMATION MODERNE - DARK MODE
 // ============================================
@@ -100,18 +117,8 @@ function customConfirm(options) {
         div.innerHTML = modalHTML;
         document.body.appendChild(div);
 
-        // Fonction de fermeture globale
-        window.closeCustomModal = (confirmed) => {
-            const overlay = document.getElementById('custom-modal-overlay');
-            if (overlay) {
-                overlay.classList.add('animate-fade-out');
-                setTimeout(() => {
-                    overlay.remove();
-                    delete window.closeCustomModal;
-                }, 200);
-            }
-            resolve(confirmed);
-        };
+        // Stocker le résolveur pour que closeCustomModal puisse l'appeler
+        window._customModalResolver = resolve;
     });
 }
 

@@ -227,6 +227,21 @@ function stopInactivityTimer() {
     });
 }
 
+// Démarrer le timer de réinitialisation automatique des filtres (5 minutes)
+function startFilterResetTimer() {
+    // Arrêter le timer existant s'il y en a un
+    if (window.filterResetTimer) {
+        clearInterval(window.filterResetTimer);
+    }
+
+    // Créer un nouveau timer qui se déclenche toutes les 5 minutes
+    window.filterResetTimer = setInterval(() => {
+        console.log('🔄 Réinitialisation automatique des filtres après 5 minutes');
+        resetFilters();
+        showNotification('🔄 Filtres réinitialisés automatiquement', 'info');
+    }, 5 * 60 * 1000); // 5 minutes en millisecondes
+}
+
 // ===== AUTHENTIFICATION =====
 async function login(username, password) {
     try {
@@ -241,6 +256,9 @@ async function login(username, password) {
 
             // Démarrer le système de déconnexion automatique
             startInactivityTimer();
+
+            // Démarrer le timer de réinitialisation automatique des filtres
+            startFilterResetTimer();
 
             await loadData();
             showNotification(`✅ Bienvenue ${result.user.nom}!`);
@@ -286,6 +304,15 @@ async function logout(isAutoLogout = false) {
         });
 
         if (!confirmed) return;
+    }
+
+    // Réinitialiser tous les filtres avant de se déconnecter
+    resetFilters();
+
+    // Arrêter le timer de réinitialisation automatique
+    if (window.filterResetTimer) {
+        clearInterval(window.filterResetTimer);
+        window.filterResetTimer = null;
     }
 
     // Nettoyer la session
@@ -617,6 +644,54 @@ function formatSize(bytes) {
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+}
+
+// Copier l'ID d'un document dans le presse-papiers
+function copyDocumentId(docId) {
+    if (!docId) {
+        showNotification('Aucun ID à copier', 'error');
+        return;
+    }
+
+    // Méthode moderne avec l'API Clipboard
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(docId)
+            .then(() => {
+                showNotification(`✅ ID copié : ${docId}`, 'success');
+            })
+            .catch(err => {
+                console.error('Erreur copie clipboard:', err);
+                // Fallback vers la méthode ancienne
+                fallbackCopyToClipboard(docId);
+            });
+    } else {
+        // Fallback pour les navigateurs plus anciens
+        fallbackCopyToClipboard(docId);
+    }
+}
+
+// Méthode de fallback pour copier dans le presse-papiers
+function fallbackCopyToClipboard(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+            showNotification(`✅ ID copié : ${text}`, 'success');
+        } else {
+            showNotification('Erreur lors de la copie', 'error');
+        }
+    } catch (err) {
+        console.error('Erreur copie fallback:', err);
+        showNotification('Erreur lors de la copie', 'error');
+    }
+
+    document.body.removeChild(textarea);
 }
 
 function showNotification(message, type = 'success') {
@@ -1334,7 +1409,9 @@ function toggleUserSelection(username) {
         // Sélectionner
         state.shareSelectedUsers.push(username);
     }
-    render();
+
+    // Mettre à jour uniquement la liste au lieu de tout recharger
+    updateShareUsersList();
 }
 
 async function confirmShare() {
@@ -1362,7 +1439,87 @@ async function confirmShare() {
 // ✅ NOUVEAU: Mettre à jour le terme de recherche de partage
 function updateShareSearch(value) {
     state.shareSearchTerm = value.toLowerCase();
-    render();
+
+    // Filtrer uniquement la liste des utilisateurs sans recharger toute la page
+    updateShareUsersList();
+}
+
+// Mettre à jour uniquement la liste des utilisateurs (sans tout re-render)
+function updateShareUsersList() {
+    const container = document.querySelector('.share-users-list-container');
+    if (!container) return;
+
+    const filteredUsers = getFilteredShareUsers();
+
+    if (filteredUsers.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-12 text-gray-500">
+                <div class="text-6xl mb-3 opacity-50">🔍</div>
+                <p class="text-lg font-semibold">Aucun utilisateur trouvé</p>
+                <p class="text-sm mt-2">Essayez un autre terme de recherche</p>
+            </div>
+        `;
+    } else {
+        container.innerHTML = filteredUsers.map(user => `
+            <label class="flex items-center gap-3 p-4 rounded-lg hover:shadow-md transition cursor-pointer border-2 ${state.shareSelectedUsers.includes(user.username) ? 'border-green-400 bg-green-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-300'}">
+                <input type="checkbox"
+                       ${state.shareSelectedUsers.includes(user.username) ? 'checked' : ''}
+                       onchange="toggleUserSelection('${user.username}')"
+                       class="w-5 h-5 accent-blue-500 rounded cursor-pointer">
+                <div class="flex-1">
+                    <div class="font-bold text-gray-900 text-base mb-1">${user.nom}</div>
+                    <div class="text-sm text-gray-600">
+                        📧 ${user.email}
+                    </div>
+                    <div class="text-sm text-blue-600 font-medium mt-1">
+                        🏢 ${user.departement}
+                    </div>
+                </div>
+                ${state.shareSelectedUsers.includes(user.username) ? '<span class="text-2xl text-green-600">✓</span>' : '<span class="text-2xl text-gray-300">○</span>'}
+            </label>
+        `).join('');
+    }
+
+    // Mettre à jour le compteur
+    updateShareCounter();
+}
+
+// Mettre à jour le compteur de sélection
+function updateShareCounter() {
+    const counterSelected = document.querySelector('.share-counter-selected');
+    const counterTotal = document.querySelector('.share-counter-total');
+    const selectAllBtn = document.querySelector('.share-select-all-btn');
+    const confirmBtn = document.querySelector('.share-confirm-btn');
+
+    if (counterSelected) {
+        counterSelected.textContent = `${state.shareSelectedUsers.length} sélectionné(s)`;
+    }
+
+    if (counterTotal) {
+        counterTotal.textContent = `sur ${getFilteredShareUsers().length} utilisateur(s) disponible(s)`;
+    }
+
+    if (selectAllBtn) {
+        const filteredUsers = getFilteredShareUsers();
+        selectAllBtn.textContent = state.shareSelectedUsers.length === filteredUsers.length ? '✖ Tout désélectionner' : '✓ Tout sélectionner';
+    }
+
+    if (confirmBtn) {
+        const span = confirmBtn.querySelector('span:last-child');
+        if (span) {
+            span.textContent = `Partager avec ${state.shareSelectedUsers.length} utilisateur(s)`;
+        }
+
+        if (state.shareSelectedUsers.length === 0) {
+            confirmBtn.disabled = true;
+            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            confirmBtn.classList.remove('hover:from-blue-600', 'hover:to-blue-700');
+        } else {
+            confirmBtn.disabled = false;
+            confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            confirmBtn.classList.add('hover:from-blue-600', 'hover:to-blue-700');
+        }
+    }
 }
 
 // ✅ NOUVEAU: Sélectionner / Désélectionner tous les utilisateurs visibles
@@ -1376,7 +1533,9 @@ function toggleSelectAll() {
         // Sélectionner tous les utilisateurs visibles
         state.shareSelectedUsers = filteredUsers.map(u => u.username);
     }
-    render();
+
+    // Mettre à jour uniquement la liste au lieu de tout recharger
+    updateShareUsersList();
 }
 
 // ✅ NOUVEAU: Obtenir les utilisateurs filtrés par recherche
@@ -1510,15 +1669,24 @@ function closeComposeMessage() {
 // Gérer la recherche d'utilisateurs
 function handleUserSearch(value) {
     state.userSearchTerm = value;
-    state.showUserDropdown = value.length > 0;
-    state.selectedUser = null;
-    state.composeMessageTo = '';
+    state.showUserDropdown = true; // Toujours afficher le dropdown
+    if (value.length === 0) {
+        // Si le champ est vide, ne pas réinitialiser la sélection
+        // pour permettre de voir la liste complète
+    } else {
+        // Si on tape, réinitialiser la sélection
+        state.selectedUser = null;
+        state.composeMessageTo = '';
+    }
     render();
 }
 
 // Filtrer les utilisateurs selon le terme de recherche
 function getFilteredUsers() {
-    if (!state.userSearchTerm) return [];
+    // Si pas de terme de recherche, afficher TOUS les utilisateurs
+    if (!state.userSearchTerm || state.userSearchTerm.trim() === '') {
+        return state.allUsers.slice(0, 20); // Afficher les 20 premiers utilisateurs
+    }
 
     const searchLower = state.userSearchTerm.toLowerCase();
     return state.allUsers.filter(user => {
@@ -1528,7 +1696,7 @@ function getFilteredUsers() {
             (user.departement && user.departement.toLowerCase().includes(searchLower)) ||
             (user.role && user.role.toLowerCase().includes(searchLower))
         );
-    }).slice(0, 10); // Limiter à 10 résultats
+    }).slice(0, 20); // Augmenter la limite à 20 résultats
 }
 
 // Sélectionner un utilisateur
@@ -1772,19 +1940,21 @@ function render() {
     if (!state.isAuthenticated) {
         app.innerHTML = `
             <div class="min-h-screen flex items-center justify-center gradient-bg">
-                <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md animate-fade-in">
+                <div class="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md animate-fade-in border-4 border-blue-400">
                     <div class="text-center mb-8">
                         <div class="flex justify-center mb-4">
-                            <img src="/logo_white.png" alt="Logo C.E.R.E.R" class="w-20 h-20 animate-float" style="filter: drop-shadow(0 4px 6px rgba(59, 130, 246, 0.3));" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                            <div class="logo-icon" style="display: none;">🗄️</div>
+                            <div class="bg-white p-4 rounded-3xl shadow-2xl border-4 border-gray-200">
+                                <img src="/logo_white.png" alt="Logo C.E.R.E.R" class="w-20 h-20 animate-float" style="filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                <div class="logo-icon text-6xl" style="display: none;">🗄️</div>
+                            </div>
                         </div>
-                        <h1 class="logo-text mb-2">Archivage C.E.R.E.R</h1>
-                        <p class="text-blue-900 font-bold">Système de gestion documentaire</p>
+                        <h1 class="text-3xl font-black text-gray-900 mb-2">Archivage C.E.R.E.R</h1>
+                        <p class="text-gray-700 font-bold text-base">Système de gestion documentaire</p>
                     </div>
                     
                     ${state.showRegister ? `
                         <div class="space-y-3">
-                            <h2 class="text-xl font-bold text-blue-900 mb-2">Créer un compte</h2>
+                            <h2 class="text-2xl font-black text-gray-900 mb-4 border-b-4 border-blue-500 pb-2">Créer un compte</h2>
 
                             <input id="reg_nom" type="text" placeholder="Nom complet"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
@@ -1799,7 +1969,7 @@ function render() {
                                 <input id="reg_password" type="password" placeholder="Mot de passe (4+ caractères)"
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
                                 <button type="button" onclick="togglePasswordVisibility('reg_password')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 focus:outline-none text-xl">
                                     <span id="reg_password_icon">👁️</span>
                                 </button>
                             </div>
@@ -1808,7 +1978,7 @@ function render() {
                                 <input id="reg_password_confirm" type="password" placeholder="Confirmer le mot de passe"
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
                                 <button type="button" onclick="togglePasswordVisibility('reg_password_confirm')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 focus:outline-none text-xl">
                                     <span id="reg_password_confirm_icon">👁️</span>
                                 </button>
                             </div>
@@ -1831,14 +2001,14 @@ function render() {
                                         </option>
                                     `).join('')}
                                 </select>
-                                <p class="text-xs text-blue-800 font-semibold mt-1">Les administrateurs de niveau 1 n'ont pas de département spécifique</p>
+                                <p class="text-xs text-gray-700 font-semibold mt-1 bg-blue-50 p-2 rounded border-l-4 border-blue-500">💡 Les administrateurs de niveau 1 n'ont pas de département spécifique</p>
                             </div>
 
                             <div class="relative">
                                 <input id="reg_admin_password" type="password" placeholder="Mot de passe administrateur"
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
                                 <button type="button" onclick="togglePasswordVisibility('reg_admin_password')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 focus:outline-none text-xl">
                                     <span id="reg_admin_password_icon">👁️</span>
                                 </button>
                             </div>
@@ -1848,13 +2018,13 @@ function render() {
                                 Créer le compte
                             </button>
                             <button onclick="toggleRegister()"
-                                    class="w-full text-blue-800 font-bold hover:text-blue-900 py-2">
+                                    class="w-full text-gray-700 font-bold hover:text-gray-900 py-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition">
                                 ← Retour à la connexion
                             </button>
                         </div>
                     ` : `
                         <div class="space-y-4">
-                            <h2 class="text-xl font-bold text-blue-900">Connexion</h2>
+                            <h2 class="text-2xl font-black text-gray-900 mb-4 border-b-4 border-blue-500 pb-2">Connexion</h2>
                             <input id="login_username" type="text" placeholder="Nom d'utilisateur"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern"
                                    onkeypress="if(event.key==='Enter') handleLogin()">
@@ -1863,7 +2033,7 @@ function render() {
                                        class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern"
                                        onkeypress="if(event.key==='Enter') handleLogin()">
                                 <button type="button" onclick="togglePasswordVisibility('login_password')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-blue-700 hover:text-blue-900 focus:outline-none">
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 focus:outline-none text-xl">
                                     <span id="login_password_icon">👁️</span>
                                 </button>
                             </div>
@@ -1872,13 +2042,13 @@ function render() {
                                 Se connecter
                             </button>
                             <button onclick="toggleRegister()"
-                                    class="w-full text-sm text-blue-800 font-bold hover:text-blue-900 py-2">
-                                Créer un nouveau compte
+                                    class="w-full text-sm text-gray-700 font-bold hover:text-gray-900 py-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition">
+                                ➕ Créer un nouveau compte
                             </button>
 
-                            <div class="mt-6 pt-4 border-t border-gray-200">
-                                <p class="text-center text-xs text-blue-900 font-semibold">
-                                    Logiciel d'archivage développé par le service informatique du C.E.R.E.R
+                            <div class="mt-6 pt-4 border-t-2 border-gray-300">
+                                <p class="text-center text-sm text-gray-800 font-bold bg-gray-50 p-3 rounded-lg">
+                                    💼 Logiciel développé par le service informatique du C.E.R.E.R
                                 </p>
                             </div>
                         </div>
@@ -1947,7 +2117,7 @@ function render() {
                                 </div>
                             </div>
                             ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
-                                <div class="bg-gradient-to-br from-purple-500 to-purple-600 p-4 rounded-xl shadow-lg text-white cursor-pointer" onclick="toggleStatsDetails()">
+                                <div class="bg-gradient-to-br from-purple-500 to-purple-600 p-4 rounded-xl shadow-lg text-white cursor-pointer" onclick="toggleAdvancedStats()">
                                     <div class="flex items-center justify-between">
                                         <div>
                                             <p class="text-sm opacity-90">Documents par département</p>
@@ -2087,41 +2257,47 @@ function render() {
 
                 ${state.showMessagingSection ? renderMessaging() : ''}
 
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
                     ${filteredDocs.map(doc => `
                         <div onclick="showDocDetail('${doc._id}')"
-                             class="doc-card p-5 rounded-2xl shadow-md cursor-pointer animate-fade-in hover:shadow-xl transition-shadow ${doc.locked ? 'locked' : ''}">
-                            <div class="flex justify-between items-start mb-3">
-                                <h3 class="font-bold text-gray-800 flex-1 text-lg">${doc.titre}</h3>
-                                <div class="flex items-center gap-2">
+                             class="doc-card p-3 rounded-xl shadow-md cursor-pointer animate-fade-in hover:shadow-xl transition-shadow ${doc.locked ? 'locked' : ''}">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="font-bold text-gray-800 flex-1 text-base">${doc.titre}</h3>
+                                <div class="flex items-center gap-1">
                                     ${doc.locked ? '<span class="text-2xl" title="Document verrouillé">🔒</span>' : ''}
                                     <span class="text-3xl">${getCategoryIcon(doc.categorie)}</span>
                                 </div>
                             </div>
-                            <span class="category-badge inline-block px-3 py-1 text-sm rounded-full ${getCategoryColor(doc.categorie)} font-medium mb-3">
+                            <span class="category-badge inline-block px-2 py-1 text-xs rounded-full ${getCategoryColor(doc.categorie)} font-medium mb-2">
                                 ${getCategoryName(doc.categorie)}
                             </span>
                             ${doc.locked ? `
-                                <div class="mb-2 px-2 py-1 bg-gradient-to-r from-red-100 to-orange-100 border-2 border-red-400 rounded-lg">
+                                <div class="mb-2 px-2 py-1 bg-gradient-to-r from-red-100 to-orange-100 border border-red-400 rounded">
                                     <p class="text-xs font-bold text-red-700 flex items-center gap-1">
-                                        🔒 VERROUILLÉ
-                                        ${doc.lockedBy ? `par ${doc.lockedBy.nomComplet}` : ''}
+                                        🔒 ${doc.lockedBy ? doc.lockedBy.nomComplet : 'VERROUILLÉ'}
                                     </p>
                                 </div>
                             ` : ''}
-                            <div class="mt-3 space-y-2 border-t pt-3">
+                            <div class="mt-2 space-y-1 border-t pt-2">
                                 ${doc.idDocument ? `
-                                <p class="text-sm text-blue-600 font-semibold flex items-center gap-2">
-                                    🆔 ${doc.idDocument}
-                                </p>
+                                <div class="flex items-center gap-1">
+                                    <p class="text-xs text-blue-600 font-semibold flex items-center gap-1">
+                                        🆔 ${doc.idDocument}
+                                    </p>
+                                    <button onclick="event.stopPropagation(); copyDocumentId('${doc.idDocument}')"
+                                            class="px-1 py-0.5 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition font-semibold"
+                                            title="Copier l'ID">
+                                        📋
+                                    </button>
+                                </div>
                                 ` : ''}
-                                <p class="text-sm text-gray-600 flex items-center gap-2">
+                                <p class="text-xs text-gray-600 flex items-center gap-1">
                                     📄 ${formatDate(doc.date)}
                                 </p>
-                                <p class="text-xs text-green-600 font-medium flex items-center gap-2">
-                                    ➕ Ajouté: ${formatDate(doc.createdAt)}
+                                <p class="text-xs text-green-600 font-medium flex items-center gap-1">
+                                    ➕ ${formatDate(doc.createdAt)}
                                 </p>
-                                <p class="text-xs text-gray-500 flex items-center gap-2">
+                                <p class="text-xs text-gray-500 flex items-center gap-1">
                                     📦 ${formatSize(doc.taille)}
                                 </p>
                             </div>
@@ -2900,94 +3076,110 @@ function render() {
             ` : ''}
 
             ${state.showShareModal ? `
-                <div class="fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
                      onclick="if(event.target === this) closeShareModal()">
-                    <div class="modal-glass share-modal rounded-2xl p-8 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                    <div class="bg-white rounded-2xl p-8 max-w-3xl w-full max-h-[85vh] overflow-y-auto shadow-2xl animate-fade-in border-4 border-blue-400" onclick="event.stopPropagation()">
                         <!-- Header -->
-                        <div class="flex justify-between items-start mb-6 pb-4 border-b-2 border-blue-500">
-                            <div>
-                                <h2 class="text-3xl font-bold text-white mb-2">📤 Partager le document</h2>
-                                <p class="text-white text-lg">Document: <span class="text-blue-400 font-bold">${state.selectedDoc ? state.selectedDoc.titre : ''}</span></p>
+                        <div class="flex justify-between items-start mb-6 pb-4 border-b-4 border-blue-200">
+                            <div class="flex items-center gap-4">
+                                <div class="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-2xl shadow-lg">
+                                    <span class="text-4xl">📤</span>
+                                </div>
+                                <div>
+                                    <h2 class="text-2xl font-bold text-gray-900 mb-1">Partager un document</h2>
+                                    <p class="text-gray-600 text-sm">Document : <span class="text-blue-600 font-semibold">${state.selectedDoc ? state.selectedDoc.titre : ''}</span></p>
+                                </div>
                             </div>
                             <button onclick="closeShareModal()"
-                                    class="text-3xl text-white hover:text-red-500 transition bg-red-900 hover:bg-red-800 px-3 py-1 rounded-lg font-bold">✖</button>
+                                    class="text-2xl text-gray-400 hover:text-red-600 transition hover:bg-red-50 px-3 py-1 rounded-lg">✖</button>
                         </div>
 
-                        <p class="text-white text-base mb-6 font-medium">
-                            🔍 Sélectionnez les utilisateurs avec qui partager ce document
-                        </p>
+                        <!-- Instructions -->
+                        <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-4 rounded-lg mb-6">
+                            <p class="text-gray-800 text-sm font-medium flex items-center gap-2">
+                                <span class="text-xl">💡</span>
+                                <span>Sélectionnez un ou plusieurs utilisateurs avec qui partager ce document</span>
+                            </p>
+                        </div>
 
                         ${state.shareAvailableUsers.length === 0 ? `
-                            <div class="text-center py-8">
-                                <div class="text-6xl mb-3">👥</div>
-                                <p class="text-white text-xl font-semibold">Chargement des utilisateurs...</p>
+                            <div class="text-center py-12">
+                                <div class="text-6xl mb-4 opacity-50">👥</div>
+                                <p class="text-gray-500 text-lg font-semibold">Chargement des utilisateurs...</p>
                             </div>
                         ` : `
                             <!-- Barre de recherche -->
-                            <div class="mb-6">
-                                <label class="block text-white font-bold mb-2 text-sm">🔎 RECHERCHER UN UTILISATEUR</label>
+                            <div class="mb-5">
+                                <label class="block text-gray-700 font-semibold mb-2 text-sm">🔍 Rechercher</label>
                                 <input type="text"
-                                       placeholder="Nom, email, département..."
+                                       placeholder="Rechercher par nom, email ou département..."
                                        value="${state.shareSearchTerm}"
                                        oninput="updateShareSearch(this.value)"
-                                       class="share-search-input w-full px-5 py-4 border-3 border-blue-500 rounded-xl text-lg font-semibold">
+                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-base focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition">
                             </div>
 
                             <!-- Compteur et bouton Tout sélectionner -->
-                            <div class="mb-6 flex items-center justify-between bg-gradient-to-r from-blue-900 to-blue-800 p-5 rounded-xl border-3 border-blue-400 shadow-lg">
+                            <div class="mb-5 flex items-center justify-between bg-gradient-to-r from-blue-100 to-indigo-100 p-4 rounded-xl border-2 border-blue-300">
                                 <div class="flex items-center gap-3">
-                                    <span class="text-4xl">✅</span>
+                                    <div class="bg-blue-500 w-12 h-12 rounded-full flex items-center justify-center shadow-lg">
+                                        <span class="text-2xl">✓</span>
+                                    </div>
                                     <div>
-                                        <p class="text-white font-bold text-xl">${state.shareSelectedUsers.length} sélectionné(s)</p>
-                                        <p class="text-blue-200 text-sm">sur ${getFilteredShareUsers().length} utilisateur(s)</p>
+                                        <p class="text-gray-900 font-bold text-lg share-counter-selected">${state.shareSelectedUsers.length} sélectionné(s)</p>
+                                        <p class="text-gray-600 text-sm share-counter-total">sur ${getFilteredShareUsers().length} utilisateur(s) disponible(s)</p>
                                     </div>
                                 </div>
                                 <button onclick="toggleSelectAll()"
-                                        class="px-6 py-3 bg-white text-blue-900 rounded-xl hover:bg-blue-100 transition font-bold text-base shadow-lg">
-                                    ${state.shareSelectedUsers.length === getFilteredShareUsers().length ? '❌ Tout désélectionner' : '✅ Tout sélectionner'}
+                                        class="share-select-all-btn px-5 py-2 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition font-semibold text-sm border-2 border-blue-400 shadow-sm">
+                                    ${state.shareSelectedUsers.length === getFilteredShareUsers().length ? '✖ Tout désélectionner' : '✓ Tout sélectionner'}
                                 </button>
                             </div>
 
                             <!-- Liste des utilisateurs -->
                             <div class="mb-6">
-                                <label class="block text-white font-bold mb-3 text-sm">👥 LISTE DES UTILISATEURS</label>
-                                <div class="space-y-3 max-h-96 overflow-y-auto border-3 border-blue-500 rounded-xl p-3 bg-black">
+                                <label class="block text-gray-700 font-semibold mb-3 text-sm flex items-center gap-2">
+                                    <span>👥</span>
+                                    <span>Utilisateurs disponibles</span>
+                                </label>
+                                <div class="share-users-list-container space-y-2 max-h-80 overflow-y-auto border-2 border-gray-300 rounded-xl p-3 bg-gray-50">
                                     ${getFilteredShareUsers().length === 0 ? `
-                                        <div class="text-center py-12 text-white">
-                                            <div class="text-6xl mb-3">🔍</div>
-                                            <p class="text-xl font-bold">Aucun utilisateur trouvé</p>
+                                        <div class="text-center py-12 text-gray-500">
+                                            <div class="text-6xl mb-3 opacity-50">🔍</div>
+                                            <p class="text-lg font-semibold">Aucun utilisateur trouvé</p>
+                                            <p class="text-sm mt-2">Essayez un autre terme de recherche</p>
                                         </div>
                                     ` : getFilteredShareUsers().map(user => `
-                                        <label class="flex items-center gap-4 p-4 rounded-xl hover:scale-102 transition cursor-pointer border-2 ${state.shareSelectedUsers.includes(user.username) ? 'border-green-400 bg-gradient-to-r from-green-900 to-green-800 shadow-lg' : 'border-gray-600 bg-gradient-to-r from-gray-800 to-gray-700'}">
+                                        <label class="flex items-center gap-3 p-4 rounded-lg hover:shadow-md transition cursor-pointer border-2 ${state.shareSelectedUsers.includes(user.username) ? 'border-green-400 bg-green-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-300'}">
                                             <input type="checkbox"
                                                    ${state.shareSelectedUsers.includes(user.username) ? 'checked' : ''}
                                                    onchange="toggleUserSelection('${user.username}')"
-                                                   class="w-6 h-6 accent-green-500 rounded cursor-pointer">
+                                                   class="w-5 h-5 accent-blue-500 rounded cursor-pointer">
                                             <div class="flex-1">
-                                                <div class="font-bold text-white text-lg mb-1">${user.nom}</div>
-                                                <div class="text-base text-white font-medium">
+                                                <div class="font-bold text-gray-900 text-base mb-1">${user.nom}</div>
+                                                <div class="text-sm text-gray-600">
                                                     📧 ${user.email}
                                                 </div>
-                                                <div class="text-base text-blue-300 font-semibold">
+                                                <div class="text-sm text-blue-600 font-medium mt-1">
                                                     🏢 ${user.departement}
                                                 </div>
                                             </div>
-                                            ${state.shareSelectedUsers.includes(user.username) ? '<span class="text-3xl">✅</span>' : '<span class="text-3xl opacity-30">⬜</span>'}
+                                            ${state.shareSelectedUsers.includes(user.username) ? '<span class="text-2xl text-green-600">✓</span>' : '<span class="text-2xl text-gray-300">○</span>'}
                                         </label>
                                     `).join('')}
                                 </div>
                             </div>
 
                             <!-- Boutons d'action -->
-                            <div class="flex gap-3">
+                            <div class="flex gap-3 pt-4 border-t-2 border-gray-200">
                                 <button onclick="confirmShare()"
-                                        class="flex-1 px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold flex items-center justify-center gap-2"
-                                        ${state.shareSelectedUsers.length === 0 ? 'disabled opacity-50 cursor-not-allowed' : ''}>
-                                    <span class="text-xl">✅</span> Valider le partage (${state.shareSelectedUsers.length})
+                                        class="share-confirm-btn flex-1 px-6 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold text-base flex items-center justify-center gap-2 ${state.shareSelectedUsers.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:from-blue-600 hover:to-blue-700'}"
+                                        ${state.shareSelectedUsers.length === 0 ? 'disabled' : ''}>
+                                    <span class="text-xl">✓</span>
+                                    <span>Partager avec ${state.shareSelectedUsers.length} utilisateur(s)</span>
                                 </button>
                                 <button onclick="closeShareModal()"
-                                        class="px-6 py-4 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
-                                    ❌ Annuler
+                                        class="px-6 py-4 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 hover:shadow-md transition font-semibold text-base">
+                                    Annuler
                                 </button>
                             </div>
                         `}
@@ -2996,67 +3188,84 @@ function render() {
             ` : ''}
 
             ${state.showComposeMessage ? `
-                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+                <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;"
                      onclick="if(event.target === this) closeComposeMessage()">
-                    <div class="modal-glass rounded-2xl p-8 max-w-2xl w-full shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
-                        <div class="flex justify-between items-start mb-6">
-                            <h2 class="text-3xl font-bold text-gray-800">✉️ Nouveau message</h2>
-                            <button onclick="closeComposeMessage()" class="text-2xl text-gray-600 hover:text-gray-800 transition">✖</button>
+                    <div style="background: #ffffff; border-radius: 12px; padding: 30px; max-width: 700px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation()">
+                        <!-- En-tête -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 3px solid #2563eb; padding-bottom: 15px;">
+                            <h2 style="font-size: 24px; font-weight: bold; color: #111827; margin: 0;">✉️ Nouveau message</h2>
+                            <button onclick="closeComposeMessage()" style="background: none; border: none; font-size: 28px; color: #6b7280; cursor: pointer; padding: 0; line-height: 1;">✖</button>
                         </div>
 
-                        <div class="space-y-4">
-                            <div class="relative">
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">Destinataire *</label>
+                        <!-- Formulaire -->
+                        <div style="display: flex; flex-direction: column; gap: 20px;">
+                            <!-- Destinataire -->
+                            <div style="position: relative;">
+                                <label style="display: block; font-weight: 600; color: #111827; margin-bottom: 8px; font-size: 14px;">📧 Destinataire *</label>
                                 <input type="text"
-                                       value="${state.selectedUser ? `${state.selectedUser.nom} (${state.selectedUser.username})${state.selectedUser.niveau !== 1 ? ` - ${state.selectedUser.departement}` : ''}` : state.userSearchTerm}"
+                                       value="${state.selectedUser ? `${state.selectedUser.nom} (@${state.selectedUser.username})` : state.userSearchTerm}"
                                        oninput="handleUserSearch(this.value)"
                                        onfocus="state.showUserDropdown = true; render();"
-                                       placeholder="Rechercher un utilisateur (nom, prénom, username)..."
-                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition"
+                                       placeholder="Cliquez pour voir tous les utilisateurs..."
+                                       style="width: 100%; padding: 12px 16px; border: 2px solid #d1d5db; border-radius: 8px; font-size: 15px; color: #111827; background: #ffffff;"
                                        autocomplete="off">
 
-                                ${state.showUserDropdown && state.userSearchTerm && getFilteredUsers().length > 0 ? `
-                                    <div class="absolute z-50 w-full mt-2 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                ${state.showUserDropdown && getFilteredUsers().length > 0 ? `
+                                    <div style="position: absolute; z-index: 10000; width: 100%; margin-top: 8px; background: #ffffff; border: 2px solid #2563eb; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); max-height: 320px; overflow-y: auto;">
+                                        <!-- En-tête liste -->
+                                        <div style="position: sticky; top: 0; background: #2563eb; color: #ffffff; padding: 12px 16px; font-weight: 700; font-size: 13px; border-bottom: 1px solid #1e40af;">
+                                            📋 ${state.userSearchTerm ? `Résultats (${getFilteredUsers().length})` : `Tous les utilisateurs (${getFilteredUsers().length})`}
+                                        </div>
+                                        <!-- Liste utilisateurs -->
                                         ${getFilteredUsers().map(user => `
                                             <div onclick="selectUser('${user.username}')"
-                                                 class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0">
-                                                <div class="font-semibold text-gray-800">${user.nom}</div>
-                                                <div class="text-sm text-gray-600">
-                                                    <span class="font-mono bg-gray-100 px-2 py-1 rounded">@${user.username}</span>
-                                                    ${user.niveau !== 1 ? `<span class="ml-2">• ${user.departement}</span>` : '<span class="ml-2 text-blue-600">• Admin Principal</span>'}
+                                                 style="padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #e5e7eb; background: #ffffff; color: #111827;"
+                                                 onmouseover="this.style.background='#eff6ff'"
+                                                 onmouseout="this.style.background='#ffffff'">
+                                                <div style="font-weight: 700; color: #111827; font-size: 15px; margin-bottom: 4px;">${user.nom}</div>
+                                                <div style="font-size: 13px; color: #374151;">
+                                                    <span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-weight: 600;">@${user.username}</span>
+                                                    ${user.niveau !== 1 ? `<span style="margin-left: 8px; color: #111827; font-weight: 600;">• ${user.departement}</span>` : '<span style="margin-left: 8px; color: #2563eb; font-weight: 700;">• Admin Principal</span>'}
                                                 </div>
-                                                <div class="text-xs text-gray-500 mt-1">Niveau ${user.niveau} - ${user.role}</div>
+                                                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Niveau ${user.niveau} - ${user.role}</div>
                                             </div>
                                         `).join('')}
                                     </div>
                                 ` : ''}
                             </div>
 
+                            <!-- Sujet -->
                             <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">Sujet *</label>
+                                <label style="display: block; font-weight: 600; color: #111827; margin-bottom: 8px; font-size: 14px;">📝 Sujet *</label>
                                 <input type="text"
                                        value="${state.composeMessageSubject}"
                                        oninput="state.composeMessageSubject = this.value"
                                        placeholder="Entrez le sujet du message"
-                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
+                                       style="width: 100%; padding: 12px 16px; border: 2px solid #d1d5db; border-radius: 8px; font-size: 15px; color: #111827; background: #ffffff;">
                             </div>
 
+                            <!-- Message -->
                             <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">Message *</label>
+                                <label style="display: block; font-weight: 600; color: #111827; margin-bottom: 8px; font-size: 14px;">💬 Message *</label>
                                 <textarea
                                        oninput="state.composeMessageBody = this.value"
-                                       placeholder="Entrez votre message..."
+                                       placeholder="Écrivez votre message ici..."
                                        rows="8"
-                                       class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none">${state.composeMessageBody}</textarea>
+                                       style="width: 100%; padding: 12px 16px; border: 2px solid #d1d5db; border-radius: 8px; font-size: 15px; color: #111827; background: #ffffff; resize: vertical; font-family: inherit;">${state.composeMessageBody}</textarea>
                             </div>
 
-                            <div class="flex gap-3">
+                            <!-- Boutons -->
+                            <div style="display: flex; gap: 12px; margin-top: 10px;">
                                 <button onclick="sendNewMessage()"
-                                        class="flex-1 px-6 py-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition font-semibold">
-                                    ✅ Envoyer le message
+                                        style="flex: 1; padding: 14px 24px; background: linear-gradient(135deg, #2563eb, #1e40af); color: #ffffff; border: none; border-radius: 8px; font-weight: 700; font-size: 15px; cursor: pointer; box-shadow: 0 4px 12px rgba(37,99,235,0.3);"
+                                        onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 16px rgba(37,99,235,0.4)'"
+                                        onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(37,99,235,0.3)'">
+                                    ✅ Envoyer
                                 </button>
                                 <button onclick="closeComposeMessage()"
-                                        class="px-6 py-4 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
+                                        style="padding: 14px 24px; background: #f3f4f6; color: #374151; border: 2px solid #d1d5db; border-radius: 8px; font-weight: 600; font-size: 15px; cursor: pointer;"
+                                        onmouseover="this.style.background='#e5e7eb'"
+                                        onmouseout="this.style.background='#f3f4f6'">
                                     ❌ Annuler
                                 </button>
                             </div>

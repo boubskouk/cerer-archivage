@@ -43,7 +43,16 @@ async function loadDeletionRequests() {
 
 // Approuver une demande
 async function handleApproveDeletion(requestId) {
-    if (!confirm('Êtes-vous sûr de vouloir approuver cette suppression ?')) {
+    const confirmed = await customConfirm({
+        title: 'Approuver la suppression',
+        message: 'Êtes-vous sûr de vouloir approuver cette suppression ?\n\nLe document sera définitivement supprimé.',
+        confirmText: 'Oui, approuver',
+        cancelText: 'Annuler',
+        type: 'warning',
+        icon: '✓'
+    });
+
+    if (!confirmed) {
         return;
     }
 
@@ -67,9 +76,15 @@ async function handleApproveDeletion(requestId) {
 
 // Rejeter une demande
 async function handleRejectDeletion(requestId) {
-    const motif = prompt('Raison du rejet (optionnel):');
+    const motif = await customPrompt({
+        title: 'Rejeter la demande de suppression',
+        message: 'Indiquez la raison du rejet (optionnel)',
+        placeholder: 'Exemple: Document encore nécessaire...',
+        confirmText: 'Rejeter',
+        cancelText: 'Annuler'
+    });
 
-    // Si l'utilisateur annule le prompt
+    // Si l'utilisateur annule
     if (motif === null) {
         return;
     }

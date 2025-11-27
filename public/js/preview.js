@@ -309,11 +309,24 @@ async function previewExcel(dataURL) {
             throw new Error('Contenu du fichier manquant ou invalide');
         }
 
+        // Vérifier et normaliser le format du contenu
+        let processedData = dataURL;
+
         if (!dataURL.startsWith('data:')) {
-            throw new Error('Format de contenu incorrect (data URL attendu)');
+            // Si ce n'est pas une data URL, essayer de la construire
+            console.warn('Le contenu n\'est pas au format data URL, tentative de normalisation...');
+
+            // Vérifier si c'est du base64 pur
+            if (dataURL.match(/^[A-Za-z0-9+/=]+$/)) {
+                // C'est probablement du base64, ajouter le préfixe
+                processedData = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${dataURL}`;
+            } else {
+                // Format inconnu
+                throw new Error('Format de contenu incorrect. Le fichier Excel doit être au format data URL ou base64.');
+            }
         }
 
-        const arrayBuffer = dataURLToArrayBuffer(dataURL);
+        const arrayBuffer = dataURLToArrayBuffer(processedData);
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
         let html = '<div class="space-y-6">';

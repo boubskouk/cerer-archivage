@@ -2,10 +2,21 @@
 node_modules/
 package-lock.json
 
-# Variables d'environnement
+# Variables d'environnement (CRITIQUE - NE JAMAIS COMMITER)
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
+
+# Certificats SSL/TLS (SÉCURITÉ)
+ssl/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
 
 # Fichiers temporaires
 nul
