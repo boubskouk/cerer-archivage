@@ -257,6 +257,17 @@ function customPrompt(options) {
                                           class="w-full px-4 py-3 bg-slate-800/90 text-white border-2 border-purple-500/50 rounded-xl focus:border-purple-400 focus:ring-4 focus:ring-purple-500/30 outline-none transition backdrop-blur-sm resize-none placeholder-gray-400"
                                           placeholder="${placeholder}"
                                           rows="${rows}">${defaultValue}</textarea>
+                            ` : type === 'password' ? `
+                                <div class="relative">
+                                    <input type="password" id="custom-prompt-input"
+                                           class="w-full px-4 py-3 pr-12 bg-slate-800/90 text-white border-2 border-purple-500/50 rounded-xl focus:border-purple-400 focus:ring-4 focus:ring-purple-500/30 outline-none transition backdrop-blur-sm placeholder-gray-400"
+                                           placeholder="${placeholder}"
+                                           value="${defaultValue}">
+                                    <button type="button" onclick="togglePasswordVisibility('custom-prompt-input')"
+                                            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-white focus:outline-none text-xl">
+                                        <span id="custom-prompt-input_icon">👁️</span>
+                                    </button>
+                                </div>
                             ` : `
                                 <input type="${type}" id="custom-prompt-input"
                                        class="w-full px-4 py-3 bg-slate-800/90 text-white border-2 border-purple-500/50 rounded-xl focus:border-purple-400 focus:ring-4 focus:ring-purple-500/30 outline-none transition backdrop-blur-sm placeholder-gray-400"

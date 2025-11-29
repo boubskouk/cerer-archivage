@@ -77,6 +77,55 @@ node scripts/test-security.js
 
 ---
 
+## 🔄 SCRIPTS DE BASE DE DONNÉES
+
+### `sync-databases.js`
+
+**Objectif:** Synchroniser les bases de données locale et production
+
+**Usage:**
+```bash
+node scripts/sync-databases.js
+```
+
+**Ce qu'il fait:**
+- Compare les données entre local et production
+- Synchronise dans les deux sens (Local ↔ Production)
+- Crée des backups automatiques avant synchronisation
+- Deux modes: REPLACE (remplacement total) et MERGE (fusion intelligente)
+
+**Options du menu:**
+1. 📊 Comparer Local ↔ Production
+2. 📤 Synchroniser Local → Production (REPLACE)
+3. 📥 Synchroniser Production → Local (REPLACE)
+4. 🔀 Synchroniser Local → Production (MERGE)
+5. 🔀 Synchroniser Production → Local (MERGE)
+6. 💾 Backup Local uniquement
+7. 💾 Backup Production uniquement
+8. 💾 Backup Local + Production
+9. 🔍 Test de connexion
+
+**Collections synchronisées:**
+- `users` (utilisateurs)
+- `documents` (documents archivés)
+- `categories` (catégories)
+- `roles` (rôles)
+- `departements` (départements)
+- `deletionRequests` (demandes de suppression)
+- `messages` (messagerie interne)
+- `messageDeletionRequests` (demandes de suppression de messages)
+- `shareHistory` (historique de partage)
+
+**Quand l'utiliser:**
+- Avant un déploiement (Local → Production)
+- Pour récupérer les données (Production → Local)
+- Pour fusionner les données des deux environnements
+- Avant une opération risquée (backup)
+
+**Documentation complète:** Voir `GUIDE-SYNCHRONISATION.md`
+
+---
+
 ## 🔄 WORKFLOW RECOMMANDÉ
 
 ### Installation initiale
@@ -112,6 +161,46 @@ pm2 restart archivage-cerer
 
 # 4. Tester
 node scripts/test-security.js
+```
+
+### Déploiement avec synchronisation de base de données
+
+```bash
+# 1. Comparer les bases
+node scripts/sync-databases.js
+# Choisir option 1 (Comparer)
+
+# 2. Faire un backup complet
+# Choisir option 8 (Backup Local + Production)
+
+# 3. Synchroniser vers production
+# Choisir option 4 (Local → Production MERGE)
+# OU option 2 (Local → Production REPLACE) si copie exacte souhaitée
+
+# 4. Vérifier en production
+# Choisir option 1 (Comparer) pour confirmer
+
+# 5. Déployer le code
+git add .
+git commit -m "Déploiement avec synchronisation DB"
+git push
+
+# 6. Tester l'application en production
+```
+
+### Récupération des données de production
+
+```bash
+# 1. Backup de votre base locale
+node scripts/sync-databases.js
+# Choisir option 6 (Backup Local)
+
+# 2. Récupérer depuis production
+# Choisir option 3 (Production → Local REPLACE)
+# OU option 5 (Production → Local MERGE) pour conserver vos données locales
+
+# 3. Vérifier
+# Choisir option 1 (Comparer)
 ```
 
 ---

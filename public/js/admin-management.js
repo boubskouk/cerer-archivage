@@ -4,15 +4,37 @@
 
 // ===== GESTION DES UTILISATEURS =====
 
+// ✅ NOUVEAU: Générer un mot de passe aléatoire sécurisé
+function generateSecurePassword(length = 8) {
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const numbers = '0123456789';
+    const symbols = '@#$%&*';
+    const allChars = lowercase + uppercase + numbers + symbols;
+
+    let password = '';
+    // Garantir au moins 1 majuscule, 1 minuscule, 1 chiffre
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+
+    // Compléter avec des caractères aléatoires
+    for (let i = password.length; i < length; i++) {
+        password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+
+    // Mélanger les caractères
+    return password.split('').sort(() => Math.random() - 0.5).join('');
+}
+
 async function createUser() {
     const username = document.getElementById('new_user_username').value.trim();
-    const password = document.getElementById('new_user_password').value;
     const nom = document.getElementById('new_user_nom').value.trim();
     const email = document.getElementById('new_user_email').value.trim();
     const idRole = document.getElementById('new_user_role').value;
     const idDepartement = document.getElementById('new_user_dept').value;
 
-    if (!username || !password || !nom || !email || !idRole) {
+    if (!username || !nom || !email || !idRole) {
         showNotification('❌ Tous les champs sont requis', 'error');
         return;
     }
@@ -22,10 +44,8 @@ async function createUser() {
         return;
     }
 
-    if (password.length < 4) {
-        showNotification('❌ Le mot de passe doit contenir au moins 4 caractères', 'error');
-        return;
-    }
+    // ✅ Mot de passe par défaut
+    const password = '1234';
 
     try {
         await apiCall('/register', 'POST', {
@@ -37,8 +57,30 @@ async function createUser() {
             idDepartement: idDepartement || null
         });
 
-        showNotification('✅ Utilisateur créé avec succès');
-        await toggleUsersManagement(); // Recharger la liste (efface automatiquement le formulaire)
+        // Afficher le mot de passe généré dans un modal
+        await customAlert({
+            title: '✅ Utilisateur créé avec succès',
+            message: `
+                <div class="text-left space-y-3">
+                    <p><strong>Nom d'utilisateur :</strong> <span class="font-mono bg-blue-100 px-2 py-1 rounded">${username}</span></p>
+                    <p><strong>Mot de passe temporaire :</strong> <span class="font-mono bg-yellow-100 px-2 py-1 rounded text-lg">${password}</span></p>
+                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mt-4">
+                        <p class="text-sm text-yellow-800">
+                            ⚠️ <strong>Important :</strong> Communiquez ce mot de passe à l'utilisateur.
+                            Il devra le changer lors de sa première connexion.
+                        </p>
+                    </div>
+                    ${email ? `<p class="text-xs text-gray-600 mt-2">📧 Un email a également été envoyé à : ${email}</p>` : ''}
+                </div>
+            `,
+            type: 'success',
+            icon: '🔑'
+        });
+
+        // Recharger la liste des utilisateurs
+        const users = await apiCall('/users');
+        state.allUsersForManagement = users;
+        render();
     } catch (error) {
         console.error('Erreur création utilisateur:', error);
     }
@@ -58,7 +100,10 @@ async function deleteUser(username) {
 
     try {
         await apiCall(`/users/${username}`, 'DELETE');
-        await toggleUsersManagement(); // Recharger la liste
+        // Recharger les utilisateurs sans fermer le panneau
+        const users = await apiCall('/users');
+        state.allUsersForManagement = users;
+        render();
         showNotification('✅ Utilisateur supprimé');
     } catch (error) {
         console.error('Erreur suppression utilisateur:', error);
@@ -97,8 +142,11 @@ async function saveEditUser() {
             idRole,
             idDepartement: idDepartement || null
         });
-        await toggleUsersManagement(); // Recharger
+        // Recharger les utilisateurs sans fermer le panneau
+        const users = await apiCall('/users');
+        state.allUsersForManagement = users;
         state.editingUser = null;
+        render();
         showNotification('✅ Utilisateur modifié');
     } catch (error) {
         console.error('Erreur modification utilisateur:', error);
@@ -323,18 +371,18 @@ function renderUsersManagement() {
                 <!-- Formulaire d'ajout d'utilisateur -->
                 <div class="bg-white p-4 rounded-xl border-2 border-purple-300 mb-4 shadow-sm">
                     <h3 class="font-bold text-gray-900 mb-3">➕ Créer un nouvel utilisateur</h3>
+
+                    <!-- ✅ Message informatif sur le mot de passe automatique -->
+                    <div class="bg-blue-50 border-2 border-blue-300 rounded-lg p-3 mb-3">
+                        <p class="text-xs text-blue-800 font-medium">
+                            🔐 <strong>Mot de passe par défaut :</strong> Le mot de passe sera <strong class="font-mono text-lg bg-yellow-100 px-2 rounded">1234</strong>
+                            <br>L'utilisateur devra le changer lors de sa première connexion.
+                        </p>
+                    </div>
+
                     <div class="space-y-3">
                         <input id="new_user_username" type="text" placeholder="Nom d'utilisateur (3+ caractères)"
                                class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
-
-                        <div class="relative">
-                            <input id="new_user_password" type="password" placeholder="Mot de passe (4+ caractères)"
-                                   class="w-full px-3 py-2 pr-10 border-2 rounded-lg input-modern text-sm">
-                            <button type="button" onclick="togglePasswordVisibility('new_user_password')"
-                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 text-sm">
-                                <span id="new_user_password_icon">👁️</span>
-                            </button>
-                        </div>
 
                         <input id="new_user_nom" type="text" placeholder="Nom complet"
                                class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">

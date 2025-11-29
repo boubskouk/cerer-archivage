@@ -251,6 +251,18 @@ async function login(username, password) {
             state.currentUserInfo = result.user; // Stocker les infos complètes (nom, rôle, niveau)
             state.isAuthenticated = true;
 
+            // ✅ NOUVEAU: Vérifier si l'utilisateur doit changer son mot de passe
+            if (result.mustChangePassword || result.firstLogin) {
+                // Sauvegarder temporairement les identifiants pour le changement de mot de passe
+                state.tempPassword = password;
+                state.mustChangePassword = true;
+
+                // Afficher le formulaire de changement de mot de passe obligatoire
+                render();
+                showNotification('🔐 Vous devez changer votre mot de passe', 'warning');
+                return true;
+            }
+
             // Sauvegarder la session
             saveSession(username, result.user);
 
@@ -289,6 +301,62 @@ async function register(username, password, nom, email, idRole, idDepartement, a
         }
     } catch (error) {
         return false;
+    }
+}
+
+// ✅ NOUVEAU: Gérer le changement de mot de passe obligatoire
+async function handlePasswordChange() {
+    const oldPassword = document.getElementById('change_old_password').value;
+    const newPassword = document.getElementById('change_new_password').value;
+    const confirmPassword = document.getElementById('change_confirm_password').value;
+
+    // Validations
+    if (!oldPassword || !newPassword || !confirmPassword) {
+        showNotification('❌ Veuillez remplir tous les champs', 'error');
+        return;
+    }
+
+    if (newPassword.length < 4) {
+        showNotification('❌ Le nouveau mot de passe doit contenir au moins 4 caractères', 'error');
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        showNotification('❌ Les mots de passe ne correspondent pas', 'error');
+        return;
+    }
+
+    if (oldPassword === newPassword) {
+        showNotification('❌ Le nouveau mot de passe doit être différent de l\'ancien', 'error');
+        return;
+    }
+
+    try {
+        const result = await apiCall('/change-password', 'POST', {
+            username: state.currentUser,
+            oldPassword,
+            newPassword,
+            confirmPassword
+        });
+
+        if (result.success) {
+            showNotification('✅ Mot de passe modifié avec succès!');
+
+            // Marquer que le mot de passe a été changé
+            state.mustChangePassword = false;
+            state.tempPassword = null;
+
+            // Sauvegarder la session et charger les données
+            saveSession(state.currentUser, state.currentUserInfo);
+            startInactivityTimer();
+            startFilterResetTimer();
+            await loadData();
+
+            // Afficher l'interface principale
+            render();
+        }
+    } catch (error) {
+        console.error('Erreur lors du changement de mot de passe:', error);
     }
 }
 
@@ -2058,7 +2126,69 @@ function render() {
         `;
         return;
     }
-    
+
+    // ✅ NOUVEAU: Formulaire de changement de mot de passe obligatoire
+    if (state.mustChangePassword) {
+        app.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center gradient-bg">
+                <div class="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md animate-fade-in border-4 border-yellow-400">
+                    <div class="text-center mb-8">
+                        <div class="text-6xl mb-4">🔐</div>
+                        <h1 class="text-3xl font-black text-gray-900 mb-2">Changement de mot de passe requis</h1>
+                        <p class="text-gray-700 font-medium text-sm">Pour votre sécurité, vous devez changer votre mot de passe avant de continuer</p>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div class="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4 mb-4">
+                            <p class="text-sm text-yellow-800 font-medium">
+                                ⚠️ <strong>Important :</strong> Créez un nouveau mot de passe sécurisé (minimum 4 caractères)
+                            </p>
+                        </div>
+
+                        <div class="relative">
+                            <input id="change_old_password" type="password" placeholder="Ancien mot de passe"
+                                   class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
+                            <button type="button" onclick="togglePasswordVisibility('change_old_password')"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 focus:outline-none text-xl">
+                                <span id="change_old_password_icon">👁️</span>
+                            </button>
+                        </div>
+
+                        <div class="relative">
+                            <input id="change_new_password" type="password" placeholder="Nouveau mot de passe (4+ caractères)"
+                                   class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
+                            <button type="button" onclick="togglePasswordVisibility('change_new_password')"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 focus:outline-none text-xl">
+                                <span id="change_new_password_icon">👁️</span>
+                            </button>
+                        </div>
+
+                        <div class="relative">
+                            <input id="change_confirm_password" type="password" placeholder="Confirmer le nouveau mot de passe"
+                                   class="w-full px-4 py-3 pr-12 border-2 rounded-xl input-modern">
+                            <button type="button" onclick="togglePasswordVisibility('change_confirm_password')"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 focus:outline-none text-xl">
+                                <span id="change_confirm_password_icon">👁️</span>
+                            </button>
+                        </div>
+
+                        <button onclick="handlePasswordChange()"
+                                class="w-full btn-primary text-white py-3 rounded-xl font-semibold transition btn-shine">
+                            ✅ Changer mon mot de passe
+                        </button>
+
+                        <div class="mt-6 pt-4 border-t-2 border-gray-300">
+                            <p class="text-center text-xs text-gray-600">
+                                💡 Conseil : Utilisez un mot de passe unique que vous n'utilisez nulle part ailleurs
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
     const filteredDocs = getFilteredDocs();
     const activeFilters = state.searchTerm || state.selectedCategory !== 'tous' || state.dateFrom || state.dateTo;
     

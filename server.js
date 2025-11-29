@@ -504,14 +504,15 @@ app.post('/api/login', security.loginLimiter, async (req, res) => {
 
         // ✅ NOUVEAU: Vérifier si c'est la première connexion
         const isFirstLogin = user.firstLogin === true;
+        const mustChangePassword = user.mustChangePassword === true || isFirstLogin;
 
-        // Si c'est la première connexion, marquer comme non-première
-        if (isFirstLogin) {
+        // Logger si c'est la première connexion (mais ne pas marquer comme non-première encore)
+        if (isFirstLogin && !user.datePremiereConnexion) {
             await usersCollection.updateOne(
                 { _id: user._id },
-                { $set: { firstLogin: false, datePremiereConnexion: new Date() } }
+                { $set: { datePremiereConnexion: new Date() } }
             );
-            console.log(`🎉 Première connexion de ${username}`);
+            console.log(`🎉 Première connexion de ${username} - Changement de mot de passe requis`);
         }
 
         // ✅ SÉCURITÉ: Logger la connexion réussie
@@ -520,6 +521,7 @@ app.post('/api/login', security.loginLimiter, async (req, res) => {
         res.json({
             success: true,
             username,
+            mustChangePassword, // ✅ Indiquer si l'utilisateur doit changer son mot de passe
             firstLogin: isFirstLogin, // ✅ NOUVEAU: Indiquer si c'est la première connexion
             user: {
                 username: user.username,
@@ -534,6 +536,103 @@ app.post('/api/login', security.loginLimiter, async (req, res) => {
     } catch (error) {
         console.error('Erreur login:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// Changement de mot de passe (première connexion ou changement forcé)
+// ============================================
+app.post('/api/change-password', [
+    body('username').trim().notEmpty().withMessage('Username requis'),
+    body('oldPassword').notEmpty().withMessage('Ancien mot de passe requis'),
+    body('newPassword')
+        .notEmpty().withMessage('Nouveau mot de passe requis')
+        .isLength({ min: 4 }).withMessage('Le nouveau mot de passe doit contenir au moins 4 caractères'),
+    body('confirmPassword').notEmpty().withMessage('Confirmation requise')
+        .custom((value, { req }) => {
+            if (value !== req.body.newPassword) {
+                throw new Error('Les mots de passe ne correspondent pas');
+            }
+            return true;
+        })
+], async (req, res) => {
+    try {
+        // Vérifier les erreurs de validation
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            const errorMessages = errors.array().map(err => err.msg).join(', ');
+            return res.status(400).json({
+                success: false,
+                message: errorMessages
+            });
+        }
+
+        const { username, oldPassword, newPassword } = req.body;
+
+        // Trouver l'utilisateur
+        const user = await usersCollection.findOne({ username });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur introuvable'
+            });
+        }
+
+        // Vérifier l'ancien mot de passe
+        let isValidOldPassword = false;
+        const isBcryptHash = /^\$2[aby]\$/.test(user.password);
+
+        if (isBcryptHash) {
+            isValidOldPassword = await bcrypt.compare(oldPassword, user.password);
+        } else {
+            // Format ancien (comparaison directe)
+            isValidOldPassword = (oldPassword === user.password);
+        }
+
+        if (!isValidOldPassword) {
+            return res.status(401).json({
+                success: false,
+                message: 'Ancien mot de passe incorrect'
+            });
+        }
+
+        // Vérifier que le nouveau mot de passe est différent de l'ancien
+        if (oldPassword === newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Le nouveau mot de passe doit être différent de l\'ancien'
+            });
+        }
+
+        // Hacher le nouveau mot de passe
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Mettre à jour le mot de passe et marquer firstLogin comme false
+        await usersCollection.updateOne(
+            { _id: user._id },
+            {
+                $set: {
+                    password: hashedPassword,
+                    firstLogin: false,
+                    mustChangePassword: false,
+                    dateChangementMotDePasse: new Date()
+                }
+            }
+        );
+
+        console.log(`✅ Mot de passe changé pour: ${username}`);
+
+        res.json({
+            success: true,
+            message: 'Mot de passe modifié avec succès'
+        });
+
+    } catch (error) {
+        console.error('Erreur changement mot de passe:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors du changement de mot de passe'
+        });
     }
 });
 

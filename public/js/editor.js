@@ -548,7 +548,7 @@ async function openLocalWordEditor(doc) {
 }
 
 // Gérer la touche Échap
-function handleEditorEscape(e) {
+async function handleEditorEscape(e) {
     if (e.key === 'Escape' && editorState.isOpen) {
         const changeCount = Object.keys(editorState.changes).length;
 
