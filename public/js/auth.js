@@ -6,17 +6,83 @@
 async function login(username, password) {
     try {
         const result = await loginUser(username, password);
-        
+
         if (result.success) {
             state.currentUser = username;
             state.isAuthenticated = true;
             await loadData();
             showNotification(`✅ Bienvenue ${username}!`);
             return true;
+        } else if (result.maintenance === true) {
+            // Mode maintenance activé - afficher le message pendant 10 secondes
+            showMaintenanceMessage(result.message);
+            return false;
         }
     } catch (error) {
         return false;
     }
+}
+
+// Afficher le message de maintenance pendant 10 secondes
+function showMaintenanceMessage(message) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        animation: fadeIn 0.3s;
+    `;
+
+    const messageBox = document.createElement('div');
+    messageBox.style.cssText = `
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 40px;
+        border-radius: 16px;
+        max-width: 500px;
+        text-align: center;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        animation: slideIn 0.3s;
+    `;
+
+    messageBox.innerHTML = `
+        <div style="font-size: 60px; margin-bottom: 20px;">🔧</div>
+        <h2 style="margin: 0 0 16px 0; font-size: 24px; font-weight: 700;">Mode Maintenance</h2>
+        <p style="margin: 0; font-size: 16px; line-height: 1.6;">${message}</p>
+        <div id="maintenanceCountdown" style="margin-top: 20px; font-size: 14px; opacity: 0.8;"></div>
+    `;
+
+    overlay.appendChild(messageBox);
+    document.body.appendChild(overlay);
+
+    // Compte à rebours de 10 secondes
+    let countdown = 10;
+    const countdownElement = document.getElementById('maintenanceCountdown');
+    countdownElement.textContent = `Ce message disparaîtra dans ${countdown} secondes...`;
+
+    const interval = setInterval(() => {
+        countdown--;
+        countdownElement.textContent = `Ce message disparaîtra dans ${countdown} secondes...`;
+        if (countdown <= 0) {
+            clearInterval(interval);
+            overlay.style.animation = 'fadeOut 0.3s';
+            setTimeout(() => overlay.remove(), 300);
+        }
+    }, 1000);
+
+    // Fermer aussi au clic
+    overlay.addEventListener('click', () => {
+        clearInterval(interval);
+        overlay.style.animation = 'fadeOut 0.3s';
+        setTimeout(() => overlay.remove(), 300);
+    });
 }
 
 // Inscription

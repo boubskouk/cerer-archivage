@@ -424,13 +424,14 @@ async function loadData() {
 // NOUVEAU : Charger les rôles et départements
 async function loadRolesAndDepartements() {
     try {
-        const roles = await apiCall('/roles');
-        state.roles = roles;
-        const departements = await apiCall('/departements');
-        state.departements = departements;
+        const rolesData = await apiCall('/roles');
+        state.roles = rolesData.roles || [];
+        const deptsData = await apiCall('/departements');
+        state.departements = deptsData.departements || [];
+        console.log('✅ Rôles et départements chargés:', state.roles.length, 'rôles,', state.departements.length, 'départements');
         render();
     } catch (error) {
-        console.error('Erreur chargement rôles/départements:', error);
+        console.error('❌ Erreur chargement rôles/départements:', error);
     }
 }
 
@@ -1398,12 +1399,24 @@ function toggleDepartements() {
 async function toggleUsersManagement() {
     state.showUsersManagement = !state.showUsersManagement;
     if (state.showUsersManagement) {
-        // Charger tous les utilisateurs
         try {
+            // Charger les rôles et départements si pas déjà chargés
+            if (!Array.isArray(state.roles) || state.roles.length === 0) {
+                const rolesData = await apiCall('/roles');
+                state.roles = rolesData.roles || [];
+            }
+            if (!Array.isArray(state.departements) || state.departements.length === 0) {
+                const deptsData = await apiCall('/departements');
+                state.departements = deptsData.departements || [];
+            }
+
+            // Charger tous les utilisateurs
             const users = await apiCall('/users');
             state.allUsersForManagement = users;
+
+            console.log('✅ Données chargées pour gestion utilisateurs');
         } catch (error) {
-            console.error('Erreur chargement utilisateurs:', error);
+            console.error('❌ Erreur chargement utilisateurs:', error);
         }
     }
     state.showUploadForm = false;
@@ -1438,8 +1451,39 @@ function toggleAdvancedStats() {
     render();
 }
 
-function toggleRegister() {
+async function toggleRegister() {
     state.showRegister = !state.showRegister;
+
+    // Charger les rôles et départements si on ouvre le formulaire d'inscription
+    if (state.showRegister) {
+        try {
+            console.log('📋 Chargement des rôles et départements...');
+            console.log('📋 État actuel - roles:', state.roles, 'departements:', state.departements);
+
+            // Toujours charger si les données ne sont pas un tableau valide
+            if (!Array.isArray(state.roles) || state.roles.length === 0) {
+                console.log('🔄 Chargement des rôles...');
+                const rolesData = await getRoles();
+                console.log('✅ Rôles reçus:', rolesData);
+                state.roles = rolesData.roles || [];
+                console.log('✅ state.roles mis à jour:', state.roles);
+            }
+
+            if (!Array.isArray(state.departements) || state.departements.length === 0) {
+                console.log('🔄 Chargement des départements...');
+                const deptsData = await getDepartements();
+                console.log('✅ Départements reçus:', deptsData);
+                state.departements = deptsData.departements || [];
+                console.log('✅ state.departements mis à jour:', state.departements);
+            }
+
+            console.log('✅ Chargement terminé. Nombre de rôles:', state.roles?.length, 'Nombre de départements:', state.departements?.length);
+        } catch (error) {
+            console.error('❌ Erreur chargement rôles/départements:', error);
+            showNotification('Erreur lors du chargement des données', 'error');
+        }
+    }
+
     render();
 }
 
@@ -2053,7 +2097,7 @@ function render() {
 
                             <select id="reg_role" class="w-full px-4 py-3 border-2 rounded-xl input-modern" onchange="handleRoleChange()">
                                 <option value="">-- Choisir un rôle --</option>
-                                ${state.roles.map(role => `
+                                ${(state.roles && Array.isArray(state.roles) ? state.roles : []).map(role => `
                                     <option value="${role._id}" data-niveau="${role.niveau}">
                                         ${role.libelle.charAt(0).toUpperCase() + role.libelle.slice(1)} - ${role.description}
                                     </option>
@@ -2063,7 +2107,7 @@ function render() {
                             <div id="departement_container">
                                 <select id="reg_departement" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
                                     <option value="">-- Choisir un département --</option>
-                                    ${state.departements.map(dept => `
+                                    ${(state.departements && Array.isArray(state.departements) ? state.departements : []).map(dept => `
                                         <option value="${dept._id}">
                                             ${dept.nom}
                                         </option>

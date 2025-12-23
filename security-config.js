@@ -57,10 +57,11 @@ if (process.env.NODE_ENV !== 'production') {
 // RATE LIMITING
 // ============================================
 
-// Rate limiter général (100 requêtes par 15 minutes)
+// Rate limiter général (500 requêtes par 15 minutes)
+// ✅ OPTIMISÉ pour environnement universitaire (plusieurs utilisateurs derrière même IP)
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // 100 requêtes max
+    max: 500, // ✅ 500 requêtes max (adapté pour un campus)
     message: 'Trop de requêtes depuis cette IP. Veuillez réessayer dans 15 minutes.',
     standardHeaders: true,
     legacyHeaders: false,
@@ -100,10 +101,11 @@ const loginLimiter = rateLimit({
     }
 });
 
-// Rate limiter pour uploads (10 par heure)
+// Rate limiter pour uploads (50 par heure)
+// ✅ OPTIMISÉ pour permettre plus d'uploads simultanés
 const uploadLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 heure
-    max: 10,
+    max: 50, // ✅ 50 uploads max (augmenté de 10 à 50)
     message: 'Trop d\'uploads. Réessayez dans 1 heure.',
     standardHeaders: true,
     legacyHeaders: false,

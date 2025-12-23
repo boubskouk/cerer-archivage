@@ -49,6 +49,10 @@ let deletionRequestsCollection;
 let messagesCollection;
 let messageDeletionRequestsCollection;
 let shareHistoryCollection;
+// ✅ NIVEAU 0: Collections Super Admin
+let auditLogsCollection;
+let ipRulesCollection;
+let systemSettingsCollection;
 
 // ============================================
 // MIDDLEWARE
@@ -177,6 +181,14 @@ async function getAccessibleDocuments(userId) {
 
     let accessibleDocs = [];
 
+    // ✅ NIVEAU 0 : Super Admin - Voit TOUS les documents (lecture seule)
+    if (userRole.niveau === 0) {
+        const allDocs = await documentsCollection.find({}).toArray();
+        accessibleDocs = allDocs;
+        console.log(`✅ NIVEAU 0 (Super Admin): Accès à TOUS les documents en LECTURE SEULE (${accessibleDocs.length})`);
+        return accessibleDocs;
+    }
+
     // ✅ NIVEAU 1 : Voit TOUS les documents de TOUS les départements
     if (userRole.niveau === 1) {
         const allDocs = await documentsCollection.find({}).toArray();
@@ -285,11 +297,21 @@ async function connectDB(retryCount = 0) {
         messageDeletionRequestsCollection = db.collection('messageDeletionRequests');
         shareHistoryCollection = db.collection('shareHistory');
 
+        // ✅ NIVEAU 0: Collections Super Admin
+        auditLogsCollection = db.collection('auditLogs');
+        ipRulesCollection = db.collection('ipRules');
+        systemSettingsCollection = db.collection('systemSettings');
+
         // Créer des index
         await documentsCollection.createIndex({ idUtilisateur: 1, dateAjout: -1 });
         await documentsCollection.createIndex({ idDepartement: 1 });
         await usersCollection.createIndex({ username: 1 }, { unique: true });
         await usersCollection.createIndex({ email: 1 }, { unique: true }); // ✅ Email unique
+
+        // ✅ NIVEAU 0: Index pour collections Super Admin
+        await auditLogsCollection.createIndex({ timestamp: -1 });
+        await auditLogsCollection.createIndex({ user: 1 });
+        await auditLogsCollection.createIndex({ action: 1 });
 
         console.log('✅ Connexion à MongoDB réussie');
         console.log(`📊 Base de données: ${DB_NAME}`);
@@ -304,11 +326,11 @@ async function connectDB(retryCount = 0) {
                 client: client,
                 dbName: DB_NAME,
                 collectionName: 'sessions',
-                ttl: 3600, // TTL court de 1 heure dans MongoDB
+                ttl: 86400, // ✅ TTL de 24 heures (86400 secondes) - Optimisé pour meilleure UX
                 crypto: {
                     secret: process.env.SESSION_CRYPTO_SECRET || 'changez_ce_secret_aussi'
                 },
-                touchAfter: 60 // Mise à jour toutes les 60 secondes si activité
+                touchAfter: 300 // ✅ Mise à jour toutes les 5 minutes (300 secondes) si activité
             }),
             cookie: {
                 secure: process.env.NODE_ENV === 'production', // HTTPS uniquement en production
@@ -321,6 +343,325 @@ async function connectDB(retryCount = 0) {
         console.log('✅ Sessions sécurisées configurées avec MongoDB');
 
         await initializeDefaultData();
+
+        // ✅ NIVEAU 0: Initialiser les modules Super Admin
+        const superAdminAuth = require('./middleware/superAdminAuth');
+        const superAdminRoutes = require('./routes/superadmin');
+
+        superAdminAuth.init({
+            users: usersCollection,
+            roles: rolesCollection,
+            auditLogs: auditLogsCollection
+        });
+
+        superAdminRoutes.init(db, {
+            users: usersCollection,
+            documents: documentsCollection,
+            roles: rolesCollection,
+            departements: departementsCollection,
+            auditLogs: auditLogsCollection,
+            systemSettings: systemSettingsCollection
+        });
+
+        // Charger les routes Super Admin
+        app.use('/api/superadmin', superAdminRoutes.router);
+        console.log('✅ Routes Super Admin (Niveau 0) chargées');
+
+        // ============================================
+        // ROUTES D'AUTHENTIFICATION (après le middleware de session)
+        // ============================================
+
+        // Route de login (REMPLACE l'ancienne route /api/login qui est en dehors de connectDB)
+        app.post('/api/login', security.loginLimiter, async (req, res) => {
+            try {
+                const { username, password } = req.body;
+
+                if (!username || !password) {
+                    security.logLoginFailure(username || 'unknown', req.ip, req.headers['user-agent'], 'missing_credentials');
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Username et password requis'
+                    });
+                }
+
+                // Chercher l'utilisateur
+                const user = await usersCollection.findOne({ username });
+
+                if (!user) {
+                    security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'user_not_found');
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Identifiants incorrects'
+                    });
+                }
+
+                // 🛡️ VÉRIFIER SI C'EST UN COMPTE SUPER ADMIN (NIVEAU 0)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                const isSuperAdminAttempt = userRole && userRole.niveau === 0;
+
+                if (isSuperAdminAttempt) {
+                    // Logger TOUTE tentative de connexion à un compte Super Admin
+                    await auditLogsCollection.insertOne({
+                        timestamp: new Date(),
+                        user: username,
+                        action: 'TENTATIVE_CONNEXION_SUPERADMIN',
+                        details: {
+                            ip: req.ip,
+                            userAgent: req.headers['user-agent'],
+                            statut: 'En tentative'
+                        },
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent']
+                    });
+                    console.log(`🛡️  TENTATIVE DE CONNEXION AU SUPER ADMIN: ${username} depuis ${req.ip}`);
+                }
+
+                // Vérifier le mot de passe
+                let isValidPassword = false;
+                const isBcryptHash = /^\$2[aby]\$/.test(user.password);
+
+                if (isBcryptHash) {
+                    isValidPassword = await bcrypt.compare(password, user.password);
+                } else {
+                    isValidPassword = (password === user.password);
+                    if (isValidPassword) {
+                        const hashedPassword = await bcrypt.hash(password, 10);
+                        await usersCollection.updateOne(
+                            { _id: user._id },
+                            { $set: { password: hashedPassword } }
+                        );
+                    }
+                }
+
+                if (!isValidPassword) {
+                    security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'wrong_password');
+
+                    // 🛡️ Logger échec Super Admin
+                    if (isSuperAdminAttempt) {
+                        await auditLogsCollection.insertOne({
+                            timestamp: new Date(),
+                            user: username,
+                            action: 'ECHEC_CONNEXION_SUPERADMIN',
+                            details: {
+                                ip: req.ip,
+                                userAgent: req.headers['user-agent'],
+                                raison: 'Mot de passe incorrect'
+                            },
+                            ip: req.ip,
+                            userAgent: req.headers['user-agent']
+                        });
+                        console.log(`🚫 ÉCHEC CONNEXION SUPER ADMIN: ${username} (mot de passe incorrect)`);
+                    }
+
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Identifiants incorrects'
+                    });
+                }
+
+                // VÉRIFIER SI L'UTILISATEUR EST BLOQUÉ
+                if (user.blocked === true) {
+                    security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'user_blocked');
+
+                    // 🛡️ Logger tentative sur compte Super Admin bloqué
+                    if (isSuperAdminAttempt) {
+                        await auditLogsCollection.insertOne({
+                            timestamp: new Date(),
+                            user: username,
+                            action: 'CONNEXION_SUPERADMIN_BLOQUE',
+                            details: {
+                                ip: req.ip,
+                                userAgent: req.headers['user-agent'],
+                                raison: 'Compte bloqué',
+                                raisonBlocage: user.blockedReason || 'Non spécifié'
+                            },
+                            ip: req.ip,
+                            userAgent: req.headers['user-agent']
+                        });
+                        console.log(`🚫 TENTATIVE CONNEXION SUPER ADMIN BLOQUÉ: ${username}`);
+                    }
+
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Votre compte a été bloqué. Contactez un administrateur.',
+                        blocked: true,
+                        blockedReason: user.blockedReason || 'Non spécifié'
+                    });
+                }
+
+                // 🔧 VÉRIFIER LE MODE MAINTENANCE (sauf pour Super Admin)
+                if (!isSuperAdminAttempt) {
+                    const maintenanceSettings = await systemSettingsCollection.findOne({ _id: 'maintenance' });
+                    if (maintenanceSettings && maintenanceSettings.enabled === true) {
+                        // Vérifier si l'utilisateur est dans la whitelist de maintenance
+                        const whitelist = maintenanceSettings.whitelist || [];
+                        const isWhitelisted = whitelist.includes(username);
+
+                        if (!isWhitelisted) {
+                            // Bloquer tous les utilisateurs qui ne sont pas dans la whitelist
+                            security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'maintenance_mode');
+                            return res.status(503).json({
+                                success: false,
+                                maintenance: true,
+                                message: 'Logiciel d\'archivage en maintenance. Veuillez contacter le super admin pour plus de précision.'
+                            });
+                        }
+
+                        // L'utilisateur est dans la whitelist, il peut se connecter
+                        console.log(`✅ Mode maintenance actif mais utilisateur ${username} autorisé (dans la whitelist)`);
+                    }
+                }
+
+                // Récupérer les infos complètes (role déjà récupéré plus haut)
+                const role = userRole;
+                const departement = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
+
+                // Vérifier première connexion
+                const isFirstLogin = user.firstLogin === true;
+                const mustChangePassword = user.mustChangePassword === true || isFirstLogin;
+
+                if (isFirstLogin && !user.datePremiereConnexion) {
+                    await usersCollection.updateOne(
+                        { _id: user._id },
+                        { $set: { datePremiereConnexion: new Date() } }
+                    );
+                }
+
+                // Logger la connexion réussie
+                security.logLoginSuccess(username, req.ip, req.headers['user-agent']);
+
+                // 📝 Logger TOUTES les connexions réussies dans auditLogs
+                await auditLogsCollection.insertOne({
+                    timestamp: new Date(),
+                    user: username,
+                    action: 'LOGIN_SUCCESS',
+                    details: {
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent'],
+                        niveau: userRole ? userRole.niveau : null,
+                        role: userRole ? userRole.nom : null
+                    },
+                    ip: req.ip,
+                    userAgent: req.headers['user-agent']
+                });
+
+                // 🛡️ Logger succès connexion Super Admin (log supplémentaire)
+                if (isSuperAdminAttempt) {
+                    await auditLogsCollection.insertOne({
+                        timestamp: new Date(),
+                        user: username,
+                        action: 'SUCCES_CONNEXION_SUPERADMIN',
+                        details: {
+                            ip: req.ip,
+                            userAgent: req.headers['user-agent'],
+                            statut: 'Connexion réussie'
+                        },
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent']
+                    });
+                    console.log(`✅ SUCCÈS CONNEXION SUPER ADMIN: ${username} depuis ${req.ip}`);
+                }
+
+                // DEBUG: Vérifier que req.session existe
+                console.log('🔍 DEBUG: req.session =', req.session);
+                console.log('🔍 DEBUG: typeof req.session =', typeof req.session);
+
+                if (!req.session) {
+                    console.error('❌ ERREUR CRITIQUE: req.session est undefined !');
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Erreur de configuration de session'
+                    });
+                }
+
+                // CRÉER LA SESSION
+                req.session.userId = username;
+                req.session.userLevel = role ? role.niveau : 0;
+
+                // Sauvegarder la session
+                await new Promise((resolve, reject) => {
+                    req.session.save((err) => {
+                        if (err) {
+                            console.error('❌ Erreur sauvegarde session:', err);
+                            reject(err);
+                        } else {
+                            console.log(`✅ Session créée pour: ${username} (niveau ${req.session.userLevel})`);
+                            resolve();
+                        }
+                    });
+                });
+
+                res.json({
+                    success: true,
+                    username,
+                    mustChangePassword,
+                    firstLogin: isFirstLogin,
+                    user: {
+                        username: user.username,
+                        nom: user.nom,
+                        email: user.email,
+                        role: role ? role.libelle : 'Non défini',
+                        niveau: role ? role.niveau : 0,
+                        departement: departement ? departement.nom : 'Aucun (Admin Principal)'
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur login:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        // Route de logout (REMPLACE l'ancienne route /api/logout qui est en dehors de connectDB)
+        app.post('/api/logout', async (req, res) => {
+            const username = req.session.userId || 'unknown';
+
+            // Logger la déconnexion dans auditLogs avec heure système
+            if (username !== 'unknown') {
+                try {
+                    await auditLogsCollection.insertOne({
+                        timestamp: new Date(), // Heure système
+                        user: username,
+                        action: 'LOGOUT',
+                        details: {
+                            ip: req.ip,
+                            userAgent: req.headers['user-agent']
+                        },
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent']
+                    });
+                } catch (error) {
+                    console.error('❌ Erreur lors du logging de la déconnexion:', error);
+                }
+            }
+
+            req.session.destroy((err) => {
+                if (err) {
+                    console.error('❌ Erreur destruction session:', err);
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Erreur lors de la déconnexion'
+                    });
+                }
+
+                console.log(`👋 Déconnexion de: ${username} à ${new Date().toLocaleString('fr-FR')}`);
+                res.json({
+                    success: true,
+                    message: 'Déconnexion réussie'
+                });
+            });
+        });
+
+        console.log('✅ Routes d\'authentification avec session configurées');
+
+        // ============================================
+        // ROUTE CATCH-ALL (DOIT ÊTRE EN DERNIER)
+        // ============================================
+        // Route catch-all pour servir index.html (après toutes les autres routes)
+        app.get('*', (req, res) => {
+            res.sendFile(path.join(__dirname, 'public', 'index.html'));
+        });
+        console.log('✅ Route catch-all configurée');
 
     } catch (error) {
         console.error('❌ Erreur connexion MongoDB:', error.message);
@@ -442,6 +783,10 @@ app.get('/health', (req, res) => {
     });
 });
 
+// ============================================
+// ANCIENNE ROUTE - DÉSACTIVÉE (remplacée par la route dans connectDB())
+// ============================================
+/*
 // Login - ✅ SÉCURITÉ: Rate limiting strict (5 tentatives/15min)
 app.post('/api/login', security.loginLimiter, async (req, res) => {
     try {
@@ -518,6 +863,19 @@ app.post('/api/login', security.loginLimiter, async (req, res) => {
         // ✅ SÉCURITÉ: Logger la connexion réussie
         security.logLoginSuccess(username, req.ip, req.headers['user-agent']);
 
+        // ✅ CRÉER LA SESSION pour l'utilisateur connecté
+        req.session.userId = username;
+        req.session.userLevel = role ? role.niveau : 0;
+
+        // Sauvegarder la session avant de répondre
+        req.session.save((err) => {
+            if (err) {
+                console.error('❌ Erreur sauvegarde session:', err);
+            } else {
+                console.log(`✅ Session créée pour: ${username} (niveau ${req.session.userLevel})`);
+            }
+        });
+
         res.json({
             success: true,
             username,
@@ -538,6 +896,34 @@ app.post('/api/login', security.loginLimiter, async (req, res) => {
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
+*/
+
+// ============================================
+// ANCIENNE ROUTE - DÉSACTIVÉE (remplacée par la route dans connectDB())
+// ============================================
+/*
+// LOGOUT - Destruction de la session
+// ============================================
+app.post('/api/logout', (req, res) => {
+    const username = req.session.userId || 'unknown';
+
+    req.session.destroy((err) => {
+        if (err) {
+            console.error('❌ Erreur destruction session:', err);
+            return res.status(500).json({
+                success: false,
+                message: 'Erreur lors de la déconnexion'
+            });
+        }
+
+        console.log(`👋 Déconnexion de: ${username}`);
+        res.json({
+            success: true,
+            message: 'Déconnexion réussie'
+        });
+    });
+});
+*/
 
 // ============================================
 // Changement de mot de passe (première connexion ou changement forcé)
@@ -1188,12 +1574,29 @@ app.post('/api/documents', security.uploadLimiter, [
         };
         
         const result = await documentsCollection.insertOne(document);
-        
-        res.json({ 
-            success: true, 
-            document: { ...document, _id: result.insertedId } 
+
+        // 📝 Logger l'archivage dans auditLogs
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: userId,
+            action: 'DOCUMENT_ARCHIVED',
+            details: {
+                documentId: document.idDocument,  // Utiliser idDocument (ID lisible)
+                titre: document.titre,
+                categorie: document.categorie,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            documentId: document.idDocument,  // Utiliser idDocument (ID lisible)
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
         });
-        
+
+        res.json({
+            success: true,
+            document: { ...document, _id: result.insertedId }
+        });
+
     } catch (error) {
         console.error('Erreur ajout document:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -1290,6 +1693,22 @@ app.get('/api/documents/:userId/:docId', async (req, res) => {
                 }
             );
 
+            // 📝 Logger la consultation dans auditLogs
+            await auditLogsCollection.insertOne({
+                timestamp: new Date(),
+                user: userId,
+                action: 'DOCUMENT_VIEWED',
+                details: {
+                    documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+                    titre: document.titre,
+                    ip: req.ip,
+                    userAgent: req.headers['user-agent']
+                },
+                documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            });
+
             console.log(`👁️ Consultation enregistrée: ${user.nom} (${user.email}, niveau ${role?.niveau}) a consulté le document ${docId}`);
         }
 
@@ -1356,6 +1775,15 @@ app.post('/api/documents/:userId/:docId/download', async (req, res) => {
             });
         }
 
+        // Récupérer le document pour avoir accès à idDocument
+        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé'
+            });
+        }
+
         // Récupérer le rôle de l'utilisateur pour avoir le niveau
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
 
@@ -1381,6 +1809,22 @@ app.post('/api/documents/:userId/:docId/download', async (req, res) => {
                 }
             }
         );
+
+        // 📝 Logger le téléchargement dans auditLogs
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: userId,
+            action: 'DOCUMENT_DOWNLOADED',
+            details: {
+                documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+                titre: document.titre,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
 
         console.log(`📥 Téléchargement enregistré: ${user.nom} (${user.email}, niveau ${downloadInfo.niveau}) a téléchargé le document ${docId}`);
 
@@ -1510,6 +1954,23 @@ app.post('/api/documents/:userId/:docId/share', async (req, res) => {
                 });
             }
         }
+
+        // 📝 Logger l'action de partage dans auditLogs
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: userId,
+            action: 'DOCUMENT_SHARED',
+            details: {
+                documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+                titre: document.titre,
+                sharedWith: targetUsers,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
 
         console.log(`📤 Document ${docId} partagé par ${userId} avec ${targetUsers.join(', ')}`);
 
@@ -1667,6 +2128,22 @@ app.post('/api/documents/:userId/:docId/toggle-lock', async (req, res) => {
             { _id: new ObjectId(docId) },
             { $set: updateData }
         );
+
+        // Logger l'action dans auditLogs avec heure système
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: userId,
+            action: newLockedState ? 'DOCUMENT_VERROUILLE' : 'DOCUMENT_DEVERROUILLE',
+            details: {
+                documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+                titre: document.titre,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
 
         console.log(`🔒 Document ${docId} ${newLockedState ? 'verrouillé' : 'déverrouillé'} par ${userId}`);
 
@@ -1924,6 +2401,16 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
         }
 
         // Niveau 1: Suppression directe
+        // D'abord récupérer le document pour avoir l'idDocument avant de le supprimer
+        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé'
+            });
+        }
+
+        // Supprimer le document
         const result = await documentsCollection.deleteOne({
             _id: new ObjectId(docId)
         });
@@ -1934,6 +2421,22 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
                 message: 'Document non trouvé'
             });
         }
+
+        // 📝 Logger la suppression dans auditLogs
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: userId,
+            action: 'DOCUMENT_DELETED',
+            details: {
+                documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+                titre: document.titre,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
 
         console.log(`🗑️ Document supprimé directement par niveau 1: ${userId}`);
 
@@ -2166,6 +2669,23 @@ app.post('/api/deletion-requests/:requestId/approve', async (req, res) => {
                 message: 'Document non trouvé ou déjà supprimé'
             });
         }
+
+        // 📝 Logger la suppression dans auditLogs (suppression approuvée par niveau 1)
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: request.idDemandeur,  // L'utilisateur qui a fait la demande
+            action: 'DOCUMENT_DELETED',
+            details: {
+                documentId: document.idDocument || request.idDocument,  // Utiliser idDocument (ID lisible)
+                titre: document.titre,
+                approvedBy: userId,  // Approuvé par niveau 1
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            documentId: document.idDocument || request.idDocument,  // Utiliser idDocument (ID lisible)
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
 
         // Mettre à jour la demande
         const dateTraitement = new Date();
@@ -2542,9 +3062,9 @@ app.delete('/api/categories/:userId/:catId', async (req, res) => {
 app.get('/api/roles', async (req, res) => {
     try {
         const roles = await rolesCollection.find().toArray();
-        res.json(roles);
+        res.json({ success: true, roles });
     } catch (error) {
-        res.status(500).json({ message: 'Erreur serveur' });
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
 
@@ -2609,9 +3129,9 @@ app.delete('/api/roles/:roleId', async (req, res) => {
 app.get('/api/departements', async (req, res) => {
     try {
         const departements = await departementsCollection.find().toArray();
-        res.json(departements);
+        res.json({ success: true, departements });
     } catch (error) {
-        res.status(500).json({ message: 'Erreur serveur' });
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
 
@@ -3545,10 +4065,8 @@ app.use(security.errorLogger);
 // ✅ SÉCURITÉ: Gestionnaire d'erreurs global
 app.use(security.errorHandler);
 
-// Route catch-all (doit être APRÈS le gestionnaire d'erreurs)
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// Note: Le catch-all app.get('*') est maintenant dans connectDB()
+// pour être enregistré APRÈS les routes Super Admin
 
 // ============================================
 // DÉMARRAGE
