@@ -72,6 +72,9 @@ const state = {
     showBlockConfirm: false,
     showDeleteConfirm: false,
     showFullHistory: false,
+    showRestoreConfirm: false,  // ✅ NOUVEAU: Modal restauration document
+    documentToRestore: null,     // ✅ NOUVEAU: Document à restaurer
+    restoringDocument: false,    // ✅ NOUVEAU: État restauration en cours
 
     // Rôles et départements (pour les selects)
     roles: [],
@@ -1864,6 +1867,8 @@ function renderDocumentsModule() {
             ${renderPeriodFilter()}
             ${renderDocumentsSubTabContent()}
         </div>
+
+        ${state.showRestoreConfirm ? renderRestoreConfirmModal() : ''}
     `;
 }
 
@@ -2522,13 +2527,13 @@ function renderDeletedDocuments() {
     return `
         <div style="margin-top: 16px;">
             <h3 style="font-size: 14px; font-weight: 600; color: #1a202c; margin-bottom: 12px;">
-                📋 Liste des Documents Supprimés
+                🗑️ Corbeille - Documents Supprimés
             </h3>
 
             <!-- Barre de recherche -->
             <div style="margin-bottom: 16px;">
                 <input type="text"
-                       placeholder="🔍 Rechercher un document supprimé (titre, ID)..."
+                       placeholder="🔍 Rechercher un document supprimé (titre, ID, motif)..."
                        value="${state.searchFilters.deleted}"
                        oninput="updateSearchFilter('deleted', this.value)"
                        style="width: 100%; padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px;">
@@ -2540,29 +2545,64 @@ function renderDeletedDocuments() {
                     <div class="empty-state-text">${state.searchFilters.deleted ? 'Aucun résultat trouvé' : 'Aucun document supprimé sur cette période'}</div>
                 </div>
             ` : `
-            <table class="documents-table">
+            <table class="documents-table" style="font-size: 13px;">
                 <thead>
                     <tr>
-                        <th>ID Document</th>
+                        <th>Statut</th>
+                        <th>ID</th>
                         <th>Titre</th>
+                        <th>Motif</th>
+                        <th>Département</th>
+                        <th>Service</th>
                         <th>Supprimé Par</th>
-                        <th>Date Suppression</th>
-                        <th>IP</th>
+                        <th>Date</th>
+                        <th>Expire le</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${filteredDocs.map(doc => `
-                        <tr>
-                            <td><code>${doc.documentId}</code></td>
+                    ${filteredDocs.map(doc => {
+                        const isRecoverable = doc.isRecoverable;
+                        const daysLeft = Math.floor(doc.daysUntilExpiration || 0);
+
+                        return `
+                        <tr style="background-color: ${isRecoverable ? '#f0fdf4' : '#fef2f2'};">
+                            <td>
+                                ${isRecoverable ? `
+                                    <span style="display: inline-block; padding: 4px 8px; background: #10b981; color: white; border-radius: 12px; font-size: 11px; font-weight: 600;">
+                                        ♻️ ${daysLeft}j restant${daysLeft > 1 ? 's' : ''}
+                                    </span>
+                                ` : `
+                                    <span style="display: inline-block; padding: 4px 8px; background: #ef4444; color: white; border-radius: 12px; font-size: 11px; font-weight: 600;">
+                                        ⚠️ Expiré
+                                    </span>
+                                `}
+                            </td>
+                            <td><code style="font-size: 11px;">${doc.documentId}</code></td>
                             <td><strong>${doc.titre}</strong></td>
+                            <td title="${doc.motif || 'Non spécifié'}" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${doc.motif || 'Non spécifié'}
+                            </td>
+                            <td>${doc.departement || '-'}</td>
+                            <td>${doc.service || '-'}</td>
                             <td>
                                 ${doc.nomComplet || doc.supprimePar}<br>
                                 <small style="color: #718096;">${doc.email || ''}</small>
                             </td>
                             <td>${formatServerDate(doc.dateSuppression)}</td>
-                            <td><small>${doc.ip}</small></td>
+                            <td>${formatServerDate(doc.expiresAt)}</td>
+                            <td>
+                                ${isRecoverable ? `
+                                    <button onclick="confirmRestoreDocument('${doc._id}', '${doc.titre.replace(/'/g, "\\'")}', '${doc.documentId}')"
+                                            style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                                        ♻️ Récupérer
+                                    </button>
+                                ` : `
+                                    <span style="color: #9ca3af; font-size: 12px;">Non récupérable</span>
+                                `}
+                            </td>
                         </tr>
-                    `).join('')}
+                    `}).join('')}
                 </tbody>
             </table>
             `}
@@ -2590,6 +2630,111 @@ function renderDeletedPagination() {
 function goToDeletedPage(page) {
     state.deletedPagination.page = page;
     loadDocumentsModule();
+}
+
+/**
+ * Fonctions de restauration de documents
+ */
+function confirmRestoreDocument(docId, titre, documentId) {
+    state.documentToRestore = { _id: docId, titre, documentId };
+    state.showRestoreConfirm = true;
+    renderDocumentsModule();
+}
+
+function cancelRestore() {
+    state.showRestoreConfirm = false;
+    state.documentToRestore = null;
+    renderDocumentsModule();
+}
+
+async function restoreDocument() {
+    if (!state.documentToRestore) return;
+
+    state.restoringDocument = true;
+    renderDocumentsModule();
+
+    try {
+        const response = await fetch(`/api/superadmin/documents/${state.documentToRestore._id}/restore`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Retirer le document restauré de la liste immédiatement (mise à jour optimiste)
+            const docId = state.documentToRestore._id;
+            state.documentToRestore = null;
+
+            // Supprimer le document de TOUTES les listes de documents supprimés
+            state.deletedDocuments = state.deletedDocuments.filter(doc => doc._id !== docId);
+            state.adminDeletedDocs = state.adminDeletedDocs.filter(doc => doc._id !== docId);
+
+            // Afficher la notification APRÈS avoir mis à jour les listes
+            showNotification('✅ Document restauré avec succès !', 'success');
+            state.showRestoreConfirm = false;
+
+            // Recharger en arrière-plan après 3 secondes (quand la notification aura disparu)
+            setTimeout(() => {
+                loadDocumentsModule().catch(err => {
+                    console.error('Erreur rechargement silencieux:', err);
+                });
+            }, 3500);
+        } else {
+            showNotification('❌ ' + (result.message || 'Erreur lors de la restauration'), 'error');
+        }
+    } catch (error) {
+        console.error('Erreur restauration:', error);
+        showNotification('❌ Erreur de connexion au serveur', 'error');
+    } finally {
+        state.restoringDocument = false;
+        renderDocumentsModule();
+    }
+}
+
+function renderRestoreConfirmModal() {
+    if (!state.showRestoreConfirm || !state.documentToRestore) return '';
+
+    return `
+        <div class="modal-overlay" onclick="cancelRestore()" style="display: flex; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); align-items: center; justify-content: center; z-index: 9999;">
+            <div class="modal-content" onclick="event.stopPropagation()" style="background: white; border-radius: 16px; padding: 32px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+                <div style="text-align: center; margin-bottom: 24px;">
+                    <div style="font-size: 64px; margin-bottom: 16px;">♻️</div>
+                    <h2 style="font-size: 24px; font-weight: 700; color: #1a202c; margin-bottom: 8px;">
+                        Restaurer ce document ?
+                    </h2>
+                    <p style="color: #718096; font-size: 14px; margin-bottom: 16px;">
+                        Le document sera récupéré et redeviendra accessible aux utilisateurs.
+                    </p>
+                    <div style="background: #f7fafc; padding: 16px; border-radius: 8px; text-align: left;">
+                        <div style="margin-bottom: 8px;">
+                            <strong style="color: #4a5568;">Titre:</strong><br>
+                            <span style="color: #1a202c;">${state.documentToRestore.titre}</span>
+                        </div>
+                        <div>
+                            <strong style="color: #4a5568;">ID:</strong><br>
+                            <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 12px;">${state.documentToRestore.documentId}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button onclick="cancelRestore()"
+                            style="padding: 12px 24px; background: #e2e8f0; color: #4a5568; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Annuler
+                    </button>
+                    <button onclick="restoreDocument()"
+                            ${state.restoringDocument ? 'disabled' : ''}
+                            style="padding: 12px 24px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; ${state.restoringDocument ? 'opacity: 0.6;' : ''}">
+                        ${state.restoringDocument ? '⏳ Restauration...' : '♻️ Restaurer'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 /**

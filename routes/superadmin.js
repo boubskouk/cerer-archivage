@@ -713,6 +713,131 @@ router.get('/documents/all', requireSuperAdmin, async (req, res) => {
     }
 });
 
+/**
+ * POST /api/superadmin/documents/:docId/restore
+ * Restaurer un document depuis la corbeille
+ */
+router.post('/documents/:docId/restore', requireSuperAdmin, async (req, res) => {
+    try {
+        const { docId } = req.params;
+        const { ObjectId } = require('mongodb');
+
+        // Vérifier que le document existe dans la corbeille
+        const document = await collections.documents.findOne({
+            _id: new ObjectId(docId),
+            deleted: true
+        });
+
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé dans la corbeille'
+            });
+        }
+
+        // Vérifier si le document n'a pas expiré
+        if (document.deletionInfo?.expiresAt < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Document expiré, restauration impossible'
+            });
+        }
+
+        // Restaurer le document
+        await collections.documents.updateOne(
+            { _id: new ObjectId(docId) },
+            {
+                $set: { deleted: false },
+                $unset: { deletionInfo: "" }
+            }
+        );
+
+        // Logger l'action
+        await logAction(
+            req.superAdmin.username,
+            'DOCUMENT_RESTORED',
+            {
+                documentId: document.idDocument,
+                titre: document.titre,
+                deletedAt: document.deletionInfo?.deletedAt,
+                deletedBy: document.deletionInfo?.deletedBy
+            },
+            {},
+            req
+        );
+
+        console.log(`♻️ Document restauré: ${document.idDocument} par ${req.superAdmin.username}`);
+
+        res.json({
+            success: true,
+            message: 'Document restauré avec succès'
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur documents/:docId/restore:', error);
+        res.status(500).json({
+            success: false,
+            message: "Erreur lors de la restauration du document"
+        });
+    }
+});
+
+/**
+ * DELETE /api/superadmin/documents/:docId/permanent
+ * Supprimer définitivement un document de la corbeille
+ */
+router.delete('/documents/:docId/permanent', requireSuperAdmin, async (req, res) => {
+    try {
+        const { docId } = req.params;
+        const { ObjectId } = require('mongodb');
+
+        // Vérifier que le document existe dans la corbeille
+        const document = await collections.documents.findOne({
+            _id: new ObjectId(docId),
+            deleted: true
+        });
+
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé dans la corbeille'
+            });
+        }
+
+        // Suppression définitive
+        await collections.documents.deleteOne({ _id: new ObjectId(docId) });
+
+        // Logger l'action
+        await logAction(
+            req.superAdmin.username,
+            'DOCUMENT_PERMANENTLY_DELETED',
+            {
+                documentId: document.idDocument,
+                titre: document.titre,
+                deletedAt: document.deletionInfo?.deletedAt,
+                deletedBy: document.deletionInfo?.deletedBy,
+                reason: `Manual permanent deletion by Super Admin ${req.superAdmin.username}`
+            },
+            {},
+            req
+        );
+
+        console.log(`🗑️ Document supprimé définitivement: ${document.idDocument} par ${req.superAdmin.username}`);
+
+        res.json({
+            success: true,
+            message: 'Document supprimé définitivement'
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur documents/:docId/permanent:', error);
+        res.status(500).json({
+            success: false,
+            message: "Erreur lors de la suppression définitive"
+        });
+    }
+});
+
 // ============================================
 // MODULE 4 : GESTION DES DÉPARTEMENTS
 // ============================================

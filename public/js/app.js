@@ -595,7 +595,22 @@ async function deleteDoc(id) {
 
     if (!confirmed) return;
 
-    await apiCall(`/documents/${state.currentUser}/${id}`, 'DELETE');
+    // Demander le motif de suppression
+    const motif = await customPrompt({
+        title: 'Motif de suppression',
+        message: 'Veuillez indiquer la raison de la suppression de ce document :',
+        placeholder: 'Ex: Document obsolète, doublon, erreur de classement...',
+        type: 'textarea',
+        rows: 3,
+        icon: '📝'
+    });
+
+    if (!motif || motif.trim() === '') {
+        showNotification('Le motif de suppression est obligatoire', 'error');
+        return;
+    }
+
+    await apiCall(`/documents/${state.currentUser}/${id}`, 'DELETE', { motif: motif.trim() });
     state.selectedDoc = null;
     await loadData();
     showNotification('✅ Document supprimé');
@@ -2298,11 +2313,14 @@ function render() {
                                         // Sinon, montrer tous les rôles
                                         return true;
                                     })
-                                    .map(role => `
+                                    .map(role => {
+                                        const libelle = role.libelle || 'Rôle';
+                                        const libelleCapitalized = libelle.charAt(0).toUpperCase() + libelle.slice(1);
+                                        return `
                                     <option value="${role._id}" data-niveau="${role.niveau}">
-                                        ${role.libelle.charAt(0).toUpperCase() + role.libelle.slice(1)} - ${role.description}
+                                        ${libelleCapitalized} - ${role.description || 'Aucune description'}
                                     </option>
-                                `).join('')}
+                                `}).join('')}
                             </select>
 
                             <div id="departement_container">

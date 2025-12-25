@@ -256,43 +256,34 @@ async function getLevel1Deletions(filters = {}) {
     try {
         const { period, startDate, endDate } = filters;
 
-        // Filtre de date pour auditLogs (utilise le champ 'timestamp')
-        const periodFilter = getPeriodFilter(period, startDate, endDate, 'timestamp');
+        // ✅ NOUVEAU: Lire depuis documents.deleted au lieu de auditLogs
+        const periodFilter = getPeriodFilter(period, startDate, endDate, 'deletionInfo.deletedAt');
         const dateFilter = {
-            action: 'DOCUMENT_DELETED',
+            deleted: true,
+            'deletionInfo.deletedByLevel': 1,  // Seulement suppressions par niveau 1
             ...periodFilter
         };
 
-        const deletions = await auditLogsCollection.aggregate([
+        const deletions = await documentsCollection.aggregate([
             { $match: dateFilter },
             { $group: {
-                _id: "$user",
+                _id: "$deletionInfo.deletedBy",
                 count: { $sum: 1 },
+                nom: { $first: "$deletionInfo.deletedByName" },
+                email: { $first: "$deletionInfo.deletedByEmail" },
                 deletedDocs: { $push: {
-                    documentId: "$details.documentId",
-                    titre: "$details.titre",
-                    timestamp: "$timestamp"
+                    documentId: "$idDocument",
+                    titre: "$titre",
+                    timestamp: "$deletionInfo.deletedAt",
+                    motif: "$deletionInfo.motif",
+                    expiresAt: "$deletionInfo.expiresAt",
+                    ip: "$deletionInfo.ip"
                 }}
             }},
-            { $lookup: {
-                from: "users",
-                localField: "_id",
-                foreignField: "username",
-                as: "userInfo"
-            }},
-            { $unwind: { path: "$userInfo", preserveNullAndEmptyArrays: true } },
-            { $lookup: {
-                from: "roles",
-                localField: "userInfo.idRole",
-                foreignField: "_id",
-                as: "roleInfo"
-            }},
-            { $unwind: { path: "$roleInfo", preserveNullAndEmptyArrays: true } },
-            { $match: { "roleInfo.niveau": 1 } }, // Seulement niveau 1
             { $project: {
                 username: "$_id",
-                nom: "$userInfo.nom",
-                email: "$userInfo.email",
+                nom: 1,
+                email: 1,
                 nombreSuppressions: "$count",
                 documentsSupprimes: "$deletedDocs"
             }},
@@ -314,37 +305,51 @@ async function getDeletedDocuments(filters = {}) {
     try {
         const { period, startDate, endDate, page = 1, limit = 20 } = filters;
 
-        // Filtre de date pour auditLogs (utilise le champ 'timestamp')
-        const periodFilter = getPeriodFilter(period, startDate, endDate, 'timestamp');
+        // ✅ NOUVEAU: Lire depuis documents.deleted au lieu de auditLogs
+        const periodFilter = getPeriodFilter(period, startDate, endDate, 'deletionInfo.deletedAt');
         const dateFilter = {
-            action: 'DOCUMENT_DELETED',
+            deleted: true,
             ...periodFilter
         };
 
         // Compter le total
-        const total = await auditLogsCollection.countDocuments(dateFilter);
+        const total = await documentsCollection.countDocuments(dateFilter);
 
-        // Récupérer les suppressions avec pagination
-        const deletions = await auditLogsCollection.aggregate([
+        // Récupérer les documents supprimés avec pagination
+        const deletions = await documentsCollection.aggregate([
             { $match: dateFilter },
-            { $sort: { timestamp: -1 } },
+            { $sort: { "deletionInfo.deletedAt": -1 } },
             { $skip: (page - 1) * limit },
             { $limit: limit },
-            { $lookup: {
-                from: "users",
-                localField: "user",
-                foreignField: "username",
-                as: "userInfo"
-            }},
-            { $unwind: { path: "$userInfo", preserveNullAndEmptyArrays: true } },
             { $project: {
-                documentId: "$details.documentId",
-                titre: "$details.titre",
-                supprimePar: "$user",
-                nomComplet: "$userInfo.nom",
-                email: "$userInfo.email",
-                dateSuppression: "$timestamp",
-                ip: "$ip"
+                _id: 1,
+                documentId: "$idDocument",
+                titre: 1,
+                supprimePar: "$deletionInfo.deletedBy",
+                nomComplet: "$deletionInfo.deletedByName",
+                email: "$deletionInfo.deletedByEmail",
+                dateSuppression: "$deletionInfo.deletedAt",
+                motif: "$deletionInfo.motif",
+                departement: "$deletionInfo.departement",
+                service: "$deletionInfo.service",
+                categorie: "$deletionInfo.categorie",
+                expiresAt: "$deletionInfo.expiresAt",
+                ip: "$deletionInfo.ip",
+
+                // ✅ NOUVEAU: Calculer si récupérable
+                isRecoverable: {
+                    $cond: {
+                        if: { $gt: ["$deletionInfo.expiresAt", new Date()] },
+                        then: true,
+                        else: false
+                    }
+                },
+                daysUntilExpiration: {
+                    $divide: [
+                        { $subtract: ["$deletionInfo.expiresAt", new Date()] },
+                        86400000  // 1 jour en ms
+                    ]
+                }
             }}
         ]).toArray();
 

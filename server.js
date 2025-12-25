@@ -25,6 +25,9 @@ const security = require('./security-config');
 const { validateUniversityEmail } = require('./config/allowedDomains');
 const { sendWelcomeEmail } = require('./services/emailService');
 
+// ✅ NOUVEAU: Service de nettoyage automatique de la corbeille
+const trashCleanup = require('./services/trashCleanup');
+
 const app = express();
 
 // ✅ CONFIGURATION: Trust proxy (nécessaire derrière reverse proxy comme Render, Heroku, etc.)
@@ -46,7 +49,6 @@ let categoriesCollection;
 let rolesCollection;
 let departementsCollection;
 let servicesCollection; // ✅ NOUVEAU: Collection services (créés par niveau 1)
-let deletionRequestsCollection;
 let messagesCollection;
 let messageDeletionRequestsCollection;
 let shareHistoryCollection;
@@ -218,7 +220,10 @@ async function generateDocumentId() {
 // ✅ NOUVELLE LOGIQUE : Si le document est dans la liste accessible, l'utilisateur peut l'ouvrir
 async function canAccessDocument(userId, documentId) {
     const user = await usersCollection.findOne({ username: userId });
-    const document = await documentsCollection.findOne({ _id: new ObjectId(documentId) });
+    const document = await documentsCollection.findOne({
+        _id: new ObjectId(documentId),
+        deleted: { $ne: true }  // ✅ Exclure documents supprimés
+    });
 
     if (!user || !document) return false;
 
@@ -253,7 +258,9 @@ async function getAccessibleDocuments(userId) {
 
     // ✅ NIVEAU 0 : Super Admin - Voit TOUS les documents (lecture seule)
     if (userRole.niveau === 0) {
-        const allDocs = await documentsCollection.find({}).toArray();
+        const allDocs = await documentsCollection.find({
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
+        }).toArray();
         accessibleDocs = allDocs;
         console.log(`✅ NIVEAU 0 (Super Admin): Accès à TOUS les documents en LECTURE SEULE (${accessibleDocs.length})`);
         return accessibleDocs;
@@ -277,6 +284,7 @@ async function getAccessibleDocuments(userId) {
 
         // Documents du département principal + documents de tous ses services
         const deptDocs = await documentsCollection.find({
+            deleted: { $ne: true },  // ✅ Exclure documents supprimés
             $or: [
                 { idDepartement: user.idDepartement }, // Documents du département principal
                 { idService: { $in: serviceIds } }  // ✅ CORRIGÉ: Documents des services (utilise idService)
@@ -298,13 +306,15 @@ async function getAccessibleDocuments(userId) {
 
         // Tous les documents du même département
         const deptDocs = await documentsCollection.find({
-            idDepartement: user.idDepartement
+            idDepartement: user.idDepartement,
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
         }).toArray();
 
         // + Documents partagés avec lui depuis d'autres départements
         const sharedDocs = await documentsCollection.find({
             sharedWith: userId,
-            idDepartement: { $ne: user.idDepartement }
+            idDepartement: { $ne: user.idDepartement },
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
         }).toArray();
 
         accessibleDocs = [...deptDocs, ...sharedDocs];
@@ -332,12 +342,14 @@ async function getAccessibleDocuments(userId) {
         // Documents des utilisateurs niveau 3 du département
         const niveau3Docs = await documentsCollection.find({
             idDepartement: user.idDepartement,
-            idUtilisateur: { $in: niveau3Usernames }
+            idUtilisateur: { $in: niveau3Usernames },
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
         }).toArray();
 
         // + Documents partagés avec lui (de n'importe quel département)
         const sharedDocs = await documentsCollection.find({
-            sharedWith: userId
+            sharedWith: userId,
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
         }).toArray();
 
         accessibleDocs = [...niveau3Docs, ...sharedDocs];
@@ -384,7 +396,6 @@ async function connectDB(retryCount = 0) {
         rolesCollection = db.collection('roles');
         departementsCollection = db.collection('departements');
         servicesCollection = db.collection('services'); // ✅ NOUVEAU: Collection services
-        deletionRequestsCollection = db.collection('deletionRequests');
         messagesCollection = db.collection('messages');
         messageDeletionRequestsCollection = db.collection('messageDeletionRequests');
         shareHistoryCollection = db.collection('shareHistory');
@@ -407,6 +418,21 @@ async function connectDB(retryCount = 0) {
 
         console.log('✅ Connexion à MongoDB réussie');
         console.log(`📊 Base de données: ${DB_NAME}`);
+
+        // ✅ NOUVEAU: Initialiser le service de nettoyage automatique de la corbeille
+        trashCleanup.init({
+            documents: documentsCollection,
+            auditLogs: auditLogsCollection,
+            db: db
+        });
+
+        // Démarrer le cron job UNIQUEMENT sur l'instance 0 (évite duplication en mode cluster)
+        if (process.env.NODE_APP_INSTANCE === '0' || !process.env.NODE_APP_INSTANCE) {
+            trashCleanup.startCronJob();
+            console.log('✅ Cron job nettoyage corbeille actif (instance principale)');
+        } else {
+            console.log('⏭️  Cron job désactivé (instance secondaire)');
+        }
 
         await initializeDefaultData();
 
@@ -2099,7 +2125,8 @@ app.get('/api/documents/:userId/:docId', async (req, res) => {
         }
 
         const document = await documentsCollection.findOne({
-            _id: new ObjectId(docId)
+            _id: new ObjectId(docId),
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
         });
 
         if (!document) {
@@ -2231,7 +2258,10 @@ app.post('/api/documents/:userId/:docId/download', async (req, res) => {
         }
 
         // Récupérer le document pour avoir accès à idDocument
-        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        const document = await documentsCollection.findOne({
+            _id: new ObjectId(docId),
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
+        });
         if (!document) {
             return res.status(404).json({
                 success: false,
@@ -2309,7 +2339,10 @@ app.post('/api/documents/:userId/:docId/share', async (req, res) => {
         }
 
         // Vérifier que le document existe
-        const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
+        const document = await documentsCollection.findOne({
+            _id: new ObjectId(docId),
+            deleted: { $ne: true }  // ✅ Exclure documents supprimés
+        });
         if (!document) {
             return res.status(404).json({
                 success: false,
@@ -2872,9 +2905,21 @@ app.delete('/api/documents/:userId/delete-all', async (req, res) => {
 });
 
 // Supprimer un document
+// ============================================
+// NOUVEAU SYSTÈME DE CORBEILLE (Soft Delete)
+// ============================================
 app.delete('/api/documents/:userId/:docId', async (req, res) => {
     try {
         const { userId, docId } = req.params;
+        const { motif, departement, service, categorie } = req.body;
+
+        // VALIDATION MOTIF OBLIGATOIRE
+        if (!motif || motif.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Le motif de suppression est obligatoire'
+            });
+        }
 
         const canAccess = await canAccessDocument(userId, docId);
         if (!canAccess) {
@@ -2884,7 +2929,7 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
             });
         }
 
-        // Vérifier le niveau de l'utilisateur
+        // Récupérer utilisateur et document
         const user = await usersCollection.findOne({ username: userId });
         if (!user) {
             return res.status(404).json({
@@ -2894,89 +2939,13 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
         }
 
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
-
-        // ✅ NOUVEAU: Si niveau 3 uniquement, créer une demande de suppression (niveau 2 n'a plus accès)
-        if (userRole.niveau === 3) {
-            const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
-
-            // Vérifier si une demande existe déjà pour ce document
-            const existingRequest = await deletionRequestsCollection.findOne({
-                idDocument: new ObjectId(docId),
-                statut: 'en_attente'
-            });
-
-            if (existingRequest) {
-                return res.json({
-                    success: false,
-                    requiresApproval: true,
-                    message: 'Une demande de suppression est déjà en attente pour ce document',
-                    requestId: existingRequest._id
-                });
-            }
-
-            // Créer une demande de suppression
-            const request = await deletionRequestsCollection.insertOne({
-                idDocument: new ObjectId(docId),
-                documentTitre: document.titre,
-                idDemandeur: userId,
-                nomDemandeur: user.nom,
-                idDepartement: user.idDepartement,
-                dateCreation: new Date(),
-                statut: 'en_attente',
-                motif: req.body.motif || 'Non spécifié'
-            });
-
-            console.log(`📝 Demande de suppression créée: ${request.insertedId} par ${userId} pour document ${docId}`);
-
-            // ✅ Envoyer un message aux administrateurs niveau 1 du même département
-            try {
-                const nivel1Users = await usersCollection.find({
-                    idDepartement: user.idDepartement
-                }).toArray();
-
-                // Filtrer pour ne garder que ceux qui ont le rôle niveau 1
-                for (const nivel1User of nivel1Users) {
-                    const nivel1Role = await rolesCollection.findOne({ _id: nivel1User.idRole });
-                    if (nivel1Role && nivel1Role.niveau === 1) {
-                        // Créer un message pour chaque admin niveau 1
-                        await messagesCollection.insertOne({
-                            from: userId,
-                            fromName: user.nom,
-                            to: nivel1User.username,
-                            toName: nivel1User.nom,
-                            subject: `📝 Nouvelle demande de suppression - ${document.titre}`,
-                            body: `Bonjour ${nivel1User.nom},\n\n${user.nom} (${userId}) a créé une demande de suppression pour le document suivant :\n\n📄 Titre: ${document.titre}\n🆔 ID Document: ${document.idDocument}\n💬 Motif: ${req.body.motif || 'Non spécifié'}\n\nVeuillez vous rendre dans la section "Demandes de suppression" pour approuver ou rejeter cette demande.\n\nMerci`,
-                            type: 'deletion-request',
-                            relatedData: { requestId: request.insertedId.toString(), documentId: docId },
-                            read: false,
-                            createdAt: new Date()
-                        });
-                        console.log(`📧 Message envoyé à ${nivel1User.username} pour la demande ${request.insertedId}`);
-                    }
-                }
-            } catch (msgError) {
-                console.error('⚠️ Erreur envoi messages notification:', msgError);
-                // On continue même si l'envoi échoue
-            }
-
-            return res.json({
+        if (!userRole) {
+            return res.status(404).json({
                 success: false,
-                requiresApproval: true,
-                message: 'Demande de suppression créée. Les administrateurs niveau 1 ont été notifiés.',
-                requestId: request.insertedId
+                message: 'Rôle utilisateur non trouvé'
             });
         }
 
-        // Bloquer niveau 2 - ils n'ont plus accès à la suppression
-        if (userRole.niveau === 2) {
-            return res.status(403).json({
-                success: false,
-                message: 'Les utilisateurs de niveau 2 ne peuvent pas supprimer de documents'
-            });
-        }
-
-        // Niveau 1: Suppression directe
-        // D'abord récupérer le document pour avoir l'idDocument avant de le supprimer
         const document = await documentsCollection.findOne({ _id: new ObjectId(docId) });
         if (!document) {
             return res.status(404).json({
@@ -2985,41 +2954,262 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
             });
         }
 
-        // Supprimer le document
+        // Vérifier droits: niveau 3 ne peut supprimer que ses propres documents
+        if (userRole.niveau === 3 && document.idUtilisateur !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Vous ne pouvez supprimer que vos propres documents'
+            });
+        }
+
+        // Calculer date d'expiration (2 mois)
+        const deletedAt = new Date();
+        const expiresAt = new Date(deletedAt);
+        expiresAt.setMonth(expiresAt.getMonth() + 2);
+
+        // SOFT DELETE - Mise en corbeille
+        const result = await documentsCollection.updateOne(
+            { _id: new ObjectId(docId) },
+            {
+                $set: {
+                    deleted: true,
+                    deletionInfo: {
+                        deletedAt: deletedAt,
+                        deletedBy: userId,
+                        deletedByName: user.nom,
+                        deletedByEmail: user.email,
+                        deletedByLevel: userRole.niveau,
+                        motif: motif.trim(),
+                        departement: departement || document.departementArchivage || 'Non spécifié',
+                        idDepartement: document.idDepartement,
+                        service: service || document.serviceArchivage || 'Non spécifié',
+                        idService: document.idService,
+                        categorie: categorie || document.categorie || 'Non spécifié',
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent'],
+                        expiresAt: expiresAt
+                    }
+                }
+            }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(500).json({
+                success: false,
+                message: 'Erreur lors de la mise en corbeille'
+            });
+        }
+
+        // Logger la mise en corbeille
+        await auditLogsCollection.insertOne({
+            timestamp: deletedAt,
+            user: userId,
+            action: 'DOCUMENT_MOVED_TO_TRASH',
+            details: {
+                documentId: document.idDocument || docId,
+                titre: document.titre,
+                motif: motif.trim(),
+                expiresAt: expiresAt,
+                niveau: userRole.niveau
+            },
+            documentId: document.idDocument || docId,
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
+
+        console.log(`🗑️ Document mis en corbeille par ${userId} (niveau ${userRole.niveau}): ${document.idDocument}, expire le ${expiresAt.toISOString()}`);
+
+        res.json({
+            success: true,
+            message: 'Document déplacé vers la corbeille (récupérable pendant 2 mois)',
+            expiresAt: expiresAt,
+            daysUntilExpiration: 60
+        });
+
+    } catch (error) {
+        console.error('Erreur suppression document:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// RESTAURER UN DOCUMENT DEPUIS LA CORBEILLE
+// ============================================
+app.post('/api/documents/restore/:docId', async (req, res) => {
+    try {
+        const { docId } = req.params;
+        const { userId } = req.body;
+
+        // Vérifier Super Admin (niveau 0)
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé'
+            });
+        }
+
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole || userRole.niveau !== 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'Seul le Super Admin peut restaurer des documents'
+            });
+        }
+
+        // Récupérer le document supprimé
+        const document = await documentsCollection.findOne({
+            _id: new ObjectId(docId),
+            deleted: true
+        });
+
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé dans la corbeille'
+            });
+        }
+
+        // Vérifier si le document n'est pas expiré
+        if (document.deletionInfo && document.deletionInfo.expiresAt < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Ce document a expiré et ne peut plus être restauré'
+            });
+        }
+
+        // Restaurer le document
+        const result = await documentsCollection.updateOne(
+            { _id: new ObjectId(docId) },
+            {
+                $set: { deleted: false },
+                $unset: { deletionInfo: "" }
+            }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(500).json({
+                success: false,
+                message: 'Erreur lors de la restauration'
+            });
+        }
+
+        // Logger la restauration
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: userId,
+            action: 'DOCUMENT_RESTORED',
+            details: {
+                documentId: document.idDocument || docId,
+                titre: document.titre,
+                deletedAt: document.deletionInfo?.deletedAt,
+                deletedBy: document.deletionInfo?.deletedBy,
+                restoredAt: new Date()
+            },
+            documentId: document.idDocument || docId,
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
+
+        console.log(`♻️ Document restauré par Super Admin ${userId}: ${document.idDocument}`);
+
+        res.json({
+            success: true,
+            message: 'Document restauré avec succès',
+            document: {
+                idDocument: document.idDocument,
+                titre: document.titre
+            }
+        });
+
+    } catch (error) {
+        console.error('Erreur restauration document:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur'
+        });
+    }
+});
+
+// ============================================
+// SUPPRESSION DÉFINITIVE MANUELLE
+// ============================================
+app.delete('/api/documents/permanent/:docId', async (req, res) => {
+    try {
+        const { docId } = req.params;
+        const { userId } = req.body;
+
+        // Vérifier Super Admin (niveau 0)
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé'
+            });
+        }
+
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole || userRole.niveau !== 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'Seul le Super Admin peut supprimer définitivement'
+            });
+        }
+
+        // Récupérer le document (doit être dans la corbeille)
+        const document = await documentsCollection.findOne({
+            _id: new ObjectId(docId),
+            deleted: true
+        });
+
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document non trouvé dans la corbeille'
+            });
+        }
+
+        // Suppression définitive (hard delete)
         const result = await documentsCollection.deleteOne({
             _id: new ObjectId(docId)
         });
 
         if (result.deletedCount === 0) {
-            return res.status(404).json({
+            return res.status(500).json({
                 success: false,
-                message: 'Document non trouvé'
+                message: 'Erreur lors de la suppression'
             });
         }
 
-        // 📝 Logger la suppression dans auditLogs
+        // Logger la suppression définitive
         await auditLogsCollection.insertOne({
             timestamp: new Date(),
             user: userId,
-            action: 'DOCUMENT_DELETED',
+            action: 'DOCUMENT_PERMANENTLY_DELETED',
             details: {
-                documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+                documentId: document.idDocument || docId,
                 titre: document.titre,
-                ip: req.ip,
-                userAgent: req.headers['user-agent']
+                deletedAt: document.deletionInfo?.deletedAt,
+                reason: `Manual deletion by Super Admin ${userId}`
             },
-            documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+            documentId: document.idDocument || docId,
             ip: req.ip,
             userAgent: req.headers['user-agent']
         });
 
-        console.log(`🗑️ Document supprimé directement par niveau 1: ${userId}`);
+        console.log(`💀 Document supprimé DÉFINITIVEMENT par Super Admin ${userId}: ${document.idDocument}`);
 
-        res.json({ success: true, message: 'Document supprimé avec succès' });
+        res.json({
+            success: true,
+            message: 'Document supprimé définitivement'
+        });
 
     } catch (error) {
-        console.error('Erreur suppression document:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
+        console.error('Erreur suppression permanente:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur'
+        });
     }
 });
 
@@ -3107,1295 +3297,6 @@ app.post('/api/documents/bulk', async (req, res) => {
 
     } catch (error) {
         console.error('Erreur import en masse:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// ============================================
-// ROUTES DEMANDES DE SUPPRESSION
-// ============================================
-
-// Récupérer les demandes de suppression pour un utilisateur niveau 1
-app.get('/api/deletion-requests/:userId', async (req, res) => {
-    try {
-        const { userId } = req.params;
-
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'Utilisateur non trouvé'
-            });
-        }
-
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-
-        // Vérifier si le rôle existe
-        if (!userRole) {
-            return res.status(404).json({
-                success: false,
-                message: 'Rôle utilisateur non trouvé'
-            });
-        }
-
-        // Seuls les niveau 1 peuvent voir les demandes
-        if (userRole.niveau !== 1) {
-            return res.status(403).json({
-                success: false,
-                message: 'Seuls les utilisateurs de niveau 1 peuvent voir les demandes de suppression'
-            });
-        }
-
-        // Récupérer les demandes du département
-        const requests = await deletionRequestsCollection.find({
-            idDepartement: user.idDepartement,
-            statut: 'en_attente'
-        }).sort({ dateCreation: -1 }).toArray();
-
-        console.log(`📋 ${requests.length} demande(s) de suppression pour ${userId}`);
-
-        res.json({
-            success: true,
-            requests
-        });
-
-    } catch (error) {
-        console.error('Erreur récupération demandes:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Approuver une demande de suppression
-app.post('/api/deletion-requests/:requestId/approve', async (req, res) => {
-    try {
-        const { requestId } = req.params;
-        const { userId } = req.body;
-
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'Utilisateur non trouvé'
-            });
-        }
-
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-
-        // Vérifier si le rôle existe
-        if (!userRole) {
-            return res.status(404).json({
-                success: false,
-                message: 'Rôle utilisateur non trouvé'
-            });
-        }
-
-        // Seuls les niveau 1 peuvent approuver
-        if (userRole.niveau !== 1) {
-            return res.status(403).json({
-                success: false,
-                message: 'Seuls les utilisateurs de niveau 1 peuvent approuver les suppressions'
-            });
-        }
-
-        const request = await deletionRequestsCollection.findOne({
-            _id: new ObjectId(requestId)
-        });
-
-        if (!request) {
-            return res.status(404).json({
-                success: false,
-                message: 'Demande non trouvée'
-            });
-        }
-
-        // Vérifier que la demande est du même département
-        if (!request.idDepartement.equals(user.idDepartement)) {
-            return res.status(403).json({
-                success: false,
-                message: 'Vous ne pouvez approuver que les demandes de votre département'
-            });
-        }
-
-        if (request.statut !== 'en_attente') {
-            return res.status(400).json({
-                success: false,
-                message: 'Cette demande a déjà été traitée'
-            });
-        }
-
-        // Récupérer les informations du document AVANT de le supprimer (pour la notification)
-        const document = await documentsCollection.findOne({ _id: request.idDocument });
-
-        if (!document) {
-            return res.status(404).json({
-                success: false,
-                message: 'Document non trouvé ou déjà supprimé'
-            });
-        }
-
-        // Supprimer le document
-        const deleteResult = await documentsCollection.deleteOne({
-            _id: request.idDocument
-        });
-
-        if (deleteResult.deletedCount === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Document non trouvé ou déjà supprimé'
-            });
-        }
-
-        // 📝 Logger la suppression dans auditLogs (suppression approuvée par niveau 1)
-        await auditLogsCollection.insertOne({
-            timestamp: new Date(),
-            user: request.idDemandeur,  // L'utilisateur qui a fait la demande
-            action: 'DOCUMENT_DELETED',
-            details: {
-                documentId: document.idDocument || request.idDocument,  // Utiliser idDocument (ID lisible)
-                titre: document.titre,
-                approvedBy: userId,  // Approuvé par niveau 1
-                ip: req.ip,
-                userAgent: req.headers['user-agent']
-            },
-            documentId: document.idDocument || request.idDocument,  // Utiliser idDocument (ID lisible)
-            ip: req.ip,
-            userAgent: req.headers['user-agent']
-        });
-
-        // Mettre à jour la demande
-        const dateTraitement = new Date();
-        await deletionRequestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
-            {
-                $set: {
-                    statut: 'approuvee',
-                    idApprobateur: userId,
-                    nomApprobateur: user.nom,
-                    dateTraitement: dateTraitement
-                }
-            }
-        );
-
-        // 📧 Envoyer une notification au demandeur
-        try {
-            const demandeur = await usersCollection.findOne({ username: request.idDemandeur });
-            const demandeurRole = demandeur ? await rolesCollection.findOne({ _id: demandeur.idRole }) : null;
-
-            const notificationBody = `Votre demande de suppression a été approuvée.
-
-📄 Document supprimé:
-- Nom: ${document.titre}
-- ID: ${document.idDocument}
-- Catégorie: ${document.categorie || 'Non spécifiée'}
-
-👤 Demandé par: ${request.nomDemandeur} (Niveau ${demandeurRole ? demandeurRole.niveau : 'N/A'})
-
-✅ Validé par: ${user.nom} (Niveau ${userRole.niveau})
-📅 Date: ${dateTraitement.toLocaleString('fr-FR')}`;
-
-            await messagesCollection.insertOne({
-                from: 'Système',
-                fromName: 'Système',
-                to: request.idDemandeur,
-                toName: request.nomDemandeur,
-                subject: '✅ Demande de suppression approuvée',
-                body: notificationBody,
-                type: 'deletion-approved',
-                relatedData: {
-                    requestId: requestId,
-                    documentId: document.idDocument,
-                    documentTitle: document.titre
-                },
-                read: false,
-                createdAt: dateTraitement
-            });
-
-            console.log(`📧 Notification d'approbation envoyée à ${request.idDemandeur}`);
-        } catch (notifError) {
-            console.error('⚠️ Erreur envoi notification approbation:', notifError);
-            // On continue même si la notification échoue
-        }
-
-        console.log(`✅ Demande approuvée: ${requestId} par ${userId} - Document ${request.idDocument} supprimé`);
-
-        res.json({
-            success: true,
-            message: 'Document supprimé avec succès'
-        });
-
-    } catch (error) {
-        console.error('Erreur approbation demande:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Rejeter une demande de suppression
-app.post('/api/deletion-requests/:requestId/reject', async (req, res) => {
-    try {
-        const { requestId } = req.params;
-        const { userId, motifRejet } = req.body;
-
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'Utilisateur non trouvé'
-            });
-        }
-
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-
-        // Vérifier si le rôle existe
-        if (!userRole) {
-            return res.status(404).json({
-                success: false,
-                message: 'Rôle utilisateur non trouvé'
-            });
-        }
-
-        // Seuls les niveau 1 peuvent rejeter
-        if (userRole.niveau !== 1) {
-            return res.status(403).json({
-                success: false,
-                message: 'Seuls les utilisateurs de niveau 1 peuvent rejeter les suppressions'
-            });
-        }
-
-        const request = await deletionRequestsCollection.findOne({
-            _id: new ObjectId(requestId)
-        });
-
-        if (!request) {
-            return res.status(404).json({
-                success: false,
-                message: 'Demande non trouvée'
-            });
-        }
-
-        // Vérifier que la demande est du même département
-        if (!request.idDepartement.equals(user.idDepartement)) {
-            return res.status(403).json({
-                success: false,
-                message: 'Vous ne pouvez rejeter que les demandes de votre département'
-            });
-        }
-
-        if (request.statut !== 'en_attente') {
-            return res.status(400).json({
-                success: false,
-                message: 'Cette demande a déjà été traitée'
-            });
-        }
-
-        // Récupérer les informations du document (pour la notification)
-        const document = await documentsCollection.findOne({ _id: request.idDocument });
-
-        // Mettre à jour la demande
-        const dateTraitement = new Date();
-        await deletionRequestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
-            {
-                $set: {
-                    statut: 'rejetee',
-                    idApprobateur: userId,
-                    nomApprobateur: user.nom,
-                    dateTraitement: dateTraitement,
-                    motifRejet: motifRejet || 'Non spécifié'
-                }
-            }
-        );
-
-        // 📧 Envoyer une notification au demandeur
-        try {
-            const demandeur = await usersCollection.findOne({ username: request.idDemandeur });
-            const demandeurRole = demandeur ? await rolesCollection.findOne({ _id: demandeur.idRole }) : null;
-
-            const notificationBody = `Votre demande de suppression n'a pas été approuvée.
-
-📄 Document concerné:
-- Nom: ${document ? document.titre : request.documentTitre}
-- ID: ${document ? document.idDocument : 'N/A'}
-- Catégorie: ${document ? (document.categorie || 'Non spécifiée') : 'N/A'}
-
-👤 Demandé par: ${request.nomDemandeur} (Niveau ${demandeurRole ? demandeurRole.niveau : 'N/A'})
-
-❌ Motif du refus: ${motifRejet || 'Non spécifié'}
-
-👤 Rejeté par: ${user.nom} (Niveau ${userRole.niveau})
-📅 Date: ${dateTraitement.toLocaleString('fr-FR')}`;
-
-            await messagesCollection.insertOne({
-                from: 'Système',
-                fromName: 'Système',
-                to: request.idDemandeur,
-                toName: request.nomDemandeur,
-                subject: '❌ Demande de suppression non approuvée',
-                body: notificationBody,
-                type: 'deletion-rejected',
-                relatedData: {
-                    requestId: requestId,
-                    documentId: document ? document.idDocument : null,
-                    documentTitle: document ? document.titre : request.documentTitre,
-                    motifRejet: motifRejet || 'Non spécifié'
-                },
-                read: false,
-                createdAt: dateTraitement
-            });
-
-            console.log(`📧 Notification de rejet envoyée à ${request.idDemandeur}`);
-        } catch (notifError) {
-            console.error('⚠️ Erreur envoi notification rejet:', notifError);
-            // On continue même si la notification échoue
-        }
-
-        console.log(`❌ Demande rejetée: ${requestId} par ${userId}`);
-
-        res.json({
-            success: true,
-            message: 'Demande de suppression rejetée'
-        });
-
-    } catch (error) {
-        console.error('Erreur rejet demande:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Récupérer l'historique des demandes (approuvées et rejetées)
-app.get('/api/deletion-requests/:userId/history', async (req, res) => {
-    try {
-        const { userId } = req.params;
-
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'Utilisateur non trouvé'
-            });
-        }
-
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-
-        // Vérifier si le rôle existe
-        if (!userRole) {
-            return res.status(404).json({
-                success: false,
-                message: 'Rôle utilisateur non trouvé'
-            });
-        }
-
-        // Seuls les niveau 1 peuvent voir l'historique complet
-        if (userRole.niveau !== 1) {
-            // Niveau 2/3 peuvent voir uniquement leurs propres demandes
-            const requests = await deletionRequestsCollection.find({
-                idDemandeur: userId
-            }).sort({ dateCreation: -1 }).toArray();
-
-            return res.json({
-                success: true,
-                requests
-            });
-        }
-
-        // Niveau 1: voir toutes les demandes du département
-        const requests = await deletionRequestsCollection.find({
-            idDepartement: user.idDepartement,
-            statut: { $in: ['approuvee', 'rejetee'] }
-        }).sort({ dateTraitement: -1 }).limit(50).toArray();
-
-        res.json({
-            success: true,
-            requests
-        });
-
-    } catch (error) {
-        console.error('Erreur récupération historique:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// ============================================
-// ROUTES CATÉGORIES
-// ============================================
-
-app.get('/api/categories/:userId', async (req, res) => {
-    try {
-        const { userId } = req.params;
-
-        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({ message: 'Utilisateur non trouvé' });
-        }
-
-        // Déterminer l'idDepartement à utiliser
-        let departementId = user.idDepartement;
-
-        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
-        if (!departementId && user.idService) {
-            const service = await servicesCollection.findOne({ _id: user.idService });
-            if (service && service.idDepartement) {
-                departementId = service.idDepartement;
-                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
-            }
-        }
-
-        // Si l'utilisateur n'a pas de département, retourner uniquement ses catégories personnelles
-        let query = {};
-        if (departementId) {
-            // 🔄 Catégories du département (partagées) OU catégories personnelles (anciennes)
-            query = {
-                $or: [
-                    { idDepartement: departementId },
-                    { idUtilisateur: userId, idDepartement: { $exists: false } } // Support anciennes catégories
-                ]
-            };
-            console.log(`📂 Catégories - User ${userId} - Département: ${departementId}`);
-        } else {
-            // Utilisateur sans département : uniquement ses catégories personnelles
-            query = { idUtilisateur: userId };
-            console.log(`📂 Catégories - User ${userId} - Aucun département (catégories personnelles)`);
-        }
-
-        const categories = await categoriesCollection.find(query).toArray();
-        console.log(`📊 ${categories.length} catégorie(s) retournée(s) pour ${userId}`);
-
-        res.json(categories);
-    } catch (error) {
-        console.error('Erreur récupération catégories:', error);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
-
-app.post('/api/categories', async (req, res) => {
-    try {
-        const { userId, id, nom, couleur, icon } = req.body;
-
-        if (!userId || !id || !nom) {
-            return res.status(400).json({
-                success: false,
-                message: 'Données manquantes'
-            });
-        }
-
-        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'Utilisateur non trouvé'
-            });
-        }
-
-        // Déterminer l'idDepartement à utiliser
-        let departementId = user.idDepartement;
-
-        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
-        if (!departementId && user.idService) {
-            const service = await servicesCollection.findOne({ _id: user.idService });
-            if (service && service.idDepartement) {
-                departementId = service.idDepartement;
-                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
-            }
-        }
-
-        // Vérifier que la catégorie n'existe pas déjà dans ce département
-        let existsQuery = { id };
-        if (departementId) {
-            existsQuery.idDepartement = departementId;
-        } else {
-            existsQuery.idUtilisateur = userId;
-        }
-
-        const exists = await categoriesCollection.findOne(existsQuery);
-        if (exists) {
-            return res.status(400).json({
-                success: false,
-                message: 'Catégorie existe déjà dans votre département'
-            });
-        }
-
-        // 🔄 Créer la catégorie liée au département
-        const newCategory = {
-            id,
-            nom,
-            couleur,
-            icon,
-            createdBy: userId,
-            createdAt: new Date()
-        };
-
-        // Si l'utilisateur a un département, lier la catégorie au département
-        if (departementId) {
-            newCategory.idDepartement = departementId;
-            console.log(`✅ Catégorie "${nom}" créée pour le département ${departementId} par ${userId}`);
-        } else {
-            // Fallback : catégorie personnelle
-            newCategory.idUtilisateur = userId;
-            console.log(`⚠️ Catégorie "${nom}" créée personnellement par ${userId} (pas de département)`);
-        }
-
-        await categoriesCollection.insertOne(newCategory);
-
-        res.json({ success: true });
-
-    } catch (error) {
-        console.error('Erreur ajout catégorie:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Modifier une catégorie
-app.put('/api/categories/:userId/:catId', async (req, res) => {
-    try {
-        const { userId, catId } = req.params;
-        const { nom, couleur, icon } = req.body;
-
-        if (!nom) {
-            return res.status(400).json({
-                success: false,
-                message: 'Le nom est requis'
-            });
-        }
-
-        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'Utilisateur non trouvé'
-            });
-        }
-
-        // Déterminer l'idDepartement à utiliser
-        let departementId = user.idDepartement;
-
-        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
-        if (!departementId && user.idService) {
-            const service = await servicesCollection.findOne({ _id: user.idService });
-            if (service && service.idDepartement) {
-                departementId = service.idDepartement;
-                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
-            }
-        }
-
-        // Construire la requête : catégorie du département OU catégorie personnelle
-        let query = { id: catId };
-        if (departementId) {
-            query.idDepartement = departementId;
-        } else {
-            query.idUtilisateur = userId;
-        }
-
-        const result = await categoriesCollection.updateOne(
-            query,
-            {
-                $set: {
-                    nom,
-                    couleur,
-                    icon,
-                    lastModifiedBy: userId,
-                    lastModifiedAt: new Date()
-                }
-            }
-        );
-
-        if (result.matchedCount === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Catégorie non trouvée dans votre département'
-            });
-        }
-
-        console.log(`✅ Catégorie "${catId}" modifiée par ${userId}`);
-        res.json({ success: true });
-
-    } catch (error) {
-        console.error('Erreur modification catégorie:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-app.delete('/api/categories/:userId/:catId', async (req, res) => {
-    try {
-        const { userId, catId } = req.params;
-
-        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
-        const user = await usersCollection.findOne({ username: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'Utilisateur non trouvé'
-            });
-        }
-
-        // Déterminer l'idDepartement à utiliser
-        let departementId = user.idDepartement;
-
-        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
-        if (!departementId && user.idService) {
-            const service = await servicesCollection.findOne({ _id: user.idService });
-            if (service && service.idDepartement) {
-                departementId = service.idDepartement;
-                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
-            }
-        }
-
-        // Construire la requête : catégorie du département OU catégorie personnelle
-        let categoryQuery = { id: catId };
-        if (departementId) {
-            categoryQuery.idDepartement = departementId;
-        } else {
-            categoryQuery.idUtilisateur = userId;
-        }
-
-        // Vérifier que la catégorie existe avant de supprimer
-        const category = await categoriesCollection.findOne(categoryQuery);
-        if (!category) {
-            return res.status(404).json({
-                success: false,
-                message: 'Catégorie non trouvée dans votre département'
-            });
-        }
-
-        // 🔄 Réaffecter TOUS les documents de cette catégorie vers "autre"
-        // Pour les catégories de département : tous les documents du département avec cette catégorie
-        if (departementId) {
-            const updateResult = await documentsCollection.updateMany(
-                {
-                    idDepartement: departementId,
-                    categorie: catId
-                },
-                { $set: { categorie: 'autre' } }
-            );
-            console.log(`📝 ${updateResult.modifiedCount} document(s) réaffecté(s) vers "autre"`);
-        } else {
-            // Pour les catégories personnelles : seulement les documents de l'utilisateur
-            await documentsCollection.updateMany(
-                { idUtilisateur: userId, categorie: catId },
-                { $set: { categorie: 'autre' } }
-            );
-        }
-
-        // Supprimer la catégorie
-        const result = await categoriesCollection.deleteOne(categoryQuery);
-
-        if (result.deletedCount === 0) {
-            return res.status(500).json({
-                success: false,
-                message: 'Erreur lors de la suppression'
-            });
-        }
-
-        console.log(`✅ Catégorie "${catId}" supprimée par ${userId}`);
-        res.json({ success: true });
-
-    } catch (error) {
-        console.error('Erreur suppression catégorie:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// ============================================
-// ROUTES RÔLES ET DÉPARTEMENTS
-// ============================================
-
-app.get('/api/roles', async (req, res) => {
-    try {
-        const roles = await rolesCollection.find().toArray();
-        res.json({ success: true, roles });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Créer un rôle
-app.post('/api/roles', async (req, res) => {
-    try {
-        const { nom, niveau, description } = req.body;
-
-        if (!nom || !niveau || !description) {
-            return res.status(400).json({ success: false, message: 'Données manquantes' });
-        }
-
-        const result = await rolesCollection.insertOne({ nom, niveau, description, createdAt: new Date() });
-        res.json({ success: true, roleId: result.insertedId });
-    } catch (error) {
-        console.error('Erreur création rôle:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Modifier un rôle
-app.put('/api/roles/:roleId', async (req, res) => {
-    try {
-        const { roleId } = req.params;
-        const { nom, niveau, description } = req.body;
-
-        if (!nom || !niveau || !description) {
-            return res.status(400).json({ success: false, message: 'Données manquantes' });
-        }
-
-        await rolesCollection.updateOne(
-            { _id: new ObjectId(roleId) },
-            { $set: { nom, niveau, description, updatedAt: new Date() } }
-        );
-
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Erreur modification rôle:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Supprimer un rôle
-app.delete('/api/roles/:roleId', async (req, res) => {
-    try {
-        const { roleId } = req.params;
-
-        // Vérifier qu'aucun utilisateur n'a ce rôle
-        const usersWithRole = await usersCollection.countDocuments({ idRole: new ObjectId(roleId) });
-        if (usersWithRole > 0) {
-            return res.status(400).json({ success: false, message: `${usersWithRole} utilisateur(s) ont ce rôle. Veuillez d'abord changer leur rôle.` });
-        }
-
-        await rolesCollection.deleteOne({ _id: new ObjectId(roleId) });
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Erreur suppression rôle:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-app.get('/api/departements', async (req, res) => {
-    try {
-        // ✅ NOUVEAU: Filtrage hiérarchique selon le niveau
-        let query = {};
-
-        // Vérifier si l'utilisateur connecté est de niveau 1 ou 0
-        if (req.session && req.session.userId) {
-            const currentUser = await usersCollection.findOne({ username: req.session.userId });
-            if (currentUser) {
-                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
-
-                // Si niveau 1, filtrer pour ne montrer que son département et ses sous-départements
-                if (currentUserRole && currentUserRole.niveau === 1) {
-                    // Montrer :
-                    // 1. Son département principal (celui auquel il est affecté)
-                    // 2. Les sous-départements qu'il a créés (parentDepartement = son département)
-                    query = {
-                        $or: [
-                            { _id: currentUser.idDepartement }, // Son département principal
-                            { parentDepartement: currentUser.idDepartement } // Ses sous-départements
-                        ]
-                    };
-                }
-                // ✅ FIX: Si niveau 0, montrer UNIQUEMENT les départements principaux (pas les services)
-                else if (currentUserRole && currentUserRole.niveau === 0) {
-                    // Ne montrer que les départements principaux (sans parent)
-                    query = { parentDepartement: null };
-                }
-            }
-        }
-
-        const departements = await departementsCollection.find(query).toArray();
-        res.json({ success: true, departements });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// Ajouter un département
-app.post('/api/departements', async (req, res) => {
-    try {
-        const { nom, code } = req.body;
-
-        if (!nom || !code) {
-            return res.status(400).json({ message: 'Nom et code requis' });
-        }
-
-        const nouveauDepartement = {
-            _id: new ObjectId(),
-            nom,
-            code,
-            dateCreation: new Date(),
-            parentDepartement: null // Par défaut, c'est un département principal
-        };
-
-        // ✅ NOUVEAU: Gestion de la hiérarchie selon le niveau
-        if (req.session && req.session.userId) {
-            const currentUser = await usersCollection.findOne({ username: req.session.userId });
-            nouveauDepartement.createdBy = req.session.userId;
-
-            if (currentUser) {
-                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
-
-                if (currentUserRole && currentUserRole.niveau === 1) {
-                    // Niveau 1 : Crée un SOUS-DÉPARTEMENT dans son département d'affectation
-                    if (!currentUser.idDepartement) {
-                        return res.status(400).json({
-                            message: 'Vous devez être affecté à un département pour créer des sous-départements'
-                        });
-                    }
-                    nouveauDepartement.parentDepartement = currentUser.idDepartement;
-                } else if (currentUserRole && currentUserRole.niveau === 0) {
-                    // Niveau 0 : Crée un DÉPARTEMENT PRINCIPAL
-                    nouveauDepartement.parentDepartement = null;
-                } else {
-                    // Autres niveaux : Pas autorisés à créer des départements
-                    return res.status(403).json({
-                        message: 'Vous n\'avez pas les permissions pour créer des départements'
-                    });
-                }
-            }
-        } else {
-            nouveauDepartement.createdBy = null;
-        }
-
-        await departementsCollection.insertOne(nouveauDepartement);
-        res.json({ message: 'Département créé', departement: nouveauDepartement });
-    } catch (error) {
-        console.error('Erreur création département:', error);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
-
-// Modifier un département
-app.put('/api/departements/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { nom, code } = req.body;
-
-        if (!nom || !code) {
-            return res.status(400).json({ message: 'Nom et code requis' });
-        }
-
-        // ✅ NOUVEAU: Vérifier les permissions selon la hiérarchie
-        if (req.session && req.session.userId) {
-            const currentUser = await usersCollection.findOne({ username: req.session.userId });
-            if (currentUser) {
-                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
-
-                // Si niveau 1, vérifier qu'il modifie un sous-département qu'il a créé OU son département principal
-                if (currentUserRole && currentUserRole.niveau === 1) {
-                    const departement = await departementsCollection.findOne({ _id: new ObjectId(id) });
-                    if (!departement) {
-                        return res.status(404).json({ message: 'Département non trouvé' });
-                    }
-
-                    // Peut modifier :
-                    // 1. Son département principal (renommer)
-                    // 2. Les sous-départements qu'il a créés
-                    const canModify =
-                        departement._id.toString() === currentUser.idDepartement?.toString() || // Son département principal
-                        (departement.parentDepartement?.toString() === currentUser.idDepartement?.toString() &&
-                         departement.createdBy === req.session.userId); // Ses sous-départements
-
-                    if (!canModify) {
-                        return res.status(403).json({
-                            message: 'Vous ne pouvez modifier que votre département ou les sous-départements que vous avez créés'
-                        });
-                    }
-                }
-            }
-        }
-
-        const result = await departementsCollection.updateOne(
-            { _id: new ObjectId(id) },
-            { $set: { nom, code } }
-        );
-
-        if (result.matchedCount === 0) {
-            return res.status(404).json({ message: 'Département non trouvé' });
-        }
-
-        res.json({ message: 'Département modifié' });
-    } catch (error) {
-        console.error('Erreur modification département:', error);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
-
-// Supprimer un département
-app.delete('/api/departements/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        // ✅ NOUVEAU: Vérifier les permissions selon la hiérarchie
-        if (req.session && req.session.userId) {
-            const currentUser = await usersCollection.findOne({ username: req.session.userId });
-            if (currentUser) {
-                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
-
-                // Si niveau 1, vérifier qu'il supprime un sous-département qu'il a créé
-                if (currentUserRole && currentUserRole.niveau === 1) {
-                    const departement = await departementsCollection.findOne({ _id: new ObjectId(id) });
-                    if (!departement) {
-                        return res.status(404).json({ message: 'Département non trouvé' });
-                    }
-
-                    // Un Niveau 1 ne peut PAS supprimer :
-                    // 1. Son département principal (créé par Niveau 0)
-                    if (departement._id.toString() === currentUser.idDepartement?.toString()) {
-                        return res.status(403).json({
-                            message: 'Vous ne pouvez pas supprimer votre département principal. Seul le Super Admin peut le faire.'
-                        });
-                    }
-
-                    // 2. Les départements principaux (parentDepartement = null)
-                    if (!departement.parentDepartement) {
-                        return res.status(403).json({
-                            message: 'Seul le Super Admin peut supprimer les départements principaux'
-                        });
-                    }
-
-                    // Peut supprimer uniquement les sous-départements qu'il a créés dans son département
-                    if (departement.createdBy !== req.session.userId ||
-                        departement.parentDepartement?.toString() !== currentUser.idDepartement?.toString()) {
-                        return res.status(403).json({
-                            message: 'Vous ne pouvez supprimer que les sous-départements/services que vous avez créés dans votre département'
-                        });
-                    }
-                }
-            }
-        }
-
-        const result = await departementsCollection.deleteOne({ _id: new ObjectId(id) });
-
-        if (result.deletedCount === 0) {
-            return res.status(404).json({ message: 'Département non trouvé' });
-        }
-
-        res.json({ message: 'Sous-département supprimé' });
-    } catch (error) {
-        console.error('Erreur suppression département:', error);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
-
-// ============================================
-// ROUTES SERVICES (SÉPARÉ DE DÉPARTEMENTS)
-// ============================================
-
-// Récupérer les services accessibles
-app.get('/api/services', async (req, res) => {
-    try {
-        let services = [];
-
-        // Si l'utilisateur est authentifié, filtrer selon son niveau
-        if (req.session && req.session.userId) {
-            const user = await usersCollection.findOne({ username: req.session.userId });
-            if (user) {
-                const userRole = await rolesCollection.findOne({ _id: user.idRole });
-                if (userRole) {
-                    const servicesModule = require('./modules/services');
-                    services = await servicesModule.getServices(
-                        req.session.userId,
-                        userRole.niveau,
-                        user.idDepartement
-                    );
-                }
-            }
-        }
-        // Si pas authentifié, retourner une liste vide (cohérent avec /departements)
-
-        res.json({ success: true, services });
-    } catch (error) {
-        console.error('Erreur récupération services:', error);
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
-});
-
-// ===== ENDPOINTS DE TEST PROGRESSIFS =====
-
-// TEST 1 : Cookie reçu ?
-app.get('/api/test/1-cookie', (req, res) => {
-    const result = {
-        test: 'TEST 1 - Réception du cookie',
-        cookieHeader: req.headers.cookie || 'AUCUN COOKIE',
-        success: !!req.headers.cookie
-    };
-    console.log('✅ TEST 1:', result);
-    res.json(result);
-});
-
-// TEST 2 : Session existe ?
-app.get('/api/test/2-session', (req, res) => {
-    const result = {
-        test: 'TEST 2 - Existence de req.session',
-        hasSession: !!req.session,
-        sessionType: typeof req.session,
-        sessionID: req.sessionID || 'AUCUN',
-        success: !!req.session
-    };
-    console.log('✅ TEST 2:', result);
-    res.json(result);
-});
-
-// TEST 3 : Session a userId ?
-app.get('/api/test/3-userid', (req, res) => {
-    const result = {
-        test: 'TEST 3 - UserId dans session',
-        hasSession: !!req.session,
-        hasUserId: !!req.session?.userId,
-        userId: req.session?.userId || 'AUCUN',
-        success: !!(req.session && req.session.userId)
-    };
-    console.log('✅ TEST 3:', result);
-    res.json(result);
-});
-
-// TEST 4 : POST simple fonctionne ?
-app.post('/api/test/4-post', (req, res) => {
-    const result = {
-        test: 'TEST 4 - POST avec session',
-        cookieHeader: req.headers.cookie || 'AUCUN',
-        hasSession: !!req.session,
-        hasUserId: !!req.session?.userId,
-        userId: req.session?.userId || 'AUCUN',
-        body: req.body,
-        success: !!(req.session && req.session.userId)
-    };
-    console.log('✅ TEST 4:', result);
-    res.json(result);
-});
-
-// Créer un service
-app.post('/api/services', async (req, res) => {
-    try {
-        console.log('🔍 POST /api/services - Session:', req.session ? 'existe' : 'null', 'UserId:', req.session?.userId);
-
-        if (!req.session || !req.session.userId) {
-            console.log('❌ POST /api/services - Session invalide');
-            return res.status(401).json({ success: false, message: 'Non authentifié' });
-        }
-
-        const user = await usersCollection.findOne({ username: req.session.userId });
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
-        }
-
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-        if (!userRole) {
-            return res.status(404).json({ success: false, message: 'Rôle non trouvé' });
-        }
-
-        // Seuls niveau 0 et niveau 1 peuvent créer des services
-        if (userRole.niveau > 1) {
-            return res.status(403).json({
-                success: false,
-                message: 'Vous n\'avez pas les permissions pour créer des services'
-            });
-        }
-
-        const { nom, code, description, idDepartement } = req.body;
-
-        if (!nom || !code || !idDepartement) {
-            return res.status(400).json({
-                success: false,
-                message: 'Nom, code et département requis'
-            });
-        }
-
-        const servicesModule = require('./modules/services');
-        const newService = await servicesModule.createService(
-            { nom, code, description, idDepartement },
-            req.session.userId,
-            userRole.niveau,
-            user.idDepartement
-        );
-
-        res.json({ success: true, message: 'Service créé avec succès', service: newService });
-    } catch (error) {
-        console.error('Erreur création service:', error);
-        res.status(400).json({ success: false, message: error.message });
-    }
-});
-
-// Modifier un service
-app.put('/api/services/:id', async (req, res) => {
-    try {
-        if (!req.session || !req.session.userId) {
-            return res.status(401).json({ success: false, message: 'Non authentifié' });
-        }
-
-        const user = await usersCollection.findOne({ username: req.session.userId });
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
-        }
-
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-        if (!userRole) {
-            return res.status(404).json({ success: false, message: 'Rôle non trouvé' });
-        }
-
-        if (userRole.niveau > 1) {
-            return res.status(403).json({
-                success: false,
-                message: 'Vous n\'avez pas les permissions pour modifier des services'
-            });
-        }
-
-        const { id } = req.params;
-        const { nom, code, description } = req.body;
-
-        if (!nom || !code) {
-            return res.status(400).json({ success: false, message: 'Nom et code requis' });
-        }
-
-        const servicesModule = require('./modules/services');
-        const updatedService = await servicesModule.updateService(
-            id,
-            { nom, code, description },
-            req.session.userId,
-            userRole.niveau,
-            user.idDepartement
-        );
-
-        res.json({ success: true, message: 'Service modifié avec succès', service: updatedService });
-    } catch (error) {
-        console.error('Erreur modification service:', error);
-        res.status(400).json({ success: false, message: error.message });
-    }
-});
-
-// Supprimer un service
-app.delete('/api/services/:id', async (req, res) => {
-    try {
-        if (!req.session || !req.session.userId) {
-            return res.status(401).json({ success: false, message: 'Non authentifié' });
-        }
-
-        const user = await usersCollection.findOne({ username: req.session.userId });
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
-        }
-
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-        if (!userRole) {
-            return res.status(404).json({ success: false, message: 'Rôle non trouvé' });
-        }
-
-        if (userRole.niveau > 1) {
-            return res.status(403).json({
-                success: false,
-                message: 'Vous n\'avez pas les permissions pour supprimer des services'
-            });
-        }
-
-        const { id } = req.params;
-
-        const servicesModule = require('./modules/services');
-        await servicesModule.deleteService(
-            id,
-            req.session.userId,
-            userRole.niveau,
-            user.idDepartement
-        );
-
-        res.json({ success: true, message: 'Service supprimé avec succès' });
-    } catch (error) {
-        console.error('Erreur suppression service:', error);
-        res.status(400).json({ success: false, message: error.message });
-    }
-});
-
-// Créer une demande de suppression (NIVEAU 2)
-app.post('/api/deletion-requests', async (req, res) => {
-    try {
-        const { documentId, requestedBy } = req.body;
-
-        if (!documentId || !requestedBy) {
-            return res.status(400).json({ success: false, message: 'Données manquantes' });
-        }
-
-        // Récupérer le document
-        const document = await documentsCollection.findOne({ _id: new ObjectId(documentId) });
-        if (!document) {
-            return res.status(404).json({ success: false, message: 'Document non trouvé' });
-        }
-
-        // Récupérer l'utilisateur qui fait la demande
-        const requester = await usersCollection.findOne({ username: requestedBy });
-        if (!requester) {
-            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
-        }
-
-        // Vérifier que l'utilisateur est bien niveau 3 uniquement (niveau 2 n'a plus accès)
-        const requesterRole = await rolesCollection.findOne({ _id: requester.idRole });
-        if (!requesterRole) {
-            return res.status(404).json({ success: false, message: 'Rôle utilisateur non trouvé' });
-        }
-        if (requesterRole.niveau !== 3) {
-            return res.status(403).json({ success: false, message: 'Seuls les utilisateurs de niveau 3 peuvent faire des demandes de suppression' });
-        }
-
-        // Vérifier que le document appartient bien à cet utilisateur
-        if (document.idUtilisateur !== requestedBy) {
-            return res.status(403).json({ success: false, message: 'Vous ne pouvez demander la suppression que de vos propres documents' });
-        }
-
-        // Vérifier si une demande existe déjà pour ce document
-        const existingRequest = await deletionRequestsCollection.findOne({
-            idDocument: new ObjectId(documentId),
-            statut: 'en_attente'
-        });
-
-        if (existingRequest) {
-            return res.json({
-                success: false,
-                message: 'Une demande de suppression est déjà en attente pour ce document',
-                requestId: existingRequest._id
-            });
-        }
-
-        // Créer la demande de suppression (utiliser la même structure que dans DELETE)
-        const insertResult = await deletionRequestsCollection.insertOne({
-            idDocument: new ObjectId(documentId),
-            documentTitre: document.titre,
-            idDemandeur: requestedBy,
-            nomDemandeur: requester.nom,
-            idDepartement: requester.idDepartement,
-            dateCreation: new Date(),
-            statut: 'en_attente',
-            motif: req.body.motif || 'Non spécifié'
-        });
-
-        // ✅ Envoyer un message aux administrateurs niveau 1 du même département
-        try {
-            const nivel1Users = await usersCollection.find({
-                idDepartement: requester.idDepartement
-            }).toArray();
-
-            // Filtrer pour ne garder que ceux qui ont le rôle niveau 1
-            for (const user of nivel1Users) {
-                const userRole = await rolesCollection.findOne({ _id: user.idRole });
-                if (userRole && userRole.niveau === 1) {
-                    await messagesCollection.insertOne({
-                        from: requestedBy,
-                        fromName: requester.nom,
-                        to: user.username,
-                        toName: user.nom,
-                        subject: `📝 Nouvelle demande de suppression - ${document.titre}`,
-                        body: `Bonjour ${user.nom},\n\n${requester.nom} (${requestedBy}) a créé une demande de suppression pour le document suivant :\n\n📄 Titre: ${document.titre}\n🆔 ID Document: ${document.idDocument}\n💬 Motif: ${req.body.motif || 'Non spécifié'}\n\nVeuillez vous rendre dans la section "Demandes de suppression" pour approuver ou rejeter cette demande.\n\nMerci`,
-                        type: 'deletion-request',
-                        relatedData: {
-                            requestId: insertResult.insertedId.toString(),
-                            documentId: documentId
-                        },
-                        read: false,
-                        createdAt: new Date()
-                    });
-                    console.log(`📧 Message envoyé à ${user.username} pour la demande ${insertResult.insertedId}`);
-                }
-            }
-        } catch (msgError) {
-            console.error('⚠️ Erreur envoi messages notification:', msgError);
-        }
-
-        res.json({ success: true, message: 'Demande de suppression envoyée' });
-    } catch (error) {
-        console.error('Erreur création demande suppression:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
@@ -4817,6 +3718,255 @@ app.get('/api/share-history/:userId', async (req, res) => {
         res.json(history);
     } catch (error) {
         console.error('Erreur récupération historique partages utilisateur:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTES POUR ROLES, DEPARTEMENTS, SERVICES, CATEGORIES
+// ============================================
+
+// Récupérer tous les rôles
+app.get('/api/roles', async (req, res) => {
+    try {
+        const roles = await rolesCollection.find({}).sort({ niveau: 1 }).toArray();
+        res.json({ success: true, roles });
+    } catch (error) {
+        console.error('Erreur récupération rôles:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer tous les départements
+app.get('/api/departements', async (req, res) => {
+    try {
+        const departements = await departementsCollection.find({}).sort({ nom: 1 }).toArray();
+        res.json({ success: true, departements });
+    } catch (error) {
+        console.error('Erreur récupération départements:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer tous les services
+app.get('/api/services', async (req, res) => {
+    try {
+        const services = await servicesCollection.find({}).sort({ nom: 1 }).toArray();
+        res.json({ success: true, services });
+    } catch (error) {
+        console.error('Erreur récupération services:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les catégories d'un utilisateur
+app.get('/api/categories/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // 🔄 NOUVEAU: Catégories partagées au niveau du DÉPARTEMENT
+        // Récupérer tous les utilisateurs du même département
+        const deptUsers = await usersCollection.find({
+            idDepartement: user.idDepartement
+        }).toArray();
+
+        const deptUsernames = deptUsers.map(u => u.username);
+
+        // Récupérer TOUTES les catégories créées par n'importe quel utilisateur du département
+        const categories = await categoriesCollection
+            .find({ idUtilisateur: { $in: deptUsernames } })
+            .sort({ nom: 1 })
+            .toArray();
+
+        res.json(categories);
+    } catch (error) {
+        console.error('Erreur récupération catégories:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Créer une nouvelle catégorie
+app.post('/api/categories', async (req, res) => {
+    try {
+        const { userId, id, nom, couleur, icon } = req.body;
+
+        if (!userId || !id || !nom) {
+            return res.status(400).json({
+                success: false,
+                message: 'userId, id et nom sont obligatoires'
+            });
+        }
+
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // 🔒 VÉRIFIER QUE L'UTILISATEUR EST NIVEAU 1
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole || userRole.niveau !== 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Seuls les utilisateurs niveau 1 peuvent créer des catégories'
+            });
+        }
+
+        // Vérifier si la catégorie existe déjà dans le département
+        const deptUsers = await usersCollection.find({
+            idDepartement: user.idDepartement
+        }).toArray();
+        const deptUsernames = deptUsers.map(u => u.username);
+
+        const existingCategory = await categoriesCollection.findOne({
+            idUtilisateur: { $in: deptUsernames },
+            id
+        });
+
+        if (existingCategory) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cette catégorie existe déjà dans le département'
+            });
+        }
+
+        // Créer la nouvelle catégorie
+        const newCategory = {
+            _id: new ObjectId(),
+            idUtilisateur: userId,
+            idDepartement: user.idDepartement, // ✅ Lier au département
+            id,
+            nom,
+            couleur: couleur || '#3b82f6',
+            icon: icon || '📁',
+            dateCreation: new Date()
+        };
+
+        await categoriesCollection.insertOne(newCategory);
+
+        console.log(`✅ Catégorie créée: ${nom} pour département ${user.idDepartement}`);
+        res.json({ success: true, category: newCategory });
+    } catch (error) {
+        console.error('Erreur création catégorie:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Modifier une catégorie
+app.put('/api/categories/:userId/:catId', async (req, res) => {
+    try {
+        const { userId, catId } = req.params;
+        const { nom, couleur, icon } = req.body;
+
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // 🔒 VÉRIFIER QUE L'UTILISATEUR EST NIVEAU 1
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole || userRole.niveau !== 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Seuls les utilisateurs niveau 1 peuvent modifier des catégories'
+            });
+        }
+
+        // Trouver la catégorie dans le département
+        const deptUsers = await usersCollection.find({
+            idDepartement: user.idDepartement
+        }).toArray();
+        const deptUsernames = deptUsers.map(u => u.username);
+
+        const result = await categoriesCollection.updateOne(
+            {
+                idUtilisateur: { $in: deptUsernames },
+                id: catId
+            },
+            {
+                $set: {
+                    nom,
+                    couleur: couleur || '#3b82f6',
+                    icon: icon || '📁',
+                    dateModification: new Date()
+                }
+            }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Catégorie non trouvée dans le département'
+            });
+        }
+
+        console.log(`✅ Catégorie modifiée: ${catId}`);
+        res.json({ success: true, message: 'Catégorie modifiée' });
+    } catch (error) {
+        console.error('Erreur modification catégorie:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer une catégorie
+app.delete('/api/categories/:userId/:catId', async (req, res) => {
+    try {
+        const { userId, catId } = req.params;
+
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // 🔒 VÉRIFIER QUE L'UTILISATEUR EST NIVEAU 1
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole || userRole.niveau !== 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Seuls les utilisateurs niveau 1 peuvent supprimer des catégories'
+            });
+        }
+
+        // Récupérer tous les utilisateurs du département
+        const deptUsers = await usersCollection.find({
+            idDepartement: user.idDepartement
+        }).toArray();
+        const deptUsernames = deptUsers.map(u => u.username);
+
+        // Vérifier si des documents du département utilisent cette catégorie
+        const documentsWithCategory = await documentsCollection.countDocuments({
+            idUtilisateur: { $in: deptUsernames },
+            categorie: catId
+        });
+
+        if (documentsWithCategory > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Impossible de supprimer : ${documentsWithCategory} document(s) du département utilisent cette catégorie`
+            });
+        }
+
+        // Supprimer la catégorie (n'importe qui du département peut l'avoir créée)
+        const result = await categoriesCollection.deleteOne({
+            idUtilisateur: { $in: deptUsernames },
+            id: catId
+        });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Catégorie non trouvée dans le département'
+            });
+        }
+
+        console.log(`✅ Catégorie supprimée: ${catId} du département ${user.idDepartement}`);
+        res.json({ success: true, message: 'Catégorie supprimée' });
+    } catch (error) {
+        console.error('Erreur suppression catégorie:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
