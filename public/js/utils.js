@@ -112,6 +112,19 @@ function getStorageColorClass(percentUsed) {
     return 'bg-green-500';
 }
 
+// Échapper les valeurs pour utilisation sécurisée dans les attributs HTML
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;')
+        .replace(/\n/g, ' ')
+        .replace(/\r/g, '');
+}
+
 // Options de couleurs pour les catégories
 const colorOptions = [
     { value: 'bg-blue-100 text-blue-800', label: 'Bleu' },

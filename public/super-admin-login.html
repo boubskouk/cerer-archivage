@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Super Admin - Connexion</title>
+
+    <!-- ✅ DÉSACTIVATION COMPLÈTE DU CACHE -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
     <style>
         * {
             margin: 0;
@@ -89,6 +95,37 @@
         .form-group input:focus {
             border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .password-wrapper {
+            position: relative;
+        }
+
+        .password-wrapper input {
+            padding-right: 48px;
+        }
+
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 20px;
+            padding: 8px;
+            color: #718096;
+            transition: color 0.2s;
+            user-select: none;
+        }
+
+        .toggle-password:hover {
+            color: #667eea;
+        }
+
+        .toggle-password:active {
+            transform: translateY(-50%) scale(0.95);
         }
 
         .btn-login {
@@ -197,14 +234,19 @@
 
             <div class="form-group">
                 <label for="password">Mot de passe</label>
-                <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    placeholder="Entrez votre mot de passe"
-                    required
-                    autocomplete="current-password"
-                >
+                <div class="password-wrapper">
+                    <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        placeholder="Entrez votre mot de passe"
+                        required
+                        autocomplete="current-password"
+                    >
+                    <button type="button" class="toggle-password" onclick="togglePasswordVisibility()" title="Afficher/Masquer le mot de passe">
+                        👁️
+                    </button>
+                </div>
             </div>
 
             <button type="submit" class="btn-login" id="loginBtn">
@@ -218,6 +260,34 @@
     </div>
 
     <script>
+        // ============================================
+        // VÉRIFICATION DE SESSION EXISTANTE
+        // ============================================
+        // Si l'utilisateur a déjà une session valide, le rediriger vers le dashboard
+        (async function() {
+            console.log('🔍 Vérification session existante...');
+
+            try {
+                const response = await fetch('/api/superadmin/test', {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        console.log('✅ Session valide détectée, redirection...');
+                        window.location.href = '/super-admin.html';
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.log('ℹ️ Pas de session active');
+            }
+
+            console.log('🛡️ Prêt pour connexion Super Admin');
+        })();
+
         async function handleLogin(event) {
             event.preventDefault();
 
@@ -293,6 +363,22 @@
             const successDiv = document.getElementById('success');
             successDiv.textContent = message;
             successDiv.classList.add('show');
+        }
+
+        // Toggle password visibility
+        function togglePasswordVisibility() {
+            const passwordInput = document.getElementById('password');
+            const toggleBtn = document.querySelector('.toggle-password');
+
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleBtn.textContent = '🙈';
+                toggleBtn.title = 'Masquer le mot de passe';
+            } else {
+                passwordInput.type = 'password';
+                toggleBtn.textContent = '👁️';
+                toggleBtn.title = 'Afficher le mot de passe';
+            }
         }
 
         // Focus sur le champ username au chargement

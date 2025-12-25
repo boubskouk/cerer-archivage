@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Super Admin - Dashboard</title>
 
+    <!-- 🛡️ ANTI-CACHE: Forcer le rechargement -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
     <!-- Chart.js pour les graphiques -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 
@@ -481,36 +486,468 @@
             color: #991b1b;
         }
 
+        /* Pagination */
+        .pagination-container {
+            margin-top: 24px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 12px;
+        }
+
+        .pagination-info {
+            text-align: center;
+            color: #4a5568;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
         .pagination {
             display: flex;
             justify-content: center;
             align-items: center;
-            gap: 8px;
-            margin-top: 20px;
+            gap: 6px;
+            flex-wrap: wrap;
         }
 
-        .pagination button {
-            padding: 8px 12px;
-            border: 1px solid #e2e8f0;
+        .pagination-btn {
+            padding: 10px 16px;
+            border: 2px solid #e2e8f0;
             background: white;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #4a5568;
+            transition: all 0.2s;
+            min-width: 44px;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: #edf2f7;
+            border-color: #cbd5e0;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .pagination-btn.page-btn {
+            min-width: 40px;
+            padding: 8px 12px;
+        }
+
+        .pagination-btn.page-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        .pagination-btn.page-btn.active:hover {
+            background: linear-gradient(135deg, #5568d3 0%, #653a8b 100%);
+        }
+
+        .pagination-dots {
+            padding: 0 8px;
+            color: #a0aec0;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        /* Module Documents */
+        .documents-module {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .period-filter {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            background: #f7fafc;
+            padding: 8px;
+            border-radius: 10px;
+            align-items: center;
+        }
+
+        .period-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: #4a5568;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .period-btn:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .period-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+        }
+
+        .custom-date-range {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-left: auto;
+        }
+
+        .custom-date-range input[type="date"] {
+            padding: 8px 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .apply-custom-period {
+            padding: 8px 16px !important;
+            background: linear-gradient(135deg, #16a34a 0%, #059669 100%) !important;
+            color: white !important;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(22, 163, 74, 0.3);
+        }
+
+        .apply-custom-period:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(22, 163, 74, 0.4);
+        }
+
+        .apply-custom-period:disabled {
+            background: #e2e8f0 !important;
+            color: #a0aec0 !important;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .documents-module .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .documents-module .stat-card {
+            padding: 20px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-left: 4px solid #667eea;
+        }
+
+        .documents-module .stat-card.success {
+            border-left-color: #16a34a;
+        }
+
+        .documents-module .stat-card.warning {
+            border-left-color: #eab308;
+        }
+
+        .documents-module .stat-card.danger {
+            border-left-color: #dc2626;
+        }
+
+        .documents-module .stat-card .stat-label {
+            font-size: 13px;
+            color: #718096;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .documents-module .stat-card .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1a202c;
+        }
+
+        .chart-container {
+            margin-bottom: 24px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 10px;
+        }
+
+        .chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 16px;
+        }
+
+        .bar-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .bar-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .bar-label {
+            min-width: 150px;
+            font-size: 14px;
+            color: #4a5568;
+            font-weight: 600;
+        }
+
+        .bar-track {
+            flex: 1;
+            height: 24px;
+            background: #e2e8f0;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            transition: width 0.5s ease;
+        }
+
+        .bar-value {
+            min-width: 50px;
+            text-align: right;
+            font-size: 14px;
+            font-weight: 700;
+            color: #1a202c;
+        }
+
+        .top-documents-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .top-doc-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #e2e8f0;
+            transition: all 0.2s;
+        }
+
+        .top-doc-item:hover {
+            border-color: #667eea;
+            transform: translateX(4px);
+        }
+
+        .top-doc-info {
+            flex: 1;
+        }
+
+        .top-doc-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+
+        .top-doc-id {
+            font-size: 12px;
+            color: #718096;
+        }
+
+        .top-doc-count {
+            padding: 6px 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            font-weight: 700;
             font-size: 14px;
         }
 
-        .pagination button:hover:not(:disabled) {
+        .documents-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        .documents-table th {
+            text-align: left;
+            padding: 12px;
+            background: #f7fafc;
+            color: #4a5568;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .documents-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 14px;
+        }
+
+        .documents-table tr:hover {
             background: #f7fafc;
         }
 
-        .pagination button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+        .badge-locked {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #fef3c7;
+            color: #92400e;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
         }
 
-        .pagination .page-number {
-            padding: 8px 12px;
+        .badge-deleted {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #fecaca;
+            color: #991b1b;
+            border-radius: 12px;
+            font-size: 12px;
             font-weight: 600;
+        }
+
+        /* Styles pour les détails de partage */
+        .share-details-row {
+            background: #f7fafc !important;
+        }
+
+        .share-details-row:hover {
+            background: #f7fafc !important;
+        }
+
+        .share-details-content {
+            padding: 16px 24px;
+        }
+
+        .share-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .share-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .share-item span {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a202c;
+        }
+
+        .share-item span:nth-child(2) {
+            color: #667eea;
+            font-size: 16px;
+        }
+
+        .share-item div {
+            margin-left: auto;
+            font-size: 12px;
+            color: #718096;
+            font-weight: 500;
+        }
+
+        .shared-docs-table {
+            margin-top: 16px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            margin-top: 24px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a202c;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #718096;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state-text {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        /* Sous-onglets du module Documents - VERSION COMPACTE */
+        .sub-tabs {
+            display: flex;
+            gap: 4px;
+            margin: 12px 0;
+            padding: 4px;
+            background: #f7fafc;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        .sub-tab {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 6px;
+            background: white;
             color: #4a5568;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+        }
+
+        .sub-tab:hover {
+            background: #edf2f7;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .sub-tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .sub-tab.active:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
         }
 
         /* Modales */
@@ -746,47 +1183,147 @@
                 text-align: center;
             }
         }
+
+        /* Animation pour la bannière maintenance */
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Animations pour les boutons POWER */
+        @keyframes pulse-warning {
+            0%, 100% {
+                box-shadow: 0 4px 20px rgba(245, 158, 11, 0.5), 0 0 30px rgba(245, 158, 11, 0.3);
+            }
+            50% {
+                box-shadow: 0 4px 30px rgba(245, 158, 11, 0.8), 0 0 50px rgba(245, 158, 11, 0.6);
+            }
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: rotate(0deg); }
+            25% { transform: rotate(-5deg); }
+            75% { transform: rotate(5deg); }
+        }
+
+        /* Effet hover pour les boutons power */
+        .power-btn:hover {
+            transform: scale(1.05) !important;
+            filter: brightness(1.1) !important;
+        }
+
+        .power-btn:active {
+            transform: scale(0.95) !important;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div>
-                <h1>🛡️ Super Admin Dashboard</h1>
-                <p style="color: #718096; margin-top: 4px; font-size: 14px;">Supervision et administration du système</p>
+        <!-- Bannière Maintenance (cachée par défaut) -->
+        <div id="maintenanceBanner" style="display: none; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 12px 20px; text-align: center; font-weight: 700; font-size: 14px; border-bottom: 3px solid #b45309; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            🔒 MODE MAINTENANCE ACTIVÉ - Aucun utilisateur ne peut se connecter (sauf whitelist)
+        </div>
+
+        <!-- Header Compact -->
+        <div class="header" style="flex-direction: column; gap: 6px; padding: 8px 12px;">
+
+            <!-- Ligne 1 : Logo + Titre + Actions principales (ULTRA COMPACT) -->
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+                <!-- Logo + Titre -->
+                <div style="display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0;">
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 3px; border-radius: 6px; flex-shrink: 0;">
+                        <img src="/logo_white.png" alt="Logo CERER" style="height: 24px; width: auto; display: block;">
+                    </div>
+                    <h1 style="font-size: 13px; font-weight: 700; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; text-transform: uppercase; line-height: 1.2; white-space: nowrap;">
+                        🛡️ LA TANIÈRE DU C.E.R.E.R
+                    </h1>
+                </div>
+
+                <!-- Actions compactes -->
+                <div style="display: flex; gap: 4px; align-items: center; flex-shrink: 0;">
+                    <!-- Bouton Actualiser -->
+                    <button class="refresh-btn" onclick="refreshCurrentSection()"
+                            style="padding: 4px 8px; font-size: 10px; display: flex; align-items: center; gap: 2px; font-weight: 600;">
+                        <span>🔄</span>
+                    </button>
+
+                    <!-- Bouton Maintenance compact -->
+                    <button id="maintenanceBtn" class="refresh-btn power-btn" onclick="toggleMaintenance()"
+                            style="background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+                                   padding: 4px 8px;
+                                   font-size: 10px;
+                                   display: flex;
+                                   align-items: center;
+                                   gap: 4px;
+                                   font-weight: 700;
+                                   border: 2px solid #6b7280;
+                                   box-shadow: 0 2px 8px rgba(107, 114, 128, 0.3);
+                                   transition: all 0.3s ease;">
+                        <span id="maintenanceIcon" style="font-size: 14px;">🔒</span>
+                        <span id="maintenanceText" style="font-size: 10px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">OFF</span>
+                    </button>
+
+                    <!-- Bouton Déconnecter tous compact -->
+                    <button class="refresh-btn power-btn" onclick="forceLogoutAllUsers()"
+                            style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+                                   padding: 4px 8px;
+                                   font-size: 10px;
+                                   display: flex;
+                                   align-items: center;
+                                   gap: 3px;
+                                   font-weight: 700;
+                                   border: 2px solid #f59e0b;
+                                   box-shadow: 0 2px 10px rgba(245, 158, 11, 0.4);
+                                   transition: all 0.3s ease;
+                                   animation: pulse-warning 2s infinite;">
+                        <span style="font-size: 14px;">⚠️</span>
+                        <span style="text-shadow: 0 1px 2px rgba(0,0,0,0.3);">KICK ALL</span>
+                    </button>
+
+                    <!-- Bouton Déconnexion -->
+                    <button class="refresh-btn" onclick="logout()"
+                            style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); padding: 4px 8px; font-size: 10px; display: flex; align-items: center; gap: 2px; font-weight: 600;">
+                        <span>🚪</span>
+                    </button>
+
+                    <!-- Badge niveau -->
+                    <span class="badge" style="padding: 4px 8px; font-size: 9px; font-weight: 700;">N0</span>
+                </div>
             </div>
 
-            <!-- Navigation par tabs -->
-            <nav class="nav-tabs">
-                <button class="nav-tab active" data-section="dashboard" onclick="navigateToSection('dashboard')">
+            <!-- Ligne 2 : Navigation ultra compacte -->
+            <nav class="nav-tabs" style="width: 100%; justify-content: flex-start; margin: 0; padding: 1px; gap: 2px;">
+                <button class="nav-tab active" data-section="dashboard" onclick="navigateToSection('dashboard')" style="padding: 4px 10px; font-size: 11px;">
                     📊 Dashboard
                 </button>
-                <button class="nav-tab" data-section="users" onclick="navigateToSection('users')">
-                    👥 Utilisateurs
+                <button class="nav-tab" data-section="users" onclick="navigateToSection('users')" style="padding: 4px 10px; font-size: 11px;">
+                    👥 Users
                 </button>
-                <button class="nav-tab disabled" title="Prochainement">
-                    📄 Documents
+                <button class="nav-tab" data-section="documents" onclick="navigateToSection('documents')" style="padding: 4px 10px; font-size: 11px;">
+                    📄 Docs
                 </button>
-                <button class="nav-tab disabled" title="Prochainement">
+                <button class="nav-tab" data-section="departments" onclick="navigateToSection('departments')" style="padding: 4px 10px; font-size: 11px;">
+                    🏢 Depts
+                </button>
+                <button class="nav-tab disabled" title="Prochainement" style="padding: 4px 10px; font-size: 11px;">
                     🔒 Audit
                 </button>
             </nav>
-
-            <div style="display: flex; gap: 12px; align-items: center;">
-                <button class="refresh-btn" onclick="refreshCurrentSection()">🔄 Actualiser</button>
-                <button id="maintenanceBtn" class="refresh-btn" onclick="toggleMaintenance()" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
-                    <span id="maintenanceIcon">🔒</span>
-                    <span id="maintenanceText">Activer maintenance</span>
-                </button>
-                <button class="refresh-btn" onclick="logout()" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">🚪 Déconnexion</button>
-                <span class="badge">NIVEAU 0</span>
-            </div>
         </div>
 
         <!-- Loading State -->
         <div id="loading" class="loading">
-            ⏳ Chargement des statistiques...
+            <div style="text-align: center;">
+                <div style="font-size: 48px; margin-bottom: 16px;">⏳</div>
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">Chargement du dashboard...</div>
+                <div style="font-size: 14px; color: #718096;">Vérification de l'authentification</div>
+            </div>
         </div>
 
         <!-- Error State -->
@@ -901,9 +1438,21 @@
                 <!-- Le contenu sera généré par JavaScript -->
             </div>
 
+            <!-- Section Documents (nouvelle) -->
+            <div id="section-documents" style="display: none;">
+                <!-- Le contenu sera généré par JavaScript -->
+            </div>
+
+            <!-- Section Départements (nouvelle) -->
+            <div id="section-departments" style="display: none;">
+                <!-- Le contenu sera généré par JavaScript -->
+            </div>
+
         </div>
     </div>
 
-    <script src="js/super-admin-dashboard.js"></script>
+    <!-- Modales personnalisées -->
+    <script src="js/custom-modals.js"></script>
+    <script src="js/super-admin-dashboard.js?v=20241225010"></script>
 </body>
 </html>

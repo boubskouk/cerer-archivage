@@ -11,7 +11,9 @@
     "dev": "nodemon server.js",
     "backup": "node scripts/backup-database.js",
     "restore": "node scripts/restore-database.js",
-    "backup:check": "node scripts/check-atlas-backups.js"
+    "backup:check": "node scripts/check-atlas-backups.js",
+    "create-superadmin": "node scripts/create-superadmin.js",
+    "delete-superadmin": "node scripts/delete-superadmin.js"
   },
   "keywords": [
     "archivage",

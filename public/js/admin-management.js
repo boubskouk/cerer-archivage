@@ -293,11 +293,29 @@ function renderUsersManagement() {
                                 <input id="edit_user_email" type="email" value="${user.email}" placeholder="Email"
                                        class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
                                 <select id="edit_user_role" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm" onchange="toggleDepartmentField('edit_user_dept_container', this.value)">
-                                    ${state.roles.map(role => `
-                                        <option value="${role._id}" data-niveau="${role.niveau}" ${user.idRole === role._id ? 'selected' : ''}>
-                                            ${role.nom} (Niveau ${role.niveau})
-                                        </option>
-                                    `).join('')}
+                                    ${state.roles
+                                        .filter(role => {
+                                            // Filtrer les rôles undefined/null
+                                            if (!role.niveau && role.niveau !== 0) return false;
+
+                                            // Si un niveau 1 est connecté, montrer uniquement niveau 2 et 3
+                                            if (state.currentUserInfo && state.currentUserInfo.niveau === 1) {
+                                                return role.niveau === 2 || role.niveau === 3;
+                                            }
+
+                                            // Si un niveau 0 est connecté, montrer uniquement niveau 1, 2 et 3 (PAS niveau 0)
+                                            if (state.currentUserInfo && state.currentUserInfo.niveau === 0) {
+                                                return role.niveau === 1 || role.niveau === 2 || role.niveau === 3;
+                                            }
+
+                                            // Sinon, montrer tous les rôles sauf niveau 0
+                                            return role.niveau !== 0;
+                                        })
+                                        .map(role => `
+                                            <option value="${role._id}" data-niveau="${role.niveau}" ${user.idRole === role._id ? 'selected' : ''}>
+                                                ${role.nom} (Niveau ${role.niveau})
+                                            </option>
+                                        `).join('')}
                                 </select>
                                 <div id="edit_user_dept_container" ${user.niveau === 1 ? 'style="display:none;"' : ''}>
                                     <select id="edit_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
@@ -392,23 +410,68 @@ function renderUsersManagement() {
 
                         <select id="new_user_role" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm" onchange="toggleDepartmentField('new_user_dept_container', this.value)">
                             <option value="">-- Sélectionner un rôle --</option>
-                            ${state.roles.map(role => `
-                                <option value="${role._id}" data-niveau="${role.niveau}">
-                                    ${role.nom} (Niveau ${role.niveau})
-                                </option>
-                            `).join('')}
-                        </select>
+                            ${state.roles
+                                .filter(role => {
+                                    // Filtrer les rôles undefined/null
+                                    if (!role.niveau && role.niveau !== 0) return false;
 
-                        <div id="new_user_dept_container">
-                            <select id="new_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
-                                <option value="">-- Sélectionner un département (optionnel) --</option>
-                                ${state.departements.map(dept => `
-                                    <option value="${dept._id}">
-                                        ${dept.nom}
+                                    // Si un niveau 1 est connecté, montrer uniquement niveau 2 et 3
+                                    if (state.currentUserInfo && state.currentUserInfo.niveau === 1) {
+                                        return role.niveau === 2 || role.niveau === 3;
+                                    }
+
+                                    // Si un niveau 0 est connecté, montrer uniquement niveau 1, 2 et 3 (PAS niveau 0)
+                                    if (state.currentUserInfo && state.currentUserInfo.niveau === 0) {
+                                        return role.niveau === 1 || role.niveau === 2 || role.niveau === 3;
+                                    }
+
+                                    // Sinon, montrer tous les rôles sauf niveau 0
+                                    return role.niveau !== 0;
+                                })
+                                .map(role => `
+                                    <option value="${role._id}" data-niveau="${role.niveau}">
+                                        ${role.nom} (Niveau ${role.niveau})
                                     </option>
                                 `).join('')}
-                            </select>
-                        </div>
+                        </select>
+
+                        ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                            <!-- Niveau 1 : Département automatique (celui du créateur) -->
+                            <div class="w-full px-3 py-2 border-2 rounded-lg bg-gray-100 font-semibold text-gray-700 text-sm">
+                                🏢 Département : ${state.currentUserInfo.departement || 'Non défini'}
+                            </div>
+                            <input type="hidden" id="new_user_dept" value="${state.currentUserInfo.idDepartement || ''}">
+                            <p class="text-xs text-blue-700 font-semibold mt-1 bg-blue-50 p-2 rounded border-l-4 border-blue-500">
+                                ℹ️ En tant qu'<strong>administrateur départemental</strong>, vous créez des utilisateurs <strong>niveau 2 et 3</strong> dans VOTRE département et gérez les <strong>services</strong> de ce département.
+                            </p>
+                        ` : state.currentUserInfo && state.currentUserInfo.niveau === 0 ? `
+                            <!-- Niveau 0 : Super Admin - Choix du département avec message informatif -->
+                            <div id="new_user_dept_container">
+                                <select id="new_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                    <option value="">-- Sélectionner un département (optionnel) --</option>
+                                    ${state.departements.map(dept => `
+                                        <option value="${dept._id}">
+                                            ${dept.nom}
+                                        </option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            <p class="text-xs text-green-700 font-semibold mt-1 bg-green-50 p-2 rounded border-l-4 border-green-500">
+                                ℹ️ En tant que <strong>Super Administrateur</strong>, vous pouvez créer des utilisateurs <strong>niveau 1, 2 et 3</strong> dans <strong>tous les départements</strong>. Les Super Admins (niveau 0) ne peuvent être créés que via script.
+                            </p>
+                        ` : `
+                            <!-- Autres niveaux : Choix du département -->
+                            <div id="new_user_dept_container">
+                                <select id="new_user_dept" class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                    <option value="">-- Sélectionner un département (optionnel) --</option>
+                                    ${state.departements.map(dept => `
+                                        <option value="${dept._id}">
+                                            ${dept.nom}
+                                        </option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                        `}
 
                         <button onclick="createUser()" class="w-full px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition font-medium">
                             ➕ Créer l'utilisateur
@@ -911,6 +974,162 @@ function toggleDepartmentField(containerId, roleId) {
     }
 }
 
+// ===== GESTION DES DÉPARTEMENTS =====
+
+async function addDepartement() {
+    const nom = document.getElementById('new_dept_nom').value.trim();
+    const code = document.getElementById('new_dept_code').value.trim();
+
+    if (!nom || !code) {
+        showNotification('❌ Tous les champs sont requis', 'error');
+        return;
+    }
+
+    try {
+        await apiCall('/departements', 'POST', { nom, code });
+        await loadRolesAndDepartements();
+        showNotification('✅ Département créé');
+        document.getElementById('new_dept_nom').value = '';
+        document.getElementById('new_dept_code').value = '';
+    } catch (error) {
+        console.error('Erreur création département:', error);
+    }
+}
+
+async function deleteDepartement(deptId) {
+    const confirmed = await customConfirm({
+        title: 'Supprimer le département',
+        message: 'Voulez-vous vraiment supprimer ce département ? Cette action est irréversible.',
+        confirmText: 'Oui, supprimer',
+        cancelText: 'Annuler',
+        type: 'danger',
+        icon: '🗑️'
+    });
+
+    if (!confirmed) return;
+
+    try {
+        await apiCall(`/departements/${deptId}`, 'DELETE');
+        await loadRolesAndDepartements();
+        showNotification('✅ Département supprimé');
+    } catch (error) {
+        console.error('Erreur suppression département:', error);
+    }
+}
+
+function startEditDepartement(deptId) {
+    const dept = state.departements.find(d => d._id === deptId);
+    if (!dept) return;
+    state.editingDepartement = { ...dept };
+    render();
+}
+
+function cancelEditDepartement() {
+    state.editingDepartement = null;
+    render();
+}
+
+async function saveEditDepartement() {
+    if (!state.editingDepartement) return;
+
+    const nom = document.getElementById('edit_dept_nom').value.trim();
+    const code = document.getElementById('edit_dept_code').value.trim();
+
+    if (!nom || !code) {
+        showNotification('❌ Nom et code sont requis', 'error');
+        return;
+    }
+
+    try {
+        await apiCall(`/departements/${state.editingDepartement._id}`, 'PUT', { nom, code });
+        await loadRolesAndDepartements();
+        state.editingDepartement = null;
+        showNotification('✅ Département modifié');
+    } catch (error) {
+        console.error('Erreur modification département:', error);
+    }
+}
+
+function renderDepartementsManagement() {
+    if (!state.showDepartementsManagement) return '';
+
+    return `
+        <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+             onclick="if(event.target === this) toggleDepartementsManagement()">
+            <div class="modal-glass rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
+                <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-green-600 to-teal-600 bg-clip-text text-transparent">🏢 Gestion des départements</h2>
+
+                <!-- Liste des départements -->
+                <div class="space-y-3 mb-6">
+                    ${state.departements.map((dept, index) => `
+                        ${state.editingDepartement && state.editingDepartement._id === dept._id ? `
+                            <!-- Mode édition -->
+                            <div class="p-4 bg-green-50 rounded-xl space-y-3 border-2 border-green-300">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="text-lg font-bold">✏️ Modifier</span>
+                                </div>
+                                <input id="edit_dept_nom" type="text" value="${dept.nom}" placeholder="Nom du département"
+                                       class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                <input id="edit_dept_code" type="text" value="${dept.code}" placeholder="Code (ex: DEPT001)"
+                                       class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                                <div class="flex gap-2">
+                                    <button onclick="saveEditDepartement()" class="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-medium">
+                                        ✅ Enregistrer
+                                    </button>
+                                    <button onclick="cancelEditDepartement()" class="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition text-sm font-medium">
+                                        ❌ Annuler
+                                    </button>
+                                </div>
+                            </div>
+                        ` : `
+                            <!-- Mode affichage -->
+                            <div class="p-4 bg-gradient-to-r from-green-50 to-teal-50 rounded-xl border-2 border-green-200 hover:shadow-md transition">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex-1">
+                                        <div class="flex items-center gap-3 mb-2">
+                                            <span class="text-2xl">🏢</span>
+                                            <div>
+                                                <h3 class="font-bold text-gray-900">${dept.nom}</h3>
+                                                <p class="text-sm text-gray-600">Code: ${dept.code}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button onclick='startEditDepartement("${dept._id}")' class="px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-xs font-medium">
+                                            ✏️ Modifier
+                                        </button>
+                                        <button onclick='deleteDepartement("${dept._id}")' class="px-3 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-xs font-medium">
+                                            🗑️ Supprimer
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `}
+                    `).join('')}
+                </div>
+
+                <!-- Formulaire d'ajout -->
+                <div class="bg-gradient-to-r from-teal-50 to-green-50 p-4 rounded-xl border-2 border-green-300 mb-4">
+                    <h3 class="font-bold text-gray-800 mb-3">➕ Ajouter un nouveau département</h3>
+                    <div class="space-y-3">
+                        <input id="new_dept_nom" type="text" placeholder="Nom du département"
+                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                        <input id="new_dept_code" type="text" placeholder="Code (ex: DEPT001)"
+                               class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
+                        <button onclick="addDepartement()" class="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition font-medium">
+                            ➕ Créer le département
+                        </button>
+                    </div>
+                </div>
+
+                <button onclick="toggleDepartementsManagement()" class="w-full px-6 py-3 bg-gradient-to-br from-gray-200 to-gray-300 rounded-xl hover:shadow-md transition font-medium">
+                    Fermer
+                </button>
+            </div>
+        </div>
+    `;
+}
+
 // Exposer les fonctions globalement
 window.createUser = createUser;
 window.deleteUser = deleteUser;
@@ -923,7 +1142,13 @@ window.deleteRole = deleteRole;
 window.startEditRole = startEditRole;
 window.cancelEditRole = cancelEditRole;
 window.saveEditRole = saveEditRole;
+window.addDepartement = addDepartement;
+window.deleteDepartement = deleteDepartement;
+window.startEditDepartement = startEditDepartement;
+window.cancelEditDepartement = cancelEditDepartement;
+window.saveEditDepartement = saveEditDepartement;
 window.renderUsersManagement = renderUsersManagement;
 window.renderRolesManagement = renderRolesManagement;
+window.renderDepartementsManagement = renderDepartementsManagement;
 window.renderAdvancedStats = renderAdvancedStats;
 window.toggleDepartmentField = toggleDepartmentField;

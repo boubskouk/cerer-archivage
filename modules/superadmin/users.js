@@ -20,6 +20,8 @@ let rolesCollection;
 let departementsCollection;
 let auditLogsCollection;
 let systemSettingsCollection;
+let categoriesCollection;
+let documentsCollection;
 
 /**
  * Initialiser le module avec les collections MongoDB
@@ -30,6 +32,8 @@ function init(collections) {
     departementsCollection = collections.departements;
     auditLogsCollection = collections.auditLogs;
     systemSettingsCollection = collections.systemSettings;
+    categoriesCollection = collections.categories;
+    documentsCollection = collections.documents;
 
     console.log('✅ Module Users (Super Admin) initialisé');
 }
@@ -133,6 +137,7 @@ async function getAllUsers(filters = {}) {
 
         // Filtre par statut
         if (status && status !== 'all') {
+            console.log(`🔍 Backend - Filtre status reçu: "${status}"`);
             if (status === 'blocked') {
                 matchConditions.blocked = true;
             } else if (status === 'active') {
@@ -140,10 +145,15 @@ async function getAllUsers(filters = {}) {
                     { blocked: { $exists: false } },
                     { blocked: false }
                 ];
+            } else if (status === 'online') {
+                // ✅ NOUVEAU: Filtrer uniquement les utilisateurs connectés
+                matchConditions.isOnline = true;
+                console.log('✅ Backend - Ajout du filtre isOnline: true');
             }
         }
 
         if (Object.keys(matchConditions).length > 0) {
+            console.log('🔍 Backend - matchConditions finale:', JSON.stringify(matchConditions));
             pipeline.push({ $match: matchConditions });
         }
 
@@ -160,6 +170,9 @@ async function getAllUsers(filters = {}) {
                 blockedBy: 1,
                 blockedReason: 1,
                 createdAt: 1,
+                createdBy: 1,  // ✅ Qui a créé l'utilisateur
+                isOnline: 1,  // ✅ Statut de connexion
+                lastActivity: 1,  // ✅ Dernière activité
                 role: {
                     _id: '$roleData._id',
                     nom: '$roleData.nom',
@@ -177,6 +190,7 @@ async function getAllUsers(filters = {}) {
 
         // Exécuter la requête pour obtenir tous les résultats (pour stats)
         const allUsers = await usersCollection.aggregate(pipeline).toArray();
+        console.log(`📊 Backend - Résultats de l'agrégation: ${allUsers.length} utilisateur(s) trouvé(s)`);
 
         // Calculer les statistiques
         const stats = {
@@ -531,14 +545,24 @@ async function deleteUser(username, deletedBy) {
             throw new Error('Vous ne pouvez pas vous supprimer vous-même');
         }
 
-        // 5. Supprimer l'utilisateur
+        // 5. Supprimer les documents de l'utilisateur
+        await documentsCollection.deleteMany({ idUtilisateur: username });
+
+        // 6. Supprimer les catégories PERSONNELLES de l'utilisateur
+        // ✅ Les catégories du département persistent même après suppression
+        await categoriesCollection.deleteMany({
+            idUtilisateur: username,
+            idDepartement: { $exists: false } // Seulement les catégories sans département
+        });
+
+        // 7. Supprimer l'utilisateur
         const result = await usersCollection.deleteOne({ username });
 
         if (result.deletedCount === 0) {
             throw new Error('Échec de la suppression de l\'utilisateur');
         }
 
-        // 6. Logger l'action
+        // 8. Logger l'action
         await auditLogsCollection.insertOne({
             timestamp: new Date(),
             user: deletedBy,

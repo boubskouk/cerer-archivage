@@ -15,6 +15,8 @@ const { requireSuperAdmin, logAction } = require('../middleware/superAdminAuth')
 // Modules
 const dashboardModule = require('../modules/superadmin/dashboard');
 const usersModule = require('../modules/superadmin/users');
+const documentsModule = require('../modules/superadmin/documents');
+const departmentsModule = require('../modules/superadmin/departments');
 
 // Collections (injectées depuis server.js)
 let db;
@@ -30,6 +32,8 @@ function init(database, cols) {
     // Initialiser les modules
     dashboardModule.init(collections);
     usersModule.init(collections);
+    documentsModule.init(collections);
+    departmentsModule.init(collections);
 
     console.log('✅ Routes Super Admin initialisées');
 }
@@ -114,7 +118,7 @@ router.get('/users', requireSuperAdmin, async (req, res) => {
             role,
             status,
             page: parseInt(page),
-            limit: 20,
+            limit: 15,
             period,
             startDate,
             endDate
@@ -260,10 +264,10 @@ router.post('/users', requireSuperAdmin, async (req, res) => {
         const { username, nom, email, idRole, idDepartement } = req.body;
 
         // Validation
-        if (!username || !nom || !email || !idRole) {
+        if (!username || !nom || !email || !idRole || !idDepartement) {
             return res.status(400).json({
                 success: false,
-                message: "Tous les champs sont requis (username, nom, email, idRole)"
+                message: "Tous les champs sont requis (username, nom, email, idRole, idDepartement)"
             });
         }
 
@@ -424,17 +428,450 @@ router.post('/maintenance/disable', requireSuperAdmin, async (req, res) => {
     }
 });
 
+/**
+ * POST /api/superadmin/force-logout-all
+ * Déconnecter tous les utilisateurs (sauf Super Admin)
+ * VRAIE déconnexion : destruction des sessions Express + isOnline=false
+ */
+router.post('/force-logout-all', requireSuperAdmin, async (req, res) => {
+    try {
+        const username = req.superAdmin.username;
+
+        // 1️⃣ Récupérer tous les sessionID des utilisateurs non-admin
+        const usersToDisconnect = await collections.users.find(
+            {
+                'role.niveau': { $ne: 0 }, // Tous sauf niveau 0
+                sessionID: { $exists: true } // Qui ont une session active
+            }
+        ).toArray();
+
+        console.log(`🔴 ${usersToDisconnect.length} utilisateur(s) avec session active à déconnecter`);
+
+        let sessionsDestroyed = 0;
+
+        // 2️⃣ Détruire chaque session Express
+        for (const user of usersToDisconnect) {
+            if (user.sessionID) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        req.sessionStore.destroy(user.sessionID, (err) => {
+                            if (err) {
+                                console.error(`❌ Erreur destruction session ${user.username}:`, err);
+                                reject(err);
+                            } else {
+                                console.log(`✅ Session détruite pour: ${user.username}`);
+                                sessionsDestroyed++;
+                                resolve();
+                            }
+                        });
+                    });
+                } catch (error) {
+                    console.error(`❌ Erreur lors de la destruction de session pour ${user.username}:`, error);
+                }
+            }
+        }
+
+        // 3️⃣ Mettre à jour MongoDB (isOnline=false + supprimer sessionID)
+        const result = await collections.users.updateMany(
+            { 'role.niveau': { $ne: 0 } }, // Tous sauf niveau 0
+            {
+                $set: {
+                    isOnline: false,
+                    lastActivity: new Date()
+                },
+                $unset: {
+                    sessionID: "" // Supprimer le sessionID
+                }
+            }
+        );
+
+        // Logger l'action
+        await logAction(username, 'FORCE_LOGOUT_ALL_USERS',
+            {
+                usersDisconnected: result.modifiedCount,
+                sessionsDestroyed: sessionsDestroyed
+            }, {}, req);
+
+        console.log(`🔴 ${username} a déconnecté ${result.modifiedCount} utilisateur(s)`);
+        console.log(`💥 ${sessionsDestroyed} session(s) Express détruite(s)`);
+
+        res.json({
+            success: true,
+            message: `${result.modifiedCount} utilisateur(s) déconnecté(s) avec succès`,
+            count: result.modifiedCount,
+            sessionsDestroyed: sessionsDestroyed
+        });
+    } catch (error) {
+        console.error('❌ Erreur force-logout-all:', error);
+        res.status(500).json({
+            success: false,
+            message: "Erreur lors de la déconnexion des utilisateurs"
+        });
+    }
+});
+
+// ============================================
+// MODULE 3 : GESTION DES DOCUMENTS
+// ============================================
+
+/**
+ * GET /api/superadmin/documents/stats
+ * Statistiques globales des documents
+ */
+router.get('/documents/stats', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate } = req.query;
+
+        const stats = await documentsModule.getDocumentsStats({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null
+        });
+
+        await logAction(req.superAdmin.username, 'SUPERADMIN_VIEW_DOCUMENTS_STATS',
+            { period, startDate, endDate }, {}, req);
+
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        console.error('❌ Erreur documents/stats:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération des statistiques" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/most-shared
+ * Top 10 documents les plus partagés
+ */
+router.get('/documents/most-shared', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate } = req.query;
+
+        const result = await documentsModule.getMostSharedDocuments({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/most-shared:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/most-downloaded
+ * Top 10 documents les plus téléchargés
+ */
+router.get('/documents/most-downloaded', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate } = req.query;
+
+        const result = await documentsModule.getMostDownloadedDocuments({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/most-downloaded:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/level1-deletions
+ * Utilisateurs niveau 1 ayant supprimé des documents
+ */
+router.get('/documents/level1-deletions', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate } = req.query;
+
+        const result = await documentsModule.getLevel1Deletions({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/level1-deletions:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/deleted
+ * Liste des documents supprimés
+ */
+router.get('/documents/deleted', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate, page = 1, limit = 20 } = req.query;
+
+        const result = await documentsModule.getDeletedDocuments({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null,
+            page: parseInt(page),
+            limit: parseInt(limit)
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/deleted:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/locked
+ * Liste des documents verrouillés
+ */
+router.get('/documents/locked', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate, page = 1, limit = 20 } = req.query;
+
+        const result = await documentsModule.getLockedDocuments({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null,
+            page: parseInt(page),
+            limit: parseInt(limit)
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/locked:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/activity
+ * Activité globale (création, suppression, téléchargement, partage)
+ */
+router.get('/documents/activity', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate } = req.query;
+
+        const result = await documentsModule.getDocumentsActivity({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/activity:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/timeline
+ * Timeline des actions sur documents (pour graphique)
+ */
+router.get('/documents/timeline', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate } = req.query;
+
+        const result = await documentsModule.getDocumentTimeline({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/timeline:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+/**
+ * GET /api/superadmin/documents/all
+ * Liste tous les documents avec pagination
+ */
+router.get('/documents/all', requireSuperAdmin, async (req, res) => {
+    try {
+        const { period, startDate, endDate, page = 1, limit = 20, search = '' } = req.query;
+
+        const result = await documentsModule.getAllDocuments({
+            period: period || 'all',
+            startDate: startDate ? new Date(startDate) : null,
+            endDate: endDate ? new Date(endDate) : null,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            search
+        });
+
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Erreur documents/all:', error);
+        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    }
+});
+
+// ============================================
+// MODULE 4 : GESTION DES DÉPARTEMENTS
+// ============================================
+
+/**
+ * GET /api/superadmin/departments
+ * Liste tous les départements
+ */
+router.get('/departments', requireSuperAdmin, async (req, res) => {
+    try {
+        const { search, type = 'all', page = 1 } = req.query;
+
+        const filters = {
+            search,
+            type, // 'all', 'main', 'services'
+            page: parseInt(page),
+            limit: 50
+        };
+
+        const result = await departmentsModule.getAllDepartments(filters);
+
+        await logAction(req.superAdmin.username, 'SUPERADMIN_VIEW_DEPARTMENTS',
+            { filters }, {}, req);
+
+        res.json({
+            success: true,
+            data: result
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur /departments:', error);
+        res.status(500).json({
+            success: false,
+            message: "Erreur lors de la récupération des départements"
+        });
+    }
+});
+
+/**
+ * GET /api/superadmin/departments/stats
+ * Statistiques des départements
+ */
+router.get('/departments/stats', requireSuperAdmin, async (req, res) => {
+    try {
+        const stats = await departmentsModule.getStats();
+
+        res.json({
+            success: true,
+            data: stats
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur /departments/stats:', error);
+        res.status(500).json({
+            success: false,
+            message: "Erreur lors de la récupération des statistiques"
+        });
+    }
+});
+
+/**
+ * POST /api/superadmin/departments
+ * Créer un département principal
+ */
+router.post('/departments', requireSuperAdmin, async (req, res) => {
+    try {
+        const { nom, code, description } = req.body;
+
+        if (!nom || !code) {
+            return res.status(400).json({
+                success: false,
+                message: "Nom et code requis"
+            });
+        }
+
+        const newDepartment = await departmentsModule.createDepartment(
+            { nom, code, description },
+            req.superAdmin.username
+        );
+
+        res.json({
+            success: true,
+            message: "Département créé avec succès",
+            data: newDepartment
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur POST /departments:', error);
+        res.status(400).json({
+            success: false,
+            message: error.message || "Erreur lors de la création du département"
+        });
+    }
+});
+
+/**
+ * PUT /api/superadmin/departments/:id
+ * Modifier un département
+ */
+router.put('/departments/:id', requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nom, code, description } = req.body;
+
+        if (!nom || !code) {
+            return res.status(400).json({
+                success: false,
+                message: "Nom et code requis"
+            });
+        }
+
+        const updatedDepartment = await departmentsModule.updateDepartment(
+            id,
+            { nom, code, description },
+            req.superAdmin.username
+        );
+
+        res.json({
+            success: true,
+            message: "Département modifié avec succès",
+            data: updatedDepartment
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur PUT /departments/:id:', error);
+        res.status(400).json({
+            success: false,
+            message: error.message || "Erreur lors de la modification du département"
+        });
+    }
+});
+
+/**
+ * DELETE /api/superadmin/departments/:id
+ * Supprimer un département
+ */
+router.delete('/departments/:id', requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        await departmentsModule.deleteDepartment(id, req.superAdmin.username);
+
+        res.json({
+            success: true,
+            message: "Département supprimé avec succès"
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur DELETE /departments/:id:', error);
+        res.status(400).json({
+            success: false,
+            message: error.message || "Erreur lors de la suppression du département"
+        });
+    }
+});
+
 // ============================================
 // ROUTES FUTURES (Commentées pour le POC)
 // ============================================
-
-// TODO: Module Utilisateurs
-// router.get('/users', requireSuperAdmin, async (req, res) => { ... });
-// router.get('/users/:userId', requireSuperAdmin, async (req, res) => { ... });
-
-// TODO: Module Documents
-// router.get('/documents', requireSuperAdmin, async (req, res) => { ... });
-// router.get('/documents/analysis', requireSuperAdmin, async (req, res) => { ... });
 
 // TODO: Module Audit
 // router.get('/audit/logs', requireSuperAdmin, async (req, res) => { ... });

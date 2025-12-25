@@ -1,56 +1,93 @@
-/**
- * Voir les logs d'audit Super Admin
- */
-
-require('dotenv').config();
 const { MongoClient } = require('mongodb');
+require('dotenv').config();
 
-const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost:27017";
-const DB_NAME = process.env.MONGODB_DB_NAME || 'cerer_archivage';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const DB_NAME = 'cerer_archivage';
 
 async function viewAuditLogs() {
-    let client;
+    const client = new MongoClient(MONGODB_URI);
 
     try {
-        client = await MongoClient.connect(MONGO_URI);
+        await client.connect();
+        console.log('Connecte a MongoDB\n');
+
         const db = client.db(DB_NAME);
         const auditLogsCollection = db.collection('auditLogs');
 
-        console.log('\n╔════════════════════════════════════════════════════════╗');
-        console.log('║  LOGS D\'AUDIT SUPER ADMIN (10 derniers)              ║');
-        console.log('╚════════════════════════════════════════════════════════╝\n');
+        const totalLogs = await auditLogsCollection.countDocuments();
+        console.log(`Total de logs d'audit : ${totalLogs}\n`);
 
-        const logs = await auditLogsCollection
+        console.log('Les 10 derniers logs d\'audit :\n');
+        console.log('='.repeat(100));
+
+        const recentLogs = await auditLogsCollection
             .find({})
             .sort({ timestamp: -1 })
             .limit(10)
             .toArray();
 
-        if (logs.length === 0) {
-            console.log('📭 Aucun log d\'audit trouvé\n');
-        } else {
-            logs.forEach((log, index) => {
-                console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                console.log(`Log #${index + 1}`);
-                console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                console.log(`📅 Date: ${log.timestamp?.toLocaleString('fr-FR') || 'N/A'}`);
-                console.log(`👤 Utilisateur: ${log.user || 'N/A'} (Niveau ${log.userLevel})`);
-                console.log(`🔧 Action: ${log.action || 'N/A'}`);
-                console.log(`🎯 Cible: ${JSON.stringify(log.target || {})}`);
-                console.log(`🌐 IP: ${log.ip || 'N/A'}`);
-                console.log(`✅ Résultat: ${log.result || 'N/A'}`);
-                console.log('');
+        recentLogs.forEach((log, index) => {
+            console.log(`\nLOG #${index + 1}`);
+            console.log('-'.repeat(100));
+            console.log(`Date/Heure : ${log.timestamp}`);
+            console.log(`Utilisateur : ${log.user || 'N/A'}`);
+            console.log(`Action      : ${log.action}`);
+            console.log(`IP          : ${log.ip || 'N/A'}`);
+            console.log(`Détails     :`);
+            console.log(JSON.stringify(log.details || {}, null, 2));
+        });
+
+        console.log('\n' + '='.repeat(100));
+
+        const yesterday = new Date();
+        yesterday.setHours(yesterday.getHours() - 24);
+
+        console.log('\nStatistiques des actions (dernieres 24h) :\n');
+
+        const actionStats = await auditLogsCollection.aggregate([
+            { $match: { timestamp: { $gte: yesterday } } },
+            { $group: {
+                _id: "$action",
+                count: { $sum: 1 }
+            }},
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+        ]).toArray();
+
+        if (actionStats.length > 0) {
+            actionStats.forEach(stat => {
+                console.log(`  ${stat._id.padEnd(35)} : ${stat.count} fois`);
             });
+        } else {
+            console.log('  Aucune activite dans les dernieres 24h');
         }
 
-        console.log(`\n📊 Total de logs: ${await auditLogsCollection.countDocuments()}\n`);
+        console.log('\nTop 5 utilisateurs les plus actifs (dernieres 24h) :\n');
 
-        await client.close();
+        const userStats = await auditLogsCollection.aggregate([
+            { $match: { timestamp: { $gte: yesterday }, user: { $ne: null } } },
+            { $group: {
+                _id: "$user",
+                count: { $sum: 1 }
+            }},
+            { $sort: { count: -1 } },
+            { $limit: 5 }
+        ]).toArray();
+
+        if (userStats.length > 0) {
+            userStats.forEach((stat, index) => {
+                console.log(`  ${index + 1}. ${stat._id.padEnd(20)} : ${stat.count} actions`);
+            });
+        } else {
+            console.log('  Aucune activite utilisateur dans les dernieres 24h');
+        }
+
+        console.log('\nTermine !\n');
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
-        if (client) await client.close();
-        process.exit(1);
+        console.error('Erreur :', error);
+    } finally {
+        await client.close();
     }
 }
 

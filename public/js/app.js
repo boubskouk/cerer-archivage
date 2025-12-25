@@ -22,6 +22,7 @@ const state = {
     categories: [],
     roles: [], // NOUVEAU : Liste des rôles
     departements: [], // NOUVEAU : Liste des départements
+    services: [], // NOUVEAU : Liste des services (niveau 1)
     searchTerm: '',
     selectedCategory: 'tous',
     selectedDepartement: 'tous',
@@ -46,6 +47,8 @@ const state = {
     allUsersForManagement: [],
     showRolesManagement: false,
     editingRole: null,
+    showDepartementsManagement: false,
+    editingDepartement: null,
     showAdvancedStats: false,
     showDeleteConfirm: false,
     isAuthenticated: false,
@@ -87,25 +90,133 @@ let formData = {
     locked: false // Verrouillage du document (niveau 1 uniquement)
 };
 
+// ===== VÉRIFICATION AUTOMATIQUE DE SESSION =====
+// Vérifie toutes les 5 secondes si la session est toujours valide
+// Si la session a été détruite (déconnexion forcée), redirige vers login
+let sessionCheckInterval = null;
+
+function startSessionCheck() {
+    // Ne vérifier que si l'utilisateur est connecté
+    if (!state.isAuthenticated) {
+        return;
+    }
+
+    // Vérifier immédiatement
+    checkSessionValidity();
+
+    // Puis vérifier toutes les 5 secondes
+    if (sessionCheckInterval) {
+        clearInterval(sessionCheckInterval);
+    }
+
+    sessionCheckInterval = setInterval(checkSessionValidity, 5000);
+}
+
+async function checkSessionValidity() {
+    try {
+        // Appeler la route dédiée pour vérifier le statut de la session
+        const response = await fetch(`${API_URL}/check-session-status`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        // Si la session a été détruite, le serveur renvoie 401
+        if (response.status === 401) {
+            const data = await response.json();
+
+            // Vérifier si c'est une déconnexion forcée
+            if (data.forceLogout) {
+                console.log('⚠️ Session fermée par un administrateur');
+
+                // Arrêter la vérification
+                if (sessionCheckInterval) {
+                    clearInterval(sessionCheckInterval);
+                    sessionCheckInterval = null;
+                }
+
+                // Afficher un message BIEN VISIBLE avec style
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0, 0, 0, 0.9);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 99999;
+                    animation: fadeIn 0.3s;
+                `;
+                modal.innerHTML = `
+                    <div style="
+                        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                        padding: 40px 60px;
+                        border-radius: 20px;
+                        text-align: center;
+                        color: white;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+                        max-width: 500px;
+                    ">
+                        <div style="font-size: 80px; margin-bottom: 20px;">🔒</div>
+                        <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 20px; text-transform: uppercase;">
+                            SESSION FERMÉE
+                        </h2>
+                        <p style="font-size: 20px; margin-bottom: 30px; font-weight: 600;">
+                            Vous avez été déconnecté par le Super Admin
+                        </p>
+                        <p style="font-size: 16px; opacity: 0.9;">
+                            Redirection vers la page de connexion...
+                        </p>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                // Rediriger après 3 secondes pour laisser le temps de lire
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 3000);
+            }
+        }
+    } catch (error) {
+        // Erreur réseau : ignorer silencieusement
+        console.debug('Erreur vérification session:', error);
+    }
+}
+
+// Arrêter la vérification quand l'utilisateur se déconnecte
+function stopSessionCheck() {
+    if (sessionCheckInterval) {
+        clearInterval(sessionCheckInterval);
+        sessionCheckInterval = null;
+    }
+}
+
 // ===== FONCTIONS API =====
 async function apiCall(endpoint, method = 'GET', data = null) {
-    state.loading = true; 
+    state.loading = true;
     render();
     try {
-        const options = { 
-            method, 
-            headers: { 'Content-Type': 'application/json' } 
+        const options = {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include' // ✅ Inclure les cookies de session
         };
         if (data) options.body = JSON.stringify(data);
         const response = await fetch(`${API_URL}${endpoint}`, options);
         const result = await response.json();
-        if (!response.ok) throw new Error(result.message || 'Erreur');
+        if (!response.ok) {
+            console.error(`❌ API Error [${method} ${endpoint}]:`, result.message || 'Erreur');
+            throw new Error(result.message || 'Erreur');
+        }
         return result;
     } catch (error) {
+        console.error(`❌ API Call Failed [${method} ${endpoint}]:`, error);
         showNotification(error.message, 'error');
         throw error;
     } finally {
-        state.loading = false; 
+        state.loading = false;
         render();
     }
 }
@@ -154,6 +265,9 @@ async function restoreSession() {
 
             // Démarrer le système de déconnexion automatique
             startInactivityTimer();
+
+            // ✅ Démarrer la vérification automatique de session (déconnexion forcée)
+            startSessionCheck();
 
             await loadData();
             return true;
@@ -272,7 +386,15 @@ async function login(username, password) {
             // Démarrer le timer de réinitialisation automatique des filtres
             startFilterResetTimer();
 
+            // ✅ Démarrer la vérification automatique de session (déconnexion forcée)
+            startSessionCheck();
+
             await loadData();
+
+            // ✅ Charger les rôles, départements et services après le login
+            await loadRolesAndDepartements();
+            await loadServices();
+
             showNotification(`✅ Bienvenue ${result.user.nom}!`);
             return true;
         }
@@ -389,6 +511,9 @@ async function logout(isAutoLogout = false) {
     // Arrêter le système de détection d'inactivité
     stopInactivityTimer();
 
+    // ✅ Arrêter la vérification automatique de session
+    stopSessionCheck();
+
     state.currentUser = null;
     state.currentUserInfo = null;
     state.isAuthenticated = false;
@@ -421,17 +546,32 @@ async function loadData() {
     }
 }
 
-// NOUVEAU : Charger les rôles et départements
+// NOUVEAU : Charger les rôles, départements et services
 async function loadRolesAndDepartements() {
     try {
         const rolesData = await apiCall('/roles');
         state.roles = rolesData.roles || [];
+
         const deptsData = await apiCall('/departements');
         state.departements = deptsData.departements || [];
+
         console.log('✅ Rôles et départements chargés:', state.roles.length, 'rôles,', state.departements.length, 'départements');
         render();
     } catch (error) {
         console.error('❌ Erreur chargement rôles/départements:', error);
+    }
+}
+
+// Charger les services (appelé après login)
+async function loadServices() {
+    try {
+        const servicesData = await apiCall('/services');
+        state.services = servicesData.services || [];
+        console.log('✅ Services chargés:', state.services.length, 'services');
+        render();
+    } catch (error) {
+        console.error('❌ Erreur chargement services:', error);
+        state.services = [];
     }
 }
 
@@ -618,17 +758,34 @@ async function addDepartement() {
         return;
     }
 
-    await apiCall('/departements', 'POST', { nom, code });
+    const isNiveau1 = state.currentUserInfo && state.currentUserInfo.niveau === 1;
+
+    if (isNiveau1) {
+        // ✅ Niveau 1 : Créer un service dans son département
+        await apiCall('/services', 'POST', {
+            nom,
+            code,
+            idDepartement: state.currentUserInfo.idDepartement
+        });
+    } else {
+        // ✅ Niveau 0 : Créer un département
+        await apiCall('/departements', 'POST', { nom, code });
+    }
+
     await loadRolesAndDepartements();
-    showNotification('✅ Département créé');
+    const message = isNiveau1 ? '✅ Service créé' : '✅ Département créé';
+    showNotification(message);
     document.getElementById('new_dept_nom').value = '';
     document.getElementById('new_dept_code').value = '';
 }
 
 async function deleteDepartement(deptId) {
+    const isNiveau1 = state.currentUserInfo && state.currentUserInfo.niveau === 1;
+    const entityName = isNiveau1 ? 'service' : 'département';
+
     const confirmed = await customConfirm({
-        title: 'Supprimer le département',
-        message: 'Voulez-vous vraiment supprimer ce département ? Cette action est irréversible.',
+        title: `Supprimer le ${entityName}`,
+        message: `Voulez-vous vraiment supprimer ce ${entityName} ? Cette action est irréversible.`,
         confirmText: 'Oui, supprimer',
         cancelText: 'Annuler',
         type: 'danger',
@@ -638,18 +795,27 @@ async function deleteDepartement(deptId) {
     if (!confirmed) return;
 
     try {
-        await apiCall(`/departements/${deptId}`, 'DELETE');
+        // ✅ Appeler la bonne API selon le niveau
+        const endpoint = isNiveau1 ? `/services/${deptId}` : `/departements/${deptId}`;
+        await apiCall(endpoint, 'DELETE');
         await loadRolesAndDepartements();
-        showNotification('✅ Département supprimé');
+        showNotification(isNiveau1 ? '✅ Service supprimé' : '✅ Département supprimé');
     } catch (error) {
-        console.error('Erreur suppression département:', error);
+        console.error('Erreur suppression:', error);
+        showNotification('❌ ' + (error.message || 'Erreur lors de la suppression'), 'error');
     }
 }
 
 function startEditDepartement(deptId) {
-    const dept = state.departements.find(d => d._id === deptId);
-    if (!dept) return;
-    state.editingDepartement = { ...dept };
+    const isNiveau1 = state.currentUserInfo && state.currentUserInfo.niveau === 1;
+
+    // ✅ Chercher dans la bonne liste selon le niveau
+    const item = isNiveau1
+        ? state.services.find(s => s._id === deptId)
+        : state.departements.find(d => d._id === deptId);
+
+    if (!item) return;
+    state.editingDepartement = { ...item };
     render();
 }
 
@@ -669,10 +835,19 @@ async function saveEditDepartement() {
         return;
     }
 
-    await apiCall(`/departements/${state.editingDepartement._id}`, 'PUT', { nom, code });
+    const isNiveau1 = state.currentUserInfo && state.currentUserInfo.niveau === 1;
+
+    // ✅ Appeler la bonne API selon le niveau
+    const endpoint = isNiveau1
+        ? `/services/${state.editingDepartement._id}`
+        : `/departements/${state.editingDepartement._id}`;
+
+    await apiCall(endpoint, 'PUT', { nom, code });
     await loadRolesAndDepartements();
     state.editingDepartement = null;
-    showNotification('✅ Département modifié');
+    const message = isNiveau1 ? '✅ Service modifié'
+        : '✅ Département modifié';
+    showNotification(message);
 }
 
 // ===== UTILITAIRES =====
@@ -1437,6 +1612,22 @@ async function toggleRolesManagement() {
     state.showCategories = false;
     state.showDepartements = false;
     state.showUsersManagement = false;
+    state.showDepartementsManagement = false;
+    state.showAdvancedStats = false;
+    render();
+}
+
+async function toggleDepartementsManagement() {
+    state.showDepartementsManagement = !state.showDepartementsManagement;
+    if (state.showDepartementsManagement) {
+        // Charger tous les départements
+        await loadRolesAndDepartements();
+    }
+    state.showUploadForm = false;
+    state.showCategories = false;
+    state.showDepartements = false;
+    state.showUsersManagement = false;
+    state.showRolesManagement = false;
     state.showAdvancedStats = false;
     render();
 }
@@ -1948,7 +2139,7 @@ async function handleLogin() {
     await login(username, password);
 }
 
-// Gérer le changement de rôle pour désactiver le département si niveau 1
+// Gérer le changement de rôle pour masquer le département seulement pour niveau 0 (Super Admin)
 function handleRoleChange() {
     const roleSelect = document.getElementById('reg_role');
     const departementContainer = document.getElementById('departement_container');
@@ -1959,14 +2150,14 @@ function handleRoleChange() {
     const selectedOption = roleSelect.options[roleSelect.selectedIndex];
     const niveau = selectedOption ? parseInt(selectedOption.getAttribute('data-niveau')) : null;
 
-    if (niveau === 1) {
-        // Niveau 1 : désactiver et masquer le département
+    if (niveau === 0) {
+        // Niveau 0 (Super Admin) : désactiver et masquer le département
         departementSelect.disabled = true;
         departementSelect.value = '';
         departementContainer.style.opacity = '0.5';
         departementContainer.style.pointerEvents = 'none';
     } else {
-        // Autres niveaux : activer le département
+        // Niveaux 1, 2, 3 : activer le département (OBLIGATOIRE)
         departementSelect.disabled = false;
         departementContainer.style.opacity = '1';
         departementContainer.style.pointerEvents = 'auto';
@@ -1988,8 +2179,9 @@ async function handleRegister() {
     const selectedOption = roleSelect.options[roleSelect.selectedIndex];
     const niveau = selectedOption ? parseInt(selectedOption.getAttribute('data-niveau')) : null;
 
-    // Pour niveau 1, le département n'est pas requis
-    if (niveau === 1) {
+    // Seul le niveau 0 (Super Admin) n'a pas besoin de département
+    // Niveaux 1, 2, 3 DOIVENT avoir un département
+    if (niveau === 0) {
         if (!nom || !email || !username || !password || !passwordConfirm || !idRole || !adminPassword) {
             return showNotification('Veuillez remplir tous les champs', 'error');
         }
@@ -2004,8 +2196,8 @@ async function handleRegister() {
     if (password !== passwordConfirm) {
         return showNotification('Les mots de passe ne correspondent pas', 'error');
     }
-    // Pour niveau 1, envoyer null pour le département
-    const finalIdDepartement = niveau === 1 ? null : idDepartement;
+    // Pour niveau 0 (Super Admin), envoyer null pour le département
+    const finalIdDepartement = niveau === 0 ? null : idDepartement;
     const success = await register(username, password, nom, email, idRole, finalIdDepartement, adminPassword);
     if (success) {
         state.showRegister = false;
@@ -2097,7 +2289,16 @@ function render() {
 
                             <select id="reg_role" class="w-full px-4 py-3 border-2 rounded-xl input-modern" onchange="handleRoleChange()">
                                 <option value="">-- Choisir un rôle --</option>
-                                ${(state.roles && Array.isArray(state.roles) ? state.roles : []).map(role => `
+                                ${(state.roles && Array.isArray(state.roles) ? state.roles : [])
+                                    .filter(role => {
+                                        // Si un niveau 1 est connecté, montrer uniquement niveau 2 et 3
+                                        if (state.currentUserInfo && state.currentUserInfo.niveau === 1) {
+                                            return role.niveau === 2 || role.niveau === 3;
+                                        }
+                                        // Sinon, montrer tous les rôles
+                                        return true;
+                                    })
+                                    .map(role => `
                                     <option value="${role._id}" data-niveau="${role.niveau}">
                                         ${role.libelle.charAt(0).toUpperCase() + role.libelle.slice(1)} - ${role.description}
                                     </option>
@@ -2105,15 +2306,39 @@ function render() {
                             </select>
 
                             <div id="departement_container">
-                                <select id="reg_departement" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                                    <option value="">-- Choisir un département --</option>
-                                    ${(state.departements && Array.isArray(state.departements) ? state.departements : []).map(dept => `
-                                        <option value="${dept._id}">
-                                            ${dept.nom}
-                                        </option>
-                                    `).join('')}
-                                </select>
-                                <p class="text-xs text-gray-700 font-semibold mt-1 bg-blue-50 p-2 rounded border-l-4 border-blue-500">💡 Les administrateurs de niveau 1 n'ont pas de département spécifique</p>
+                                ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                                    <!-- Niveau 1 : Département automatique (celui du créateur) -->
+                                    <div class="w-full px-4 py-3 border-2 rounded-xl bg-gray-100 font-semibold text-gray-700">
+                                        🏢 Département : ${state.currentUserInfo.departement || 'Non défini'}
+                                    </div>
+                                    <input type="hidden" id="reg_departement" value="${state.currentUserInfo.idDepartement || ''}">
+                                    <p class="text-xs text-blue-700 font-semibold mt-1 bg-blue-50 p-2 rounded border-l-4 border-blue-500">
+                                        ℹ️ En tant qu'<strong>administrateur départemental</strong>, vous créez des utilisateurs <strong>niveau 2 et 3</strong> dans VOTRE département et gérez les <strong>services</strong> de ce département.
+                                    </p>
+                                ` : state.currentUserInfo && state.currentUserInfo.niveau === 0 ? `
+                                    <!-- Niveau 0 : Super Admin - Choix du département avec message informatif -->
+                                    <select id="reg_departement" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                        <option value="">-- Choisir un département --</option>
+                                        ${(state.departements && Array.isArray(state.departements) ? state.departements : []).map(dept => `
+                                            <option value="${dept._id}">
+                                                ${dept.nom}
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                    <p class="text-xs text-green-700 font-semibold mt-1 bg-green-50 p-2 rounded border-l-4 border-green-500">
+                                        ℹ️ En tant que <strong>Super Administrateur</strong>, vous pouvez créer des utilisateurs de <strong>tous niveaux</strong> (0, 1, 2, 3) dans <strong>tous les départements</strong>.
+                                    </p>
+                                ` : `
+                                    <!-- Autres niveaux : Choix du département -->
+                                    <select id="reg_departement" class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                        <option value="">-- Choisir un département --</option>
+                                        ${(state.departements && Array.isArray(state.departements) ? state.departements : []).map(dept => `
+                                            <option value="${dept._id}">
+                                                ${dept.nom}
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                `}
                             </div>
 
                             <div class="relative">
@@ -2294,7 +2519,7 @@ function render() {
                                 <div class="bg-gradient-to-br from-purple-500 to-purple-600 p-4 rounded-xl shadow-lg text-white cursor-pointer" onclick="toggleAdvancedStats()">
                                     <div class="flex items-center justify-between">
                                         <div>
-                                            <p class="text-sm opacity-90">Documents par département</p>
+                                            <p class="text-sm opacity-90">Documents par service</p>
                                             <p class="text-xl font-bold mt-1">
                                                 ${state.departements.map(dept => {
                                                     const count = state.documents.filter(doc => doc.departementArchivage === dept.nom).length;
@@ -2336,8 +2561,15 @@ function render() {
                             </select>
                             <select onchange="updateTempDepartement(this.value)"
                                     class="px-4 py-2 text-sm border-2 rounded-lg outline-none font-medium">
-                                <option value="tous" ${state.tempSelectedDepartement === 'tous' ? 'selected' : ''}>🏢 Tous départements</option>
-                                ${state.departements.map(dept => `
+                                <option value="tous" ${state.tempSelectedDepartement === 'tous' ? 'selected' : ''}>
+                                    ${state.currentUserInfo && (state.currentUserInfo.niveau === 1 || state.currentUserInfo.niveau === 2 || state.currentUserInfo.niveau === 3)
+                                        ? '🏢 Tous services'
+                                        : '🏢 Tous départements'}
+                                </option>
+                                ${(state.currentUserInfo && (state.currentUserInfo.niveau === 1 || state.currentUserInfo.niveau === 2 || state.currentUserInfo.niveau === 3)
+                                    ? state.services
+                                    : state.departements
+                                ).map(dept => `
                                     <option value="${dept.nom}" ${state.tempSelectedDepartement === dept.nom ? 'selected' : ''}>
                                         🏢 ${dept.nom}
                                     </option>
@@ -2508,13 +2740,43 @@ function render() {
                         ` : ''}
 
                         <div class="space-y-2">
-                            ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
-                                <!-- Menu complet pour NIVEAU 1 (Admin) -->
+                            ${state.currentUserInfo && state.currentUserInfo.niveau === 0 ? `
+                                <!-- Menu complet pour NIVEAU 0 (Super Admin) -->
+                                <button onclick="toggleDepartementsManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-green-50 hover:to-teal-50 rounded-xl transition font-medium">
+                                    🏢 Gérer les départements
+                                </button>
+                                <button onclick="toggleCategories()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                    📂 Gérer les catégories
+                                </button>
+                                <button onclick="toggleUsersManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 rounded-xl transition font-medium">
+                                    👥 Gérer les utilisateurs
+                                </button>
+                                <button onclick="toggleRolesManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-indigo-50 hover:to-blue-50 rounded-xl transition font-medium">
+                                    🎭 Gérer les rôles
+                                </button>
+                                <button onclick="toggleAdvancedStats()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-green-50 hover:to-teal-50 rounded-xl transition font-medium">
+                                    📊 Statistiques avancées
+                                </button>
+                                <button onclick="createExcelReport()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 rounded-xl transition font-medium">
+                                    📊 Créer un rapport Excel
+                                </button>
+                                <button onclick="exportData()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
+                                    💾 Exporter les données
+                                </button>
+                                <label class="block w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl cursor-pointer transition font-medium">
+                                    📥 Importer des données
+                                    <input type="file" accept=".json" onchange="importData(event)" class="hidden">
+                                </label>
+                                <button onclick="deleteAllDocuments()" class="w-full text-left px-4 py-4 hover:bg-red-50 text-red-600 rounded-xl transition font-medium">
+                                    🗑️ Tout supprimer
+                                </button>
+                            ` : state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                                <!-- Menu complet pour NIVEAU 1 (Admin Départemental) -->
                                 <button onclick="toggleCategories()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
                                     📂 Gérer les catégories
                                 </button>
                                 <button onclick="toggleDepartements()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
-                                    🏢 Gérer les départements
+                                    🏢 Gérer les services
                                 </button>
                                 <button onclick="toggleUsersManagement()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 rounded-xl transition font-medium">
                                     👥 Gérer les utilisateurs
@@ -2562,7 +2824,7 @@ function render() {
                     <div class="modal-glass rounded-2xl p-8 max-w-md w-full shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
                         <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">➕ Ajouter un document</h2>
                         <div class="space-y-4">
-                            <input type="text" placeholder="Titre du document *" value="${formData.titre}"
+                            <input type="text" placeholder="Titre du document *" value="${escapeHtml(formData.titre)}"
                                    oninput="updateFormData('titre', this.value)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
                             <select onchange="updateFormData('categorie', this.value)" 
@@ -2581,18 +2843,31 @@ function render() {
                             </div>
                             <select onchange="updateFormData('departementArchivage', this.value)"
                                     class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                                <option value="">🏢 Sélectionner le département d'archivage</option>
-                                ${state.departements.map(dept => `
-                                    <option value="${dept._id}" ${formData.departementArchivage === dept._id ? 'selected' : ''}>
-                                        ${dept.nom}
-                                    </option>
-                                `).join('')}
+                                ${(() => {
+                                    const isNiveau123 = state.currentUserInfo && (state.currentUserInfo.niveau === 1 || state.currentUserInfo.niveau === 2 || state.currentUserInfo.niveau === 3);
+                                    const items = isNiveau123 ? state.services : state.departements;
+
+                                    if (isNiveau123 && items.length === 0) {
+                                        return `<option value="">⚠️ Aucun service disponible - Le niveau 1 doit créer des services</option>`;
+                                    }
+
+                                    return `
+                                        <option value="">
+                                            ${isNiveau123 ? '🏢 Sélectionner le service d\'archivage' : '🏢 Sélectionner le département d\'archivage'}
+                                        </option>
+                                        ${items.map(dept => `
+                                            <option value="${dept._id}" ${formData.departementArchivage === dept._id ? 'selected' : ''}>
+                                                ${dept.nom}
+                                            </option>
+                                        `).join('')}
+                                    `;
+                                })()}
                             </select>
                             <textarea placeholder="Description (optionnelle)" 
                                       oninput="updateFormData('description', this.value)"
                                       class="w-full px-4 py-3 border-2 rounded-xl input-modern resize-none"
-                                      rows="3">${formData.description}</textarea>
-                            <input type="text" placeholder="Tags (séparés par des virgules)" value="${formData.tags}"
+                                      rows="3">${escapeHtml(formData.description)}</textarea>
+                            <input type="text" placeholder="Tags (séparés par des virgules)" value="${escapeHtml(formData.tags)}"
                                    oninput="updateFormData('tags', this.value)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
 
@@ -2704,16 +2979,27 @@ function render() {
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
                      onclick="if(event.target === this) toggleDepartements()">
                     <div class="modal-glass rounded-2xl p-8 max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in" onclick="event.stopPropagation()">
-                        <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">🏢 Gérer les départements</h2>
+                        <h2 class="text-2xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">
+                            ${state.currentUserInfo && state.currentUserInfo.niveau === 1
+                                ? '🏢 Gérer les services'
+                                : '🏢 Gérer les départements'}
+                        </h2>
+                        ${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? `
+                            <div class="bg-blue-50 border-2 border-blue-300 rounded-lg p-3 mb-4">
+                                <p class="text-xs text-blue-800 font-medium">
+                                    ℹ️ En tant qu'administrateur départemental, vous gérez les <strong>services</strong> de votre département.
+                                </p>
+                            </div>
+                        ` : ''}
                         <div class="space-y-3 mb-6">
-                            ${state.departements.map(dept => `
+                            ${(state.currentUserInfo && state.currentUserInfo.niveau === 1 ? state.services : state.departements).map(dept => `
                                 ${state.editingDepartement && state.editingDepartement._id === dept._id ? `
                                     <!-- Mode édition -->
                                     <div class="p-4 bg-blue-50 rounded-xl space-y-3">
                                         <div class="flex items-center gap-2 mb-2">
                                             <span class="text-lg font-bold">✏️ Modifier</span>
                                         </div>
-                                        <input id="edit_dept_nom" type="text" value="${dept.nom}" placeholder="Nom du département"
+                                        <input id="edit_dept_nom" type="text" value="${dept.nom}" placeholder="${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? 'Nom du service' : 'Nom du département'}"
                                                class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
                                         <input id="edit_dept_code" type="text" value="${dept.code}" placeholder="Code (ex: INFO)"
                                                class="w-full px-3 py-2 border-2 rounded-lg input-modern text-sm">
@@ -2747,14 +3033,20 @@ function render() {
                             `).join('')}
                         </div>
                         <div class="border-t-2 border-gray-200 pt-6 space-y-4">
-                            <h3 class="font-bold text-lg">➕ Nouveau département</h3>
-                            <input id="new_dept_nom" type="text" placeholder="Nom du département"
+                            <h3 class="font-bold text-lg">
+                                ${state.currentUserInfo && state.currentUserInfo.niveau === 1
+                                    ? '➕ Nouveau service'
+                                    : '➕ Nouveau département'}
+                            </h3>
+                            <input id="new_dept_nom" type="text" placeholder="${state.currentUserInfo && state.currentUserInfo.niveau === 1 ? 'Nom du service' : 'Nom du département'}"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
                             <input id="new_dept_code" type="text" placeholder="Code (ex: INFO, MATH)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
                             <button onclick="addDepartement()"
                                     class="w-full px-6 py-4 btn-success text-white rounded-xl hover:shadow-lg transition font-semibold">
-                                ✅ Ajouter le département
+                                ${state.currentUserInfo && state.currentUserInfo.niveau === 1
+                                    ? '✅ Ajouter le service'
+                                    : '✅ Ajouter le département'}
                             </button>
                             <button onclick="toggleDepartements()"
                                     class="w-full px-6 py-3 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl hover:shadow-md transition font-medium">
@@ -2770,6 +3062,9 @@ function render() {
 
             <!-- NOUVEAU : Gestion des rôles -->
             ${renderRolesManagement()}
+
+            <!-- NOUVEAU : Gestion des départements (Niveau 0) -->
+            ${renderDepartementsManagement()}
 
             <!-- NOUVEAU : Statistiques avancées -->
             ${renderAdvancedStats()}
@@ -2797,8 +3092,8 @@ function render() {
                             
                             <div class="bg-white rounded-xl p-4 shadow-inner">
                                 ${state.selectedDoc.type.startsWith('image/') ? `
-                                    <img src="${state.selectedDoc.contenu}" 
-                                         alt="${state.selectedDoc.titre}" 
+                                    <img src="${state.selectedDoc.contenu}"
+                                         alt="${escapeHtml(state.selectedDoc.titre)}"
                                          class="w-full h-auto max-h-[500px] object-contain rounded-lg cursor-zoom-in"
                                          onclick="window.open(this.src, '_blank')"
                                          title="Cliquer pour agrandir">
@@ -3058,10 +3353,14 @@ function render() {
                                         ${getCategoryIcon(state.selectedDoc.categorie)} ${getCategoryName(state.selectedDoc.categorie)}
                                     </span>
                                 </div>
-                                ${state.selectedDoc.departementArchivage ? `
+                                ${state.selectedDoc.serviceArchivage || state.selectedDoc.departementArchivage ? `
                                 <div class="flex items-center gap-2">
-                                    <strong class="text-gray-700">🏢 Département d'archivage:</strong>
-                                    <span class="text-gray-600 font-semibold">${state.selectedDoc.departementArchivage}</span>
+                                    <strong class="text-gray-700">
+                                        ${state.selectedDoc.serviceArchivage
+                                            ? '🏢 Service d\'archivage:'
+                                            : '🏢 Département d\'archivage:'}
+                                    </strong>
+                                    <span class="text-gray-600 font-semibold">${state.selectedDoc.serviceArchivage || state.selectedDoc.departementArchivage}</span>
                                 </div>
                                 ` : ''}
                                 <div class="flex items-center gap-2">
@@ -3568,8 +3867,11 @@ async function initApp() {
     // Afficher l'interface appropriée (connecté ou page de connexion)
     render();
 
-    // Charger les rôles et départements
-    await loadRolesAndDepartements();
+    // Charger les rôles et départements seulement si authentifié
+    if (sessionRestored) {
+        await loadRolesAndDepartements();
+        await loadServices();
+    }
 }
 
 // Démarrer l'application

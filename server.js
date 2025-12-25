@@ -45,6 +45,7 @@ let documentsCollection;
 let categoriesCollection;
 let rolesCollection;
 let departementsCollection;
+let servicesCollection; // ✅ NOUVEAU: Collection services (créés par niveau 1)
 let deletionRequestsCollection;
 let messagesCollection;
 let messageDeletionRequestsCollection;
@@ -64,10 +65,79 @@ app.use(security.helmetConfig);
 // ✅ SÉCURITÉ: Compression des réponses
 app.use(security.compressionConfig);
 
-// CORS et parsing
-app.use(cors());
+// CORS et parsing - ✅ Activer credentials pour les cookies de session
+app.use(cors({
+    origin: function (origin, callback) {
+        // Permettre localhost et les requêtes sans origin (Postman, etc.)
+        const allowedOrigins = ['http://localhost:4000', 'http://127.0.0.1:4000'];
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(null, true); // En développement, on accepte tout
+        }
+    },
+    credentials: true, // ✅ CRITIQUE: Permet l'envoi de cookies
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// ✅ SESSIONS: Configuration MemoryStore (AVANT les routes !)
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'changez_ce_secret_en_production',
+    resave: false,
+    saveUninitialized: false,
+    rolling: true,
+    cookie: {
+        secure: false,
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000
+    },
+    name: 'sessionId'
+}));
+console.log('✅ Sessions configurées (MemoryStore - DEV)');
+
+// ✅ MIDDLEWARE DE SÉCURITÉ: Vérifier isOnline et forcer la déconnexion si false
+app.use(async (req, res, next) => {
+    // Ignorer pour les routes publiques et la route de vérification de session
+    if (req.path === '/api/login' ||
+        req.path === '/api/logout' ||
+        req.path === '/api/check-session-status' ||
+        req.path.startsWith('/api/superadmin/login') ||
+        !req.path.startsWith('/api/') ||
+        !req.session.userId) {
+        return next();
+    }
+
+    try {
+        // Vérifier si l'utilisateur a isOnline=false
+        const user = await usersCollection.findOne({
+            username: req.session.userId
+        });
+
+        if (user && user.isOnline === false) {
+            console.log(`⚠️ Utilisateur ${req.session.userId} déconnecté (isOnline=false) - destruction de la session`);
+
+            // Détruire la session
+            return req.session.destroy((err) => {
+                if (err) {
+                    console.error('❌ Erreur destruction session:', err);
+                }
+                res.status(401).json({
+                    success: false,
+                    message: 'Votre session a été fermée par un administrateur',
+                    forceLogout: true
+                });
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error('❌ Erreur middleware isOnline:', error);
+        next(); // Continuer même en cas d'erreur pour ne pas bloquer l'app
+    }
+});
 
 // ✅ SÉCURITÉ: Protection contre les injections NoSQL
 app.use(security.sanitizeConfig);
@@ -189,11 +259,32 @@ async function getAccessibleDocuments(userId) {
         return accessibleDocs;
     }
 
-    // ✅ NIVEAU 1 : Voit TOUS les documents de TOUS les départements
+    // ✅ NIVEAU 1 : Voit les documents de SON département ET des services de ce département
     if (userRole.niveau === 1) {
-        const allDocs = await documentsCollection.find({}).toArray();
-        accessibleDocs = allDocs;
-        console.log(`✅ NIVEAU 1: Accès à TOUS les documents (${accessibleDocs.length})`);
+        // Vérifier que l'utilisateur a un département
+        if (!user.idDepartement) {
+            console.log(`⚠️ Utilisateur niveau 1 sans département: Aucun document accessible`);
+            return [];
+        }
+
+        // ✅ NOUVEAU: Récupérer tous les services du département depuis la collection services
+        const services = await servicesCollection.find({
+            idDepartement: user.idDepartement
+        }).toArray();
+
+        const serviceIds = services.map(s => s._id);
+        console.log(`📋 Services trouvés pour le département: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
+
+        // Documents du département principal + documents de tous ses services
+        const deptDocs = await documentsCollection.find({
+            $or: [
+                { idDepartement: user.idDepartement }, // Documents du département principal
+                { idService: { $in: serviceIds } }  // ✅ CORRIGÉ: Documents des services (utilise idService)
+            ]
+        }).toArray();
+
+        accessibleDocs = deptDocs;
+        console.log(`✅ NIVEAU 1: Accès aux documents du département + services (${accessibleDocs.length})`);
         return accessibleDocs;
     }
 
@@ -292,6 +383,7 @@ async function connectDB(retryCount = 0) {
         categoriesCollection = db.collection('categories');
         rolesCollection = db.collection('roles');
         departementsCollection = db.collection('departements');
+        servicesCollection = db.collection('services'); // ✅ NOUVEAU: Collection services
         deletionRequestsCollection = db.collection('deletionRequests');
         messagesCollection = db.collection('messages');
         messageDeletionRequestsCollection = db.collection('messageDeletionRequests');
@@ -316,33 +408,11 @@ async function connectDB(retryCount = 0) {
         console.log('✅ Connexion à MongoDB réussie');
         console.log(`📊 Base de données: ${DB_NAME}`);
 
-        // ✅ SÉCURITÉ: Configuration des sessions sécurisées avec MongoDB
-        app.use(session({
-            secret: process.env.SESSION_SECRET || 'changez_ce_secret_en_production',
-            resave: false,
-            saveUninitialized: false,
-            rolling: true, // Renouvelle le cookie à chaque requête
-            store: MongoStore.create({
-                client: client,
-                dbName: DB_NAME,
-                collectionName: 'sessions',
-                ttl: 86400, // ✅ TTL de 24 heures (86400 secondes) - Optimisé pour meilleure UX
-                crypto: {
-                    secret: process.env.SESSION_CRYPTO_SECRET || 'changez_ce_secret_aussi'
-                },
-                touchAfter: 300 // ✅ Mise à jour toutes les 5 minutes (300 secondes) si activité
-            }),
-            cookie: {
-                secure: process.env.NODE_ENV === 'production', // HTTPS uniquement en production
-                httpOnly: true, // Pas accessible en JavaScript côté client
-                // Ne pas définir maxAge pour faire un cookie de session
-                sameSite: 'strict' // Protection CSRF
-            },
-            name: 'sessionId' // Cacher que c'est Express
-        }));
-        console.log('✅ Sessions sécurisées configurées avec MongoDB');
-
         await initializeDefaultData();
+
+        // ✅ Module Services (séparé de départements)
+        const servicesModule = require('./modules/services');
+        servicesModule.init(db);
 
         // ✅ NIVEAU 0: Initialiser les modules Super Admin
         const superAdminAuth = require('./middleware/superAdminAuth');
@@ -357,10 +427,13 @@ async function connectDB(retryCount = 0) {
         superAdminRoutes.init(db, {
             users: usersCollection,
             documents: documentsCollection,
+            categories: categoriesCollection, // ✅ Collection categories
             roles: rolesCollection,
             departements: departementsCollection,
+            services: servicesCollection, // ✅ NOUVEAU: Collection services
             auditLogs: auditLogsCollection,
-            systemSettings: systemSettingsCollection
+            systemSettings: systemSettingsCollection,
+            shareHistory: shareHistoryCollection
         });
 
         // Charger les routes Super Admin
@@ -591,6 +664,21 @@ async function connectDB(retryCount = 0) {
                     });
                 });
 
+                // ✅ Mettre à jour lastActivity pour le statut de connexion + stocker sessionID
+                console.log(`🟢 Mise à jour isOnline=true pour: ${username}`);
+                console.log(`🔑 Stockage sessionID: ${req.sessionID}`);
+                const updateResult = await usersCollection.updateOne(
+                    { username },
+                    {
+                        $set: {
+                            lastActivity: new Date(),
+                            isOnline: true,
+                            sessionID: req.sessionID // ✅ Stocker l'ID de session
+                        }
+                    }
+                );
+                console.log(`✅ isOnline mis à jour: ${updateResult.modifiedCount} document(s) modifié(s)`);
+
                 res.json({
                     success: true,
                     username,
@@ -602,7 +690,8 @@ async function connectDB(retryCount = 0) {
                         email: user.email,
                         role: role ? role.libelle : 'Non défini',
                         niveau: role ? role.niveau : 0,
-                        departement: departement ? departement.nom : 'Aucun (Admin Principal)'
+                        departement: departement ? departement.nom : 'Aucun (Admin Principal)',
+                        idDepartement: user.idDepartement // ✅ AJOUTÉ: ID du département pour création de services
                     }
                 });
 
@@ -630,6 +719,22 @@ async function connectDB(retryCount = 0) {
                         ip: req.ip,
                         userAgent: req.headers['user-agent']
                     });
+
+                    // ✅ Mettre à jour le statut de connexion + supprimer sessionID
+                    console.log(`🔴 Mise à jour isOnline=false pour: ${username}`);
+                    const logoutUpdate = await usersCollection.updateOne(
+                        { username },
+                        {
+                            $set: {
+                                lastActivity: new Date(),
+                                isOnline: false
+                            },
+                            $unset: {
+                                sessionID: "" // ✅ Supprimer l'ID de session
+                            }
+                        }
+                    );
+                    console.log(`✅ isOnline=false mis à jour: ${logoutUpdate.modifiedCount} document(s) modifié(s)`);
                 } catch (error) {
                     console.error('❌ Erreur lors du logging de la déconnexion:', error);
                 }
@@ -887,7 +992,8 @@ app.post('/api/login', security.loginLimiter, async (req, res) => {
                 email: user.email,
                 role: role ? role.libelle : 'Non défini',
                 niveau: role ? role.niveau : 0,
-                departement: departement ? departement.nom : 'Aucun (Admin Principal)'
+                departement: departement ? departement.nom : 'Aucun (Admin Principal)',
+                idDepartement: user.idDepartement // ✅ AJOUTÉ: ID du département pour création de services
             }
         });
         
@@ -1066,6 +1172,66 @@ app.post('/api/verify-session', async (req, res) => {
     }
 });
 
+// ✅ NOUVEAU: Route dédiée pour vérifier si l'utilisateur est toujours connecté
+// Utilisée par le polling côté client pour détecter la déconnexion forcée
+app.get('/api/check-session-status', async (req, res) => {
+    try {
+        // Vérifier si l'utilisateur a une session active
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Aucune session active',
+                forceLogout: true
+            });
+        }
+
+        // Vérifier si l'utilisateur existe et est toujours en ligne
+        const user = await usersCollection.findOne({
+            username: req.session.userId
+        });
+
+        if (!user) {
+            console.log(`⚠️ Utilisateur ${req.session.userId} introuvable - session invalide`);
+            return res.status(401).json({
+                success: false,
+                message: 'Utilisateur introuvable',
+                forceLogout: true
+            });
+        }
+
+        // Vérifier si l'utilisateur a été déconnecté de force
+        if (user.isOnline === false) {
+            console.log(`⚠️ Utilisateur ${req.session.userId} a isOnline=false - déconnexion forcée`);
+
+            // Détruire la session
+            req.session.destroy((err) => {
+                if (err) {
+                    console.error('❌ Erreur destruction session:', err);
+                }
+            });
+
+            return res.status(401).json({
+                success: false,
+                message: 'Votre session a été fermée par un administrateur',
+                forceLogout: true
+            });
+        }
+
+        // Session valide
+        res.json({
+            success: true,
+            isOnline: true
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur check-session-status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur'
+        });
+    }
+});
+
 // Register - ✅ SÉCURITÉ: Validation stricte des entrées
 app.post('/api/register', [
     // Validation username
@@ -1166,10 +1332,48 @@ app.post('/api/register', [
                 message: 'Rôle invalide'
             });
         }
-        const isNiveau1 = selectedRole.niveau === 1;
+        const isNiveau0 = selectedRole.niveau === 0;
 
-        // Pour les utilisateurs de niveau 1, pas de département
-        if (!isNiveau1 && !deptId) {
+        // 🛡️ SÉCURITÉ: INTERDIRE la création de niveau 0 via l'API
+        // Les Super Admins (niveau 0) ne peuvent être créés QUE via un script dédié
+        if (isNiveau0) {
+            return res.status(403).json({
+                success: false,
+                message: '❌ ACCÈS REFUSÉ : Les Super Administrateurs (niveau 0) ne peuvent pas être créés via cette interface. Utilisez le script dédié : npm run create-superadmin'
+            });
+        }
+
+        // ✅ NOUVEAU: Vérifier si un utilisateur est connecté et appliquer les restrictions
+        if (req.session && req.session.userId) {
+            const creator = await usersCollection.findOne({ username: req.session.userId });
+            if (creator) {
+                const creatorRole = await rolesCollection.findOne({ _id: creator.idRole });
+                if (creatorRole && creatorRole.niveau === 1) {
+                    // Un niveau 1 ne peut créer QUE des utilisateurs niveau 2 ou 3
+                    if (selectedRole.niveau !== 2 && selectedRole.niveau !== 3) {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'En tant qu\'administrateur départemental (niveau 1), vous ne pouvez créer que des utilisateurs de niveau 2 ou 3.'
+                        });
+                    }
+                    // Forcer le département à celui du créateur (niveau 1)
+                    deptId = creator.idDepartement;
+                }
+                // Si c'est un niveau 0 qui crée un utilisateur, vérifier qu'il ne crée pas un niveau 0
+                else if (creatorRole && creatorRole.niveau === 0) {
+                    if (selectedRole.niveau === 0) {
+                        return res.status(403).json({
+                            success: false,
+                            message: '❌ ACCÈS REFUSÉ : Même les Super Administrateurs ne peuvent pas créer d\'autres Super Administrateurs via l\'interface. Utilisez le script dédié : npm run create-superadmin'
+                        });
+                    }
+                }
+            }
+        }
+
+        // Seul le niveau 0 (Super Admin) n'a pas besoin de département
+        // Niveaux 1, 2, 3 DOIVENT avoir un département
+        if (!isNiveau0 && !deptId) {
             const defaultDept = await departementsCollection.findOne({ nom: 'Direction' });
             if (!defaultDept) {
                 return res.status(400).json({
@@ -1194,26 +1398,25 @@ app.post('/api/register', [
             firstLogin: true // ✅ NOUVEAU: Marquer comme première connexion
         };
 
-        // Ajouter le département seulement si ce n'est pas un niveau 1
-        if (!isNiveau1 && deptId) {
+        // Ajouter le département seulement si ce n'est pas un niveau 0 (Super Admin)
+        if (!isNiveau0 && deptId) {
             newUser.idDepartement = new ObjectId(deptId);
+        } else if (isNiveau0) {
+            newUser.idDepartement = null; // Niveau 0 (Super Admin) : pas de département
+        }
+
+        // ✅ NOUVEAU: Ajouter le créateur de l'utilisateur (pour filtrage Niveau 1)
+        if (req.session && req.session.userId) {
+            newUser.createdBy = req.session.userId;
         } else {
-            newUser.idDepartement = null; // Niveau 1 : pas de département
+            newUser.createdBy = null; // Pas de créateur (création initiale ou import)
         }
 
         await usersCollection.insertOne(newUser);
 
-        // Créer les catégories par défaut
-        const defaultCategories = [
-            { id: 'factures', nom: 'Factures', couleur: 'bg-blue-100 text-blue-800', icon: '🧾' },
-            { id: 'contrats', nom: 'Contrats', couleur: 'bg-purple-100 text-purple-800', icon: '📜' },
-            { id: 'fiscalite', nom: 'Fiscalité', couleur: 'bg-green-100 text-green-800', icon: '💰' },
-            { id: 'autre', nom: 'Autre', couleur: 'bg-gray-100 text-gray-800', icon: '📄' }
-        ];
-
-        for (const cat of defaultCategories) {
-            await categoriesCollection.insertOne({ idUtilisateur: username, ...cat });
-        }
+        // ✅ Les catégories ne sont PLUS créées automatiquement
+        // Les catégories sont maintenant gérées au niveau du département
+        // par les utilisateurs niveau 1
 
         // ✅ NOUVEAU: Envoyer l'email de bienvenue avec les identifiants
         try {
@@ -1250,6 +1453,7 @@ app.post('/api/register', [
 app.get('/api/users/:username', async (req, res) => {
     try {
         const { username } = req.params;
+        const { ObjectId } = require('mongodb');
 
         const user = await usersCollection.findOne({ username });
         if (!user) {
@@ -1259,8 +1463,54 @@ app.get('/api/users/:username', async (req, res) => {
             });
         }
 
+        // Verifier que l'utilisateur connecte a le droit de voir cet utilisateur
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                const roleId = typeof currentUser.idRole === 'string'
+                    ? new ObjectId(currentUser.idRole)
+                    : currentUser.idRole;
+                const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+                // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    if (currentUser.idDepartement) {
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        // Recuperer les services du departement
+                        const services = await servicesCollection.find({
+                            idDepartement: deptId
+                        }).toArray();
+                        const serviceIds = services.map(s => s._id.toString());
+
+                        // Verifier si l'utilisateur cible est autorise
+                        const userDeptId = user.idDepartement ? user.idDepartement.toString() : null;
+                        const userServiceId = user.idService ? user.idService.toString() : null;
+
+                        const isInDepartment = userDeptId === deptId.toString();
+                        const isInService = userServiceId && serviceIds.includes(userServiceId);
+
+                        if (!isInDepartment && !isInService) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'Acces non autorise a cet utilisateur'
+                            });
+                        }
+                    } else {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'Niveau 1 sans departement ne peut acceder aux utilisateurs'
+                        });
+                    }
+                }
+            }
+        }
+
         const role = await rolesCollection.findOne({ _id: user.idRole });
         const departement = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
+        const service = user.idService ? await servicesCollection.findOne({ _id: user.idService }) : null;
 
         res.json({
             success: true,
@@ -1268,11 +1518,13 @@ app.get('/api/users/:username', async (req, res) => {
                 username: user.username,
                 nom: user.nom,
                 email: user.email,
-                role: role.libelle,
-                roleNiveau: role.niveau,
-                departement: departement ? departement.nom : 'Aucun (Admin Principal)',
+                role: role ? role.libelle : 'Non defini',
+                roleNiveau: role ? role.niveau : null,
+                departement: departement ? departement.nom : (service ? 'Via service' : 'Aucun (Admin Principal)'),
+                service: service ? service.nom : null,
                 idRole: user.idRole,
-                idDepartement: user.idDepartement
+                idDepartement: user.idDepartement,
+                idService: user.idService
             }
         });
 
@@ -1290,6 +1542,65 @@ app.put('/api/users/:username', async (req, res) => {
 
         if (!nom || !email || !idRole) {
             return res.status(400).json({ success: false, message: 'Nom, email et rôle sont requis' });
+        }
+
+        // Recuperer l'utilisateur cible
+        const targetUser = await usersCollection.findOne({ username });
+        if (!targetUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouve' });
+        }
+
+        // Verifier les droits du niveau 1
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                const roleId = typeof currentUser.idRole === 'string'
+                    ? new ObjectId(currentUser.idRole)
+                    : currentUser.idRole;
+                const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+                // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    if (currentUser.idDepartement) {
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        // Recuperer les services du departement
+                        const services = await servicesCollection.find({
+                            idDepartement: deptId
+                        }).toArray();
+                        const serviceIds = services.map(s => s._id.toString());
+
+                        // Verifier si l'utilisateur cible est autorise
+                        const userDeptId = targetUser.idDepartement ? targetUser.idDepartement.toString() : null;
+                        const userServiceId = targetUser.idService ? targetUser.idService.toString() : null;
+
+                        const isInDepartment = userDeptId === deptId.toString();
+                        const isInService = userServiceId && serviceIds.includes(userServiceId);
+
+                        if (!isInDepartment && !isInService) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'Vous ne pouvez modifier que les utilisateurs de votre departement'
+                            });
+                        }
+
+                        // Le niveau 1 ne peut pas modifier vers un autre departement que le sien
+                        if (idDepartement && idDepartement !== deptId.toString()) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'Vous ne pouvez affecter un utilisateur qu\'a votre departement'
+                            });
+                        }
+                    } else {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'Niveau 1 sans departement ne peut modifier les utilisateurs'
+                        });
+                    }
+                }
+            }
         }
 
         // Vérifier que le rôle existe
@@ -1339,11 +1650,80 @@ app.delete('/api/users/:username', async (req, res) => {
             return res.status(403).json({ success: false, message: 'Impossible de supprimer l\'utilisateur jbk' });
         }
 
+        // Recuperer l'utilisateur cible
+        const targetUser = await usersCollection.findOne({ username });
+        if (!targetUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouve' });
+        }
+
+        // Verifier les droits du niveau 1
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                const roleId = typeof currentUser.idRole === 'string'
+                    ? new ObjectId(currentUser.idRole)
+                    : currentUser.idRole;
+                const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+                // Recuperer le role de l'utilisateur cible pour verifier son niveau
+                const targetRoleId = typeof targetUser.idRole === 'string'
+                    ? new ObjectId(targetUser.idRole)
+                    : targetUser.idRole;
+                const targetUserRole = await rolesCollection.findOne({ _id: targetRoleId });
+
+                // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    // Le niveau 1 ne peut pas supprimer un autre niveau 1 ou un niveau 0
+                    if (targetUserRole && (targetUserRole.niveau === 0 || targetUserRole.niveau === 1)) {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'Vous ne pouvez pas supprimer un administrateur de niveau superieur ou egal'
+                        });
+                    }
+
+                    if (currentUser.idDepartement) {
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        // Recuperer les services du departement
+                        const services = await servicesCollection.find({
+                            idDepartement: deptId
+                        }).toArray();
+                        const serviceIds = services.map(s => s._id.toString());
+
+                        // Verifier si l'utilisateur cible est autorise
+                        const userDeptId = targetUser.idDepartement ? targetUser.idDepartement.toString() : null;
+                        const userServiceId = targetUser.idService ? targetUser.idService.toString() : null;
+
+                        const isInDepartment = userDeptId === deptId.toString();
+                        const isInService = userServiceId && serviceIds.includes(userServiceId);
+
+                        if (!isInDepartment && !isInService) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'Vous ne pouvez supprimer que les utilisateurs de votre departement'
+                            });
+                        }
+                    } else {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'Niveau 1 sans departement ne peut supprimer les utilisateurs'
+                        });
+                    }
+                }
+            }
+        }
+
         // Supprimer tous les documents de l'utilisateur
         await documentsCollection.deleteMany({ idUtilisateur: username });
 
-        // Supprimer toutes les catégories de l'utilisateur
-        await categoriesCollection.deleteMany({ idUtilisateur: username });
+        // ✅ NE SUPPRIMER QUE LES CATÉGORIES PERSONNELLES (sans département)
+        // Les catégories du département doivent persister même après suppression de l'utilisateur
+        await categoriesCollection.deleteMany({
+            idUtilisateur: username,
+            idDepartement: { $exists: false } // Seulement les catégories sans département
+        });
 
         // Supprimer l'utilisateur
         await usersCollection.deleteOne({ username });
@@ -1363,6 +1743,57 @@ app.post('/api/users/:username/reset-password', async (req, res) => {
 
         if (!newPassword || newPassword.length < 4) {
             return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 4 caractères' });
+        }
+
+        // Recuperer l'utilisateur cible
+        const targetUser = await usersCollection.findOne({ username });
+        if (!targetUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouve' });
+        }
+
+        // Verifier les droits du niveau 1
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                const roleId = typeof currentUser.idRole === 'string'
+                    ? new ObjectId(currentUser.idRole)
+                    : currentUser.idRole;
+                const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+                // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    if (currentUser.idDepartement) {
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        // Recuperer les services du departement
+                        const services = await servicesCollection.find({
+                            idDepartement: deptId
+                        }).toArray();
+                        const serviceIds = services.map(s => s._id.toString());
+
+                        // Verifier si l'utilisateur cible est autorise
+                        const userDeptId = targetUser.idDepartement ? targetUser.idDepartement.toString() : null;
+                        const userServiceId = targetUser.idService ? targetUser.idService.toString() : null;
+
+                        const isInDepartment = userDeptId === deptId.toString();
+                        const isInService = userServiceId && serviceIds.includes(userServiceId);
+
+                        if (!isInDepartment && !isInService) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'Vous ne pouvez reinitialiser que le mot de passe des utilisateurs de votre departement'
+                            });
+                        }
+                    } else {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'Niveau 1 sans departement ne peut reinitialiser les mots de passe'
+                        });
+                    }
+                }
+            }
         }
 
         const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -1524,9 +1955,30 @@ app.post('/api/documents', security.uploadLimiter, [
         const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
         const departement = user.idDepartement ? await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) }) : null;
 
-        // Déterminer le département d'archivage (celui sélectionné ou celui de l'utilisateur par défaut)
-        const idDeptArchivage = departementArchivage || user.idDepartement;
-        const deptArchivage = idDeptArchivage ? await departementsCollection.findOne({ _id: new ObjectId(idDeptArchivage) }) : null;
+        // ✅ NOUVEAU: Déterminer si c'est un service ou un département
+        const isNiveau123 = role && (role.niveau === 1 || role.niveau === 2 || role.niveau === 3);
+        const idArchivage = departementArchivage || user.idDepartement;
+
+        let serviceArchivage = null;
+        let idServiceArchivage = null;
+        let deptArchivage = null;
+        let idDeptArchivage = null;
+
+        if (isNiveau123 && idArchivage) {
+            // Niveaux 1/2/3 : chercher dans les services
+            const service = await servicesCollection.findOne({ _id: new ObjectId(idArchivage) });
+            if (service) {
+                serviceArchivage = service.nom;
+                idServiceArchivage = idArchivage;
+            }
+        } else if (idArchivage) {
+            // Niveau 0 : chercher dans les départements
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(idArchivage) });
+            if (dept) {
+                deptArchivage = dept.nom;
+                idDeptArchivage = idArchivage;
+            }
+        }
 
         // Générer l'ID unique du document
         const idDocument = await generateDocumentId();
@@ -1545,9 +1997,12 @@ app.post('/api/documents', security.uploadLimiter, [
             contenu,
             idDepartement: user.idDepartement,
             createdAt: new Date(),
-            // ✅ Département d'archivage
-            departementArchivage: deptArchivage ? deptArchivage.nom : null,
+            // ✅ Département d'archivage (niveau 0)
+            departementArchivage: deptArchivage,
             idDepartementArchivage: idDeptArchivage,
+            // ✅ Service d'archivage (niveaux 1/2/3)
+            serviceArchivage: serviceArchivage,
+            idService: idServiceArchivage ? new ObjectId(idServiceArchivage) : null,
             // ✅ Informations de l'archiveur
             archivePar: {
                 utilisateur: userId,
@@ -1876,12 +2331,8 @@ app.post('/api/documents/:userId/:docId/share', async (req, res) => {
 
         const documentOwner = await usersCollection.findOne({ username: document.idUtilisateur });
 
-        // Vérifier le rôle de l'utilisateur pour voir si c'est un niveau 1
-        const userRole = await rolesCollection.findOne({ _id: user.idRole });
-        const isNiveau1 = userRole && userRole.niveau === 1;
-
-        // Admin niveau 1 a accès à tout
-        const sameDepartment = isNiveau1 || (
+        // Vérifier que l'utilisateur est du même département que le document
+        const sameDepartment = (
             documentOwner &&
             user.idDepartement &&
             documentOwner.idDepartement &&
@@ -2160,27 +2611,96 @@ app.post('/api/documents/:userId/:docId/toggle-lock', async (req, res) => {
     }
 });
 
-// Récupérer tous les utilisateurs
+// Récupérer tous les utilisateurs (avec filtrage pour Niveau 1)
 app.get('/api/users', async (req, res) => {
     try {
-        const allUsers = await usersCollection.find({}).toArray();
+        const { ObjectId } = require('mongodb');
+        let allUsers = [];
 
-        // Enrichir avec les informations du rôle et département
+        // Vérifier si l'utilisateur connecté est de niveau 1
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                // 🔒 SÉCURITÉ: Convertir idRole en ObjectId pour la comparaison
+                const roleId = typeof currentUser.idRole === 'string'
+                    ? new ObjectId(currentUser.idRole)
+                    : currentUser.idRole;
+
+                const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+                console.log(`🔍 VÉRIFICATION NIVEAU - User: ${req.session.userId}, Role trouvé: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
+
+                // ✅ Si niveau 1, filtrer pour ne montrer QUE les utilisateurs de son département ET services
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    if (currentUser.idDepartement) {
+                        // Convertir en ObjectId pour la comparaison
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        // 1. Récupérer tous les services du département du niveau 1
+                        const services = await servicesCollection.find({
+                            idDepartement: deptId
+                        }).toArray();
+                        const serviceIds = services.map(s => s._id);
+
+                        console.log(`📋 Services du département: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
+
+                        // 2. Récupérer les utilisateurs avec:
+                        //    - idDepartement = département du niveau 1 (utilisateurs directs du département)
+                        //    - OU idService dans la liste des services du département
+                        const query = {
+                            $or: [
+                                { idDepartement: deptId },  // Utilisateurs directement dans le département
+                                { idService: { $in: serviceIds } }  // Utilisateurs dans les services du département
+                            ]
+                        };
+
+                        allUsers = await usersCollection.find(query).toArray();
+
+                        console.log(`🔒 SÉCURITÉ - Niveau 1 (${req.session.userId}) - Filtrage par département + services`);
+                        console.log(`📊 Résultat: ${allUsers.length} utilisateur(s) trouvé(s)`);
+                    } else {
+                        // 🔴 SÉCURITÉ CRITIQUE: Niveau 1 sans département = AUCUN ACCÈS
+                        console.log(`🔴 SÉCURITÉ CRITIQUE - Niveau 1 (${req.session.userId}) SANS DÉPARTEMENT - Retour liste vide`);
+                        return res.json([]); // Retourner immédiatement une liste vide
+                    }
+                } else {
+                    // Niveau 0 ou autre: accès à tous les utilisateurs
+                    console.log(`✅ Utilisateur ${req.session.userId} - Niveau ${currentUserRole?.niveau || 'inconnu'} - Accès à tous les utilisateurs`);
+                    allUsers = await usersCollection.find({}).toArray();
+                }
+            } else {
+                // Utilisateur non trouvé
+                return res.json([]);
+            }
+        } else {
+            // Pas de session
+            return res.json([]);
+        }
+
+        console.log(`📊 RÉSULTAT /api/users - ${allUsers.length} utilisateur(s) retourné(s) pour ${req.session.userId}`);
+
+        // Enrichir avec les informations du rôle, département et service
         const usersWithInfo = await Promise.all(allUsers.map(async (user) => {
             const role = await rolesCollection.findOne({ _id: user.idRole });
             const dept = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
+            const service = user.idService ? await servicesCollection.findOne({ _id: user.idService }) : null;
             return {
                 username: user.username,
                 nom: user.nom,
                 email: user.email,
                 role: role ? role.libelle : 'Non défini',
                 niveau: role ? role.niveau : null,
-                departement: dept ? dept.nom : 'Aucun (Admin Principal)',
+                departement: dept ? dept.nom : (service ? 'Via service' : 'Aucun (Admin Principal)'),
+                service: service ? service.nom : null,
                 idRole: user.idRole,
-                idDepartement: user.idDepartement
+                idDepartement: user.idDepartement,
+                idService: user.idService
             };
         }));
 
+        console.log(`✅ Envoi de ${usersWithInfo.length} utilisateur(s) au client`);
         res.json(usersWithInfo);
     } catch (error) {
         console.error('Erreur récupération utilisateurs:', error);
@@ -2192,23 +2712,78 @@ app.get('/api/users', async (req, res) => {
 app.get('/api/users-for-sharing/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
+        const { ObjectId } = require('mongodb');
+        let allUsers = [];
 
-        // Récupérer tous les utilisateurs sauf l'utilisateur actuel
-        const allUsers = await usersCollection.find({
-            username: { $ne: userId }
-        }).toArray();
+        // Vérifier si l'utilisateur actuel est de niveau 1
+        const currentUser = await usersCollection.findOne({ username: userId });
+        if (currentUser) {
+            // 🔒 SÉCURITÉ: Convertir idRole en ObjectId pour la comparaison
+            const roleId = typeof currentUser.idRole === 'string'
+                ? new ObjectId(currentUser.idRole)
+                : currentUser.idRole;
 
-        // Enrichir avec les informations du rôle et département
+            const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+            console.log(`🔍 VÉRIFICATION PARTAGE - User: ${userId}, Role: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
+
+            // Si niveau 1, ne montrer que les utilisateurs de son département + services
+            if (currentUserRole && currentUserRole.niveau === 1) {
+                if (currentUser.idDepartement) {
+                    // Convertir en ObjectId pour la comparaison
+                    const deptId = typeof currentUser.idDepartement === 'string'
+                        ? new ObjectId(currentUser.idDepartement)
+                        : currentUser.idDepartement;
+
+                    // 1. Récupérer tous les services du département du niveau 1
+                    const services = await servicesCollection.find({
+                        idDepartement: deptId
+                    }).toArray();
+                    const serviceIds = services.map(s => s._id);
+
+                    console.log(`📋 Services du département pour partage: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
+
+                    // 2. Récupérer les utilisateurs (excluant l'utilisateur courant) avec:
+                    //    - idDepartement = département du niveau 1
+                    //    - OU idService dans la liste des services du département
+                    const query = {
+                        username: { $ne: userId },  // Exclure l'utilisateur courant
+                        $or: [
+                            { idDepartement: deptId },  // Utilisateurs directement dans le département
+                            { idService: { $in: serviceIds } }  // Utilisateurs dans les services du département
+                        ]
+                    };
+
+                    allUsers = await usersCollection.find(query).toArray();
+
+                    console.log(`🔒 SÉCURITÉ PARTAGE - Niveau 1 (${userId}) - Filtrage par département + services`);
+                    console.log(`📊 Résultat partage: ${allUsers.length} utilisateur(s) disponible(s)`);
+                } else {
+                    // 🔴 SÉCURITÉ CRITIQUE: Niveau 1 sans département = AUCUN PARTAGE POSSIBLE
+                    console.log(`🔴 SÉCURITÉ PARTAGE - Niveau 1 (${userId}) SANS DÉPARTEMENT - Retour liste vide`);
+                    return res.json({ success: true, users: [] });
+                }
+            } else {
+                // Niveau 0 ou autre: accès à tous les utilisateurs sauf soi-meme
+                allUsers = await usersCollection.find({ username: { $ne: userId } }).toArray();
+            }
+        } else {
+            return res.json({ success: true, users: [] });
+        }
+
+        // Enrichir avec les informations du rôle, département et service
         const usersWithInfo = await Promise.all(allUsers.map(async (user) => {
             const role = await rolesCollection.findOne({ _id: user.idRole });
             const dept = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
+            const service = user.idService ? await servicesCollection.findOne({ _id: user.idService }) : null;
             return {
                 username: user.username,
                 nom: user.nom,
                 email: user.email,
                 role: role ? role.libelle : 'Non défini',
                 niveau: role ? role.niveau : 0,
-                departement: dept ? dept.nom : 'Aucun'
+                departement: dept ? dept.nom : (service ? 'Via service' : 'Aucun'),
+                service: service ? service.nom : null
             };
         }));
 
@@ -2256,9 +2831,9 @@ app.delete('/api/documents/:userId/delete-all', async (req, res) => {
         let query;
 
         if (userRole.niveau === 1) {
-            // ✅ NIVEAU 1 : Supprimer TOUS les documents de TOUS les départements
-            query = {};  // Pas de filtre = tous les documents
-            console.log('📋 Suppression niveau 1 (ADMIN) - TOUS les documents du système');
+            // ✅ NIVEAU 1 : Supprimer TOUS les documents de SON département uniquement
+            query = { idDepartement: user.idDepartement };
+            console.log('📋 Suppression niveau 1 (ADMIN) - TOUS les documents de SON département');
         } else if (userRole.niveau === 2) {
             // ✅ NIVEAU 2 : Supprimer TOUS les documents de son département
             query = { idDepartement: user.idDepartement };
@@ -2946,9 +3521,45 @@ app.get('/api/deletion-requests/:userId/history', async (req, res) => {
 app.get('/api/categories/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const categories = await categoriesCollection
-            .find({ idUtilisateur: userId })
-            .toArray();
+
+        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+
+        // Déterminer l'idDepartement à utiliser
+        let departementId = user.idDepartement;
+
+        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
+        if (!departementId && user.idService) {
+            const service = await servicesCollection.findOne({ _id: user.idService });
+            if (service && service.idDepartement) {
+                departementId = service.idDepartement;
+                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
+            }
+        }
+
+        // Si l'utilisateur n'a pas de département, retourner uniquement ses catégories personnelles
+        let query = {};
+        if (departementId) {
+            // 🔄 Catégories du département (partagées) OU catégories personnelles (anciennes)
+            query = {
+                $or: [
+                    { idDepartement: departementId },
+                    { idUtilisateur: userId, idDepartement: { $exists: false } } // Support anciennes catégories
+                ]
+            };
+            console.log(`📂 Catégories - User ${userId} - Département: ${departementId}`);
+        } else {
+            // Utilisateur sans département : uniquement ses catégories personnelles
+            query = { idUtilisateur: userId };
+            console.log(`📂 Catégories - User ${userId} - Aucun département (catégories personnelles)`);
+        }
+
+        const categories = await categoriesCollection.find(query).toArray();
+        console.log(`📊 ${categories.length} catégorie(s) retournée(s) pour ${userId}`);
+
         res.json(categories);
     } catch (error) {
         console.error('Erreur récupération catégories:', error);
@@ -2967,21 +3578,64 @@ app.post('/api/categories', async (req, res) => {
             });
         }
 
-        const exists = await categoriesCollection.findOne({ idUtilisateur: userId, id });
-        if (exists) {
-            return res.status(400).json({
+        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({
                 success: false,
-                message: 'Catégorie existe déjà'
+                message: 'Utilisateur non trouvé'
             });
         }
 
-        await categoriesCollection.insertOne({
-            idUtilisateur: userId,
+        // Déterminer l'idDepartement à utiliser
+        let departementId = user.idDepartement;
+
+        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
+        if (!departementId && user.idService) {
+            const service = await servicesCollection.findOne({ _id: user.idService });
+            if (service && service.idDepartement) {
+                departementId = service.idDepartement;
+                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
+            }
+        }
+
+        // Vérifier que la catégorie n'existe pas déjà dans ce département
+        let existsQuery = { id };
+        if (departementId) {
+            existsQuery.idDepartement = departementId;
+        } else {
+            existsQuery.idUtilisateur = userId;
+        }
+
+        const exists = await categoriesCollection.findOne(existsQuery);
+        if (exists) {
+            return res.status(400).json({
+                success: false,
+                message: 'Catégorie existe déjà dans votre département'
+            });
+        }
+
+        // 🔄 Créer la catégorie liée au département
+        const newCategory = {
             id,
             nom,
             couleur,
-            icon
-        });
+            icon,
+            createdBy: userId,
+            createdAt: new Date()
+        };
+
+        // Si l'utilisateur a un département, lier la catégorie au département
+        if (departementId) {
+            newCategory.idDepartement = departementId;
+            console.log(`✅ Catégorie "${nom}" créée pour le département ${departementId} par ${userId}`);
+        } else {
+            // Fallback : catégorie personnelle
+            newCategory.idUtilisateur = userId;
+            console.log(`⚠️ Catégorie "${nom}" créée personnellement par ${userId} (pas de département)`);
+        }
+
+        await categoriesCollection.insertOne(newCategory);
 
         res.json({ success: true });
 
@@ -3004,18 +3658,56 @@ app.put('/api/categories/:userId/:catId', async (req, res) => {
             });
         }
 
+        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé'
+            });
+        }
+
+        // Déterminer l'idDepartement à utiliser
+        let departementId = user.idDepartement;
+
+        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
+        if (!departementId && user.idService) {
+            const service = await servicesCollection.findOne({ _id: user.idService });
+            if (service && service.idDepartement) {
+                departementId = service.idDepartement;
+                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
+            }
+        }
+
+        // Construire la requête : catégorie du département OU catégorie personnelle
+        let query = { id: catId };
+        if (departementId) {
+            query.idDepartement = departementId;
+        } else {
+            query.idUtilisateur = userId;
+        }
+
         const result = await categoriesCollection.updateOne(
-            { idUtilisateur: userId, id: catId },
-            { $set: { nom, couleur, icon } }
+            query,
+            {
+                $set: {
+                    nom,
+                    couleur,
+                    icon,
+                    lastModifiedBy: userId,
+                    lastModifiedAt: new Date()
+                }
+            }
         );
 
         if (result.matchedCount === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'Catégorie non trouvée'
+                message: 'Catégorie non trouvée dans votre département'
             });
         }
 
+        console.log(`✅ Catégorie "${catId}" modifiée par ${userId}`);
         res.json({ success: true });
 
     } catch (error) {
@@ -3028,25 +3720,74 @@ app.delete('/api/categories/:userId/:catId', async (req, res) => {
     try {
         const { userId, catId } = req.params;
 
-        // Réaffecter les documents de cette catégorie vers "autre"
-        await documentsCollection.updateMany(
-            { idUtilisateur: userId, categorie: catId },
-            { $set: { categorie: 'autre' } }
-        );
-
-        // Supprimer la catégorie
-        const result = await categoriesCollection.deleteOne({
-            idUtilisateur: userId,
-            id: catId
-        });
-
-        if (result.deletedCount === 0) {
+        // 🔄 NOUVEAU: Récupérer le département de l'utilisateur
+        const user = await usersCollection.findOne({ username: userId });
+        if (!user) {
             return res.status(404).json({
                 success: false,
-                message: 'Catégorie non trouvée'
+                message: 'Utilisateur non trouvé'
             });
         }
 
+        // Déterminer l'idDepartement à utiliser
+        let departementId = user.idDepartement;
+
+        // ✅ Si l'utilisateur a un service mais pas de département direct, récupérer le département du service
+        if (!departementId && user.idService) {
+            const service = await servicesCollection.findOne({ _id: user.idService });
+            if (service && service.idDepartement) {
+                departementId = service.idDepartement;
+                console.log(`🔍 User ${userId} - Département récupéré via service: ${departementId}`);
+            }
+        }
+
+        // Construire la requête : catégorie du département OU catégorie personnelle
+        let categoryQuery = { id: catId };
+        if (departementId) {
+            categoryQuery.idDepartement = departementId;
+        } else {
+            categoryQuery.idUtilisateur = userId;
+        }
+
+        // Vérifier que la catégorie existe avant de supprimer
+        const category = await categoriesCollection.findOne(categoryQuery);
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: 'Catégorie non trouvée dans votre département'
+            });
+        }
+
+        // 🔄 Réaffecter TOUS les documents de cette catégorie vers "autre"
+        // Pour les catégories de département : tous les documents du département avec cette catégorie
+        if (departementId) {
+            const updateResult = await documentsCollection.updateMany(
+                {
+                    idDepartement: departementId,
+                    categorie: catId
+                },
+                { $set: { categorie: 'autre' } }
+            );
+            console.log(`📝 ${updateResult.modifiedCount} document(s) réaffecté(s) vers "autre"`);
+        } else {
+            // Pour les catégories personnelles : seulement les documents de l'utilisateur
+            await documentsCollection.updateMany(
+                { idUtilisateur: userId, categorie: catId },
+                { $set: { categorie: 'autre' } }
+            );
+        }
+
+        // Supprimer la catégorie
+        const result = await categoriesCollection.deleteOne(categoryQuery);
+
+        if (result.deletedCount === 0) {
+            return res.status(500).json({
+                success: false,
+                message: 'Erreur lors de la suppression'
+            });
+        }
+
+        console.log(`✅ Catégorie "${catId}" supprimée par ${userId}`);
         res.json({ success: true });
 
     } catch (error) {
@@ -3128,7 +3869,36 @@ app.delete('/api/roles/:roleId', async (req, res) => {
 
 app.get('/api/departements', async (req, res) => {
     try {
-        const departements = await departementsCollection.find().toArray();
+        // ✅ NOUVEAU: Filtrage hiérarchique selon le niveau
+        let query = {};
+
+        // Vérifier si l'utilisateur connecté est de niveau 1 ou 0
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
+
+                // Si niveau 1, filtrer pour ne montrer que son département et ses sous-départements
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    // Montrer :
+                    // 1. Son département principal (celui auquel il est affecté)
+                    // 2. Les sous-départements qu'il a créés (parentDepartement = son département)
+                    query = {
+                        $or: [
+                            { _id: currentUser.idDepartement }, // Son département principal
+                            { parentDepartement: currentUser.idDepartement } // Ses sous-départements
+                        ]
+                    };
+                }
+                // ✅ FIX: Si niveau 0, montrer UNIQUEMENT les départements principaux (pas les services)
+                else if (currentUserRole && currentUserRole.niveau === 0) {
+                    // Ne montrer que les départements principaux (sans parent)
+                    query = { parentDepartement: null };
+                }
+            }
+        }
+
+        const departements = await departementsCollection.find(query).toArray();
         res.json({ success: true, departements });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -3148,8 +3918,39 @@ app.post('/api/departements', async (req, res) => {
             _id: new ObjectId(),
             nom,
             code,
-            dateCreation: new Date()
+            dateCreation: new Date(),
+            parentDepartement: null // Par défaut, c'est un département principal
         };
+
+        // ✅ NOUVEAU: Gestion de la hiérarchie selon le niveau
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            nouveauDepartement.createdBy = req.session.userId;
+
+            if (currentUser) {
+                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
+
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    // Niveau 1 : Crée un SOUS-DÉPARTEMENT dans son département d'affectation
+                    if (!currentUser.idDepartement) {
+                        return res.status(400).json({
+                            message: 'Vous devez être affecté à un département pour créer des sous-départements'
+                        });
+                    }
+                    nouveauDepartement.parentDepartement = currentUser.idDepartement;
+                } else if (currentUserRole && currentUserRole.niveau === 0) {
+                    // Niveau 0 : Crée un DÉPARTEMENT PRINCIPAL
+                    nouveauDepartement.parentDepartement = null;
+                } else {
+                    // Autres niveaux : Pas autorisés à créer des départements
+                    return res.status(403).json({
+                        message: 'Vous n\'avez pas les permissions pour créer des départements'
+                    });
+                }
+            }
+        } else {
+            nouveauDepartement.createdBy = null;
+        }
 
         await departementsCollection.insertOne(nouveauDepartement);
         res.json({ message: 'Département créé', departement: nouveauDepartement });
@@ -3167,6 +3968,36 @@ app.put('/api/departements/:id', async (req, res) => {
 
         if (!nom || !code) {
             return res.status(400).json({ message: 'Nom et code requis' });
+        }
+
+        // ✅ NOUVEAU: Vérifier les permissions selon la hiérarchie
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
+
+                // Si niveau 1, vérifier qu'il modifie un sous-département qu'il a créé OU son département principal
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    const departement = await departementsCollection.findOne({ _id: new ObjectId(id) });
+                    if (!departement) {
+                        return res.status(404).json({ message: 'Département non trouvé' });
+                    }
+
+                    // Peut modifier :
+                    // 1. Son département principal (renommer)
+                    // 2. Les sous-départements qu'il a créés
+                    const canModify =
+                        departement._id.toString() === currentUser.idDepartement?.toString() || // Son département principal
+                        (departement.parentDepartement?.toString() === currentUser.idDepartement?.toString() &&
+                         departement.createdBy === req.session.userId); // Ses sous-départements
+
+                    if (!canModify) {
+                        return res.status(403).json({
+                            message: 'Vous ne pouvez modifier que votre département ou les sous-départements que vous avez créés'
+                        });
+                    }
+                }
+            }
         }
 
         const result = await departementsCollection.updateOne(
@@ -3190,16 +4021,282 @@ app.delete('/api/departements/:id', async (req, res) => {
     try {
         const { id } = req.params;
 
+        // ✅ NOUVEAU: Vérifier les permissions selon la hiérarchie
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+            if (currentUser) {
+                const currentUserRole = await rolesCollection.findOne({ _id: currentUser.idRole });
+
+                // Si niveau 1, vérifier qu'il supprime un sous-département qu'il a créé
+                if (currentUserRole && currentUserRole.niveau === 1) {
+                    const departement = await departementsCollection.findOne({ _id: new ObjectId(id) });
+                    if (!departement) {
+                        return res.status(404).json({ message: 'Département non trouvé' });
+                    }
+
+                    // Un Niveau 1 ne peut PAS supprimer :
+                    // 1. Son département principal (créé par Niveau 0)
+                    if (departement._id.toString() === currentUser.idDepartement?.toString()) {
+                        return res.status(403).json({
+                            message: 'Vous ne pouvez pas supprimer votre département principal. Seul le Super Admin peut le faire.'
+                        });
+                    }
+
+                    // 2. Les départements principaux (parentDepartement = null)
+                    if (!departement.parentDepartement) {
+                        return res.status(403).json({
+                            message: 'Seul le Super Admin peut supprimer les départements principaux'
+                        });
+                    }
+
+                    // Peut supprimer uniquement les sous-départements qu'il a créés dans son département
+                    if (departement.createdBy !== req.session.userId ||
+                        departement.parentDepartement?.toString() !== currentUser.idDepartement?.toString()) {
+                        return res.status(403).json({
+                            message: 'Vous ne pouvez supprimer que les sous-départements/services que vous avez créés dans votre département'
+                        });
+                    }
+                }
+            }
+        }
+
         const result = await departementsCollection.deleteOne({ _id: new ObjectId(id) });
 
         if (result.deletedCount === 0) {
             return res.status(404).json({ message: 'Département non trouvé' });
         }
 
-        res.json({ message: 'Département supprimé' });
+        res.json({ message: 'Sous-département supprimé' });
     } catch (error) {
         console.error('Erreur suppression département:', error);
         res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTES SERVICES (SÉPARÉ DE DÉPARTEMENTS)
+// ============================================
+
+// Récupérer les services accessibles
+app.get('/api/services', async (req, res) => {
+    try {
+        let services = [];
+
+        // Si l'utilisateur est authentifié, filtrer selon son niveau
+        if (req.session && req.session.userId) {
+            const user = await usersCollection.findOne({ username: req.session.userId });
+            if (user) {
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (userRole) {
+                    const servicesModule = require('./modules/services');
+                    services = await servicesModule.getServices(
+                        req.session.userId,
+                        userRole.niveau,
+                        user.idDepartement
+                    );
+                }
+            }
+        }
+        // Si pas authentifié, retourner une liste vide (cohérent avec /departements)
+
+        res.json({ success: true, services });
+    } catch (error) {
+        console.error('Erreur récupération services:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ===== ENDPOINTS DE TEST PROGRESSIFS =====
+
+// TEST 1 : Cookie reçu ?
+app.get('/api/test/1-cookie', (req, res) => {
+    const result = {
+        test: 'TEST 1 - Réception du cookie',
+        cookieHeader: req.headers.cookie || 'AUCUN COOKIE',
+        success: !!req.headers.cookie
+    };
+    console.log('✅ TEST 1:', result);
+    res.json(result);
+});
+
+// TEST 2 : Session existe ?
+app.get('/api/test/2-session', (req, res) => {
+    const result = {
+        test: 'TEST 2 - Existence de req.session',
+        hasSession: !!req.session,
+        sessionType: typeof req.session,
+        sessionID: req.sessionID || 'AUCUN',
+        success: !!req.session
+    };
+    console.log('✅ TEST 2:', result);
+    res.json(result);
+});
+
+// TEST 3 : Session a userId ?
+app.get('/api/test/3-userid', (req, res) => {
+    const result = {
+        test: 'TEST 3 - UserId dans session',
+        hasSession: !!req.session,
+        hasUserId: !!req.session?.userId,
+        userId: req.session?.userId || 'AUCUN',
+        success: !!(req.session && req.session.userId)
+    };
+    console.log('✅ TEST 3:', result);
+    res.json(result);
+});
+
+// TEST 4 : POST simple fonctionne ?
+app.post('/api/test/4-post', (req, res) => {
+    const result = {
+        test: 'TEST 4 - POST avec session',
+        cookieHeader: req.headers.cookie || 'AUCUN',
+        hasSession: !!req.session,
+        hasUserId: !!req.session?.userId,
+        userId: req.session?.userId || 'AUCUN',
+        body: req.body,
+        success: !!(req.session && req.session.userId)
+    };
+    console.log('✅ TEST 4:', result);
+    res.json(result);
+});
+
+// Créer un service
+app.post('/api/services', async (req, res) => {
+    try {
+        console.log('🔍 POST /api/services - Session:', req.session ? 'existe' : 'null', 'UserId:', req.session?.userId);
+
+        if (!req.session || !req.session.userId) {
+            console.log('❌ POST /api/services - Session invalide');
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const user = await usersCollection.findOne({ username: req.session.userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole) {
+            return res.status(404).json({ success: false, message: 'Rôle non trouvé' });
+        }
+
+        // Seuls niveau 0 et niveau 1 peuvent créer des services
+        if (userRole.niveau > 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Vous n\'avez pas les permissions pour créer des services'
+            });
+        }
+
+        const { nom, code, description, idDepartement } = req.body;
+
+        if (!nom || !code || !idDepartement) {
+            return res.status(400).json({
+                success: false,
+                message: 'Nom, code et département requis'
+            });
+        }
+
+        const servicesModule = require('./modules/services');
+        const newService = await servicesModule.createService(
+            { nom, code, description, idDepartement },
+            req.session.userId,
+            userRole.niveau,
+            user.idDepartement
+        );
+
+        res.json({ success: true, message: 'Service créé avec succès', service: newService });
+    } catch (error) {
+        console.error('Erreur création service:', error);
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+// Modifier un service
+app.put('/api/services/:id', async (req, res) => {
+    try {
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const user = await usersCollection.findOne({ username: req.session.userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole) {
+            return res.status(404).json({ success: false, message: 'Rôle non trouvé' });
+        }
+
+        if (userRole.niveau > 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Vous n\'avez pas les permissions pour modifier des services'
+            });
+        }
+
+        const { id } = req.params;
+        const { nom, code, description } = req.body;
+
+        if (!nom || !code) {
+            return res.status(400).json({ success: false, message: 'Nom et code requis' });
+        }
+
+        const servicesModule = require('./modules/services');
+        const updatedService = await servicesModule.updateService(
+            id,
+            { nom, code, description },
+            req.session.userId,
+            userRole.niveau,
+            user.idDepartement
+        );
+
+        res.json({ success: true, message: 'Service modifié avec succès', service: updatedService });
+    } catch (error) {
+        console.error('Erreur modification service:', error);
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+// Supprimer un service
+app.delete('/api/services/:id', async (req, res) => {
+    try {
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const user = await usersCollection.findOne({ username: req.session.userId });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        const userRole = await rolesCollection.findOne({ _id: user.idRole });
+        if (!userRole) {
+            return res.status(404).json({ success: false, message: 'Rôle non trouvé' });
+        }
+
+        if (userRole.niveau > 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Vous n\'avez pas les permissions pour supprimer des services'
+            });
+        }
+
+        const { id } = req.params;
+
+        const servicesModule = require('./modules/services');
+        await servicesModule.deleteService(
+            id,
+            req.session.userId,
+            userRole.niveau,
+            user.idDepartement
+        );
+
+        res.json({ success: true, message: 'Service supprimé avec succès' });
+    } catch (error) {
+        console.error('Erreur suppression service:', error);
+        res.status(400).json({ success: false, message: error.message });
     }
 });
 
