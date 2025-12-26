@@ -973,14 +973,63 @@ async function connectDB(retryCount = 0) {
                 // Récupérer les logs
                 const logs = await securityLogger.getLogs(filters);
 
+                // Enrichir les logs avec les informations utilisateur et document
+                const enrichedLogs = await Promise.all(logs.map(async (log) => {
+                    const enrichedLog = { ...log };
+
+                    // Enrichir avec les informations utilisateur
+                    try {
+                        const logUser = await usersCollection.findOne({ username: log.username });
+                        if (logUser) {
+                            const logUserRole = await rolesCollection.findOne({ _id: logUser.idRole });
+                            const logUserDept = await departementsCollection.findOne({ _id: logUser.idDepartement });
+
+                            enrichedLog.userInfo = {
+                                nom: logUser.nom || 'N/A',
+                                prenom: logUser.prenom || 'N/A',
+                                email: logUser.email || null,
+                                departement: logUserDept ? logUserDept.nom : 'N/A',
+                                niveau: logUserRole ? logUserRole.niveau : 'N/A',
+                                role: logUserRole ? logUserRole.nom : 'N/A'
+                            };
+                        }
+                    } catch (err) {
+                        console.error('Erreur enrichissement user:', err);
+                    }
+
+                    // Enrichir avec les informations document si présent dans les détails
+                    try {
+                        if (log.details && log.details.documentId) {
+                            const documentsCollection = db.collection('documents');
+                            const document = await documentsCollection.findOne({
+                                _id: log.details.documentId
+                            });
+
+                            if (document) {
+                                const docOwner = await usersCollection.findOne({ username: document.userId });
+                                enrichedLog.documentInfo = {
+                                    titre: document.titre || 'N/A',
+                                    proprietaire: docOwner ? `${docOwner.prenom} ${docOwner.nom}` : document.userId,
+                                    statut: document.statut || 'N/A',
+                                    categorie: document.categorie || null
+                                };
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Erreur enrichissement document:', err);
+                    }
+
+                    return enrichedLog;
+                }));
+
                 // Récupérer les statistiques
                 const stats = await securityLogger.getStats(7);
 
                 res.json({
                     success: true,
-                    logs,
+                    logs: enrichedLogs,
                     stats,
-                    total: logs.length
+                    total: enrichedLogs.length
                 });
 
             } catch (error) {
@@ -989,6 +1038,109 @@ async function connectDB(retryCount = 0) {
                     success: false,
                     message: 'Erreur serveur'
                 });
+            }
+        });
+
+        /**
+         * Endpoint: Supprimer tous les logs de sécurité
+         * IMPORTANT: Doit être avant /api/security-logs/:id
+         */
+        app.delete('/api/security-logs/all', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    await securityLogger.log(
+                        EVENT_TYPES.UNAUTHORIZED_ACCESS,
+                        req.session.userId,
+                        { resource: '/api/security-logs/all', action: 'DELETE' },
+                        req
+                    );
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Supprimer tous les logs
+                const result = await securityLogger.collection.deleteMany({});
+
+                console.log(`🗑️ TOUS les logs supprimés par ${req.session.userId}: ${result.deletedCount} logs`);
+
+                // Logger cette action critique
+                await securityLogger.log(
+                    EVENT_TYPES.BULK_DELETION,
+                    req.session.userId,
+                    {
+                        resource: 'security_logs',
+                        deletedCount: result.deletedCount,
+                        message: 'Suppression totale des logs de sécurité'
+                    },
+                    req
+                );
+
+                res.json({
+                    success: true,
+                    message: 'Tous les logs ont été supprimés',
+                    deletedCount: result.deletedCount
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur suppression tous les logs:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Supprimer un log de sécurité individuel
+         */
+        app.delete('/api/security-logs/:id', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    await securityLogger.log(
+                        EVENT_TYPES.UNAUTHORIZED_ACCESS,
+                        req.session.userId,
+                        { resource: '/api/security-logs/:id', action: 'DELETE' },
+                        req
+                    );
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                const { id } = req.params;
+                const { ObjectId } = require('mongodb');
+
+                // Supprimer le log
+                const result = await securityLogger.collection.deleteOne({ _id: new ObjectId(id) });
+
+                if (result.deletedCount > 0) {
+                    console.log(`🗑️ Log supprimé par ${req.session.userId}: ${id}`);
+                    res.json({ success: true, message: 'Log supprimé avec succès' });
+                } else {
+                    res.status(404).json({ success: false, message: 'Log non trouvé' });
+                }
+
+            } catch (error) {
+                console.error('❌ Erreur suppression log:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
             }
         });
 
@@ -1046,6 +1198,146 @@ async function connectDB(retryCount = 0) {
                     message: 'Déconnexion réussie'
                 });
             });
+        });
+
+        // ============================================
+        // ROUTES SUPER ADMIN - MODULE DOCUMENTS
+        // ============================================
+
+        /**
+         * Endpoint: Liste des admins niveau 1 ayant verrouillé des documents
+         */
+        app.get('/api/superadmin/documents/level1-locks', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Récupérer tous les documents verrouillés
+                const documentsCollection = db.collection('documents');
+                const lockedDocs = await documentsCollection.find({
+                    statut: 'verrouillé',
+                    verrouilléPar: { $exists: true, $ne: null }
+                }).toArray();
+
+                // Grouper par admin niveau 1
+                const adminMap = new Map();
+
+                for (const doc of lockedDocs) {
+                    const adminUsername = doc.verrouilléPar;
+
+                    // Vérifier que c'est un admin niveau 1
+                    const admin = await usersCollection.findOne({ username: adminUsername });
+                    if (!admin) continue;
+
+                    const adminRole = await rolesCollection.findOne({ _id: admin.idRole });
+                    if (!adminRole || adminRole.niveau !== 1) continue;
+
+                    // Ajouter au compteur
+                    if (!adminMap.has(adminUsername)) {
+                        const dept = await departementsCollection.findOne({ _id: admin.idDepartement });
+                        adminMap.set(adminUsername, {
+                            username: adminUsername,
+                            nom: admin.nom,
+                            prenom: admin.prenom,
+                            departement: dept ? dept.nom : 'N/A',
+                            count: 0
+                        });
+                    }
+
+                    const adminData = adminMap.get(adminUsername);
+                    adminData.count++;
+                }
+
+                const result = Array.from(adminMap.values()).sort((a, b) => b.count - a.count);
+
+                res.json({ success: true, data: result });
+
+            } catch (error) {
+                console.error('❌ Erreur level1-locks:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Documents verrouillés (avec pagination et filtres)
+         */
+        app.get('/api/superadmin/documents/locked', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Récupérer paramètres
+                const { username, limit } = req.query;
+                const limitNum = parseInt(limit) || 100;
+
+                // Construire le filtre
+                const filter = {
+                    statut: 'verrouillé',
+                    verrouilléPar: { $exists: true, $ne: null }
+                };
+
+                if (username) {
+                    filter.verrouilléPar = username;
+                }
+
+                // Récupérer les documents
+                const documentsCollection = db.collection('documents');
+                const lockedDocs = await documentsCollection
+                    .find(filter)
+                    .sort({ dateVerrouillage: -1 })
+                    .limit(limitNum)
+                    .toArray();
+
+                // Enrichir avec les informations utilisateur
+                const enrichedDocs = await Promise.all(lockedDocs.map(async (doc) => {
+                    const owner = await usersCollection.findOne({ username: doc.userId });
+                    const ownerDept = owner ? await departementsCollection.findOne({ _id: owner.idDepartement }) : null;
+
+                    return {
+                        ...doc,
+                        proprietaire: owner ? `${owner.prenom} ${owner.nom}` : doc.userId,
+                        departementProprietaire: ownerDept ? ownerDept.nom : 'N/A'
+                    };
+                }));
+
+                res.json({
+                    success: true,
+                    data: {
+                        locked: enrichedDocs,
+                        total: enrichedDocs.length
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur documents locked:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
         });
 
         console.log('✅ Routes d\'authentification avec session configurées');

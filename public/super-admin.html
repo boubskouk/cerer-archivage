@@ -1494,15 +1494,29 @@
                         </div>
                         <div>
                             <label style="display: block; font-size: 13px; color: #7f8c8d; margin-bottom: 6px;">Période</label>
-                            <select id="audit-filter-period" style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
+                            <select id="audit-filter-period" onchange="toggleCustomAuditDates()" style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
                                 <option value="24h">24 dernières heures</option>
                                 <option value="7d" selected>7 derniers jours</option>
                                 <option value="30d">30 derniers jours</option>
                                 <option value="all">Toute période</option>
+                                <option value="custom">📅 Période personnalisée</option>
                             </select>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 10px;">
+
+                    <!-- Dates personnalisées (masquées par défaut) -->
+                    <div id="audit-custom-dates" style="display: none; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #e1e8ed;">
+                        <div>
+                            <label style="display: block; font-size: 13px; color: #000000; font-weight: 600; margin-bottom: 6px;">📅 Date de début</label>
+                            <input type="date" id="audit-custom-start" style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 13px; color: #000000; font-weight: 600; margin-bottom: 6px;">📅 Date de fin</label>
+                            <input type="date" id="audit-custom-end" style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; margin-top: 16px;">
                         <button onclick="applyAuditFilters()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;">
                             Appliquer
                         </button>
@@ -1511,6 +1525,9 @@
                         </button>
                         <button onclick="loadAuditLogs()" style="padding: 8px 16px; background: #ecf0f1; color: #2c3e50; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;">
                             🔄 Actualiser
+                        </button>
+                        <button onclick="deleteAllAuditLogs()" style="padding: 8px 16px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-left: auto;">
+                            🗑️ Supprimer tous les logs
                         </button>
                     </div>
                 </div>

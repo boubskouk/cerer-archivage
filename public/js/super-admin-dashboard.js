@@ -53,8 +53,11 @@ const state = {
     deletedPagination: { page: 1, totalPages: 1, total: 0 },
     expandedAdmin: null, // Admin dont on affiche les documents supprimés
     adminDeletedDocs: [], // Documents supprimés par l'admin sélectionné
+    level1Locks: [], // Admins niveau 1 ayant verrouillé des documents
     lockedDocuments: [],
     lockedPagination: { page: 1, totalPages: 1, total: 0 },
+    expandedAdminLocked: null, // Admin dont on affiche les documents verrouillés
+    adminLockedDocs: [], // Documents verrouillés par l'admin sélectionné
     allDocuments: [],
     allDocsPagination: { page: 1, totalPages: 1, total: 0 },
     allDocsSearch: '',
@@ -1807,6 +1810,7 @@ async function loadDocumentsModule() {
             sharedRes,
             downloadedRes,
             level1Res,
+            level1LocksRes,
             deletedRes,
             lockedRes
         ] = await Promise.all([
@@ -1815,6 +1819,7 @@ async function loadDocumentsModule() {
             fetch(`/api/superadmin/documents/most-shared?${params}`, { credentials: 'include' }),
             fetch(`/api/superadmin/documents/most-downloaded?${params}`, { credentials: 'include' }),
             fetch(`/api/superadmin/documents/level1-deletions?${params}`, { credentials: 'include' }),
+            fetch(`/api/superadmin/documents/level1-locks?${params}`, { credentials: 'include' }),
             fetch(`/api/superadmin/documents/deleted?${params}&page=${state.deletedPagination.page}`, { credentials: 'include' }),
             fetch(`/api/superadmin/documents/locked?${params}&page=${state.lockedPagination.page}`, { credentials: 'include' })
         ]);
@@ -1825,6 +1830,7 @@ async function loadDocumentsModule() {
         const sharedData = await sharedRes.json();
         const downloadedData = await downloadedRes.json();
         const level1Data = await level1Res.json();
+        const level1LocksData = await level1LocksRes.json();
         const deletedData = await deletedRes.json();
         const lockedData = await lockedRes.json();
 
@@ -1834,6 +1840,7 @@ async function loadDocumentsModule() {
         if (sharedData.success) state.mostShared = sharedData.data;
         if (downloadedData.success) state.mostDownloaded = downloadedData.data;
         if (level1Data.success) state.level1Deletions = level1Data.data;
+        if (level1LocksData.success) state.level1Locks = level1LocksData.data;
         if (deletedData.success) {
             state.deletedDocuments = deletedData.data.deletions;
             state.deletedPagination = deletedData.data.pagination;
@@ -2521,6 +2528,67 @@ async function loadAdminDeletedDocuments(username) {
 }
 
 /**
+ * Toggle l'affichage des documents verrouillés d'un admin niveau 1
+ */
+async function toggleAdminLocks(username) {
+    // Si on clique sur l'admin déjà ouvert, on le ferme
+    if (state.expandedAdminLocked === username) {
+        state.expandedAdminLocked = null;
+        state.adminLockedDocs = [];
+        renderDocumentsModule();
+        return;
+    }
+
+    // Sinon, on ouvre le nouvel admin
+    state.expandedAdminLocked = username;
+    state.adminLockedDocs = []; // Reset pendant le chargement
+    renderDocumentsModule();
+
+    // Charger les documents verrouillés par cet admin
+    await loadAdminLockedDocuments(username);
+}
+
+/**
+ * Charge les documents verrouillés par un admin spécifique
+ */
+async function loadAdminLockedDocuments(username) {
+    try {
+        const { documentsPeriod, documentsCustomStartDate, documentsCustomEndDate } = state;
+
+        const params = new URLSearchParams({
+            period: documentsPeriod,
+            username: username,
+            limit: 100 // Limite pour ne pas surcharger
+        });
+
+        if (documentsPeriod === 'custom' && documentsCustomStartDate && documentsCustomEndDate) {
+            params.append('startDate', documentsCustomStartDate);
+            params.append('endDate', documentsCustomEndDate);
+        }
+
+        const response = await fetch(`/api/superadmin/documents/locked?${params}`, {
+            credentials: 'include'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Filtrer pour ne garder que les documents de cet admin
+            state.adminLockedDocs = result.data.locked.filter(doc => doc.verrouilléPar === username);
+            renderDocumentsModule();
+        } else {
+            console.error('Erreur chargement documents verrouillés:', result.message);
+            state.adminLockedDocs = [];
+            renderDocumentsModule();
+        }
+    } catch (error) {
+        console.error('❌ Erreur loadAdminLockedDocuments:', error);
+        state.adminLockedDocs = [];
+        renderDocumentsModule();
+    }
+}
+
+/**
  * Render des documents supprimés
  */
 function renderDeletedDocuments() {
@@ -2743,27 +2811,90 @@ function renderRestoreConfirmModal() {
  * Render des documents verrouillés
  */
 function renderLockedDocuments() {
-    const filteredDocs = filterDocuments(state.lockedDocuments || [], state.searchFilters.locked);
-
     return `
-        <!-- Barre de recherche -->
-        <div style="margin-bottom: 16px;">
-            <input type="text"
-                   placeholder="🔍 Rechercher un document verrouillé (titre, ID, catégorie)..."
-                   value="${state.searchFilters.locked}"
-                   oninput="updateSearchFilter('locked', this.value)"
-                   style="width: 100%; padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px;">
-        </div>
+        ${renderLevel1Locks()}
+        ${state.expandedAdminLocked ? renderAdminLockedDocuments() : ''}
+    `;
+}
 
-        ${filteredDocs.length === 0 ? `
-            <div style="margin-top: 16px;">
+/**
+ * Render des admins ayant verrouillé des documents (VERSION ACCORDÉON)
+ */
+function renderLevel1Locks() {
+    if (!state.level1Locks || state.level1Locks.length === 0) {
+        return `
+            <div style="margin-top: 16px; margin-bottom: 32px;">
+                <h3 style="font-size: 14px; font-weight: 600; color: #1a202c; margin-bottom: 12px;">
+                    👨‍💼 Admins (Niveau 1) ayant Verrouillé
+                </h3>
                 <div class="empty-state">
-                    <div class="empty-state-icon">${state.searchFilters.locked ? '🔍' : '🔓'}</div>
-                    <div class="empty-state-text">${state.searchFilters.locked ? 'Aucun résultat trouvé' : 'Aucun document verrouillé'}</div>
+                    <div class="empty-state-icon">🔓</div>
+                    <div class="empty-state-text">Aucun admin n'a verrouillé de documents</div>
                 </div>
             </div>
-        ` : `
-        <div style="margin-top: 16px;">
+        `;
+    }
+
+    return `
+        <div style="margin-top: 16px; margin-bottom: 32px;">
+            <h3 style="font-size: 14px; font-weight: 600; color: #1a202c; margin-bottom: 12px;">
+                👨‍💼 Admins (Niveau 1) ayant Verrouillé
+            </h3>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                ${state.level1Locks.map(admin => {
+                    const isExpanded = state.expandedAdminLocked === admin.username;
+                    return `
+                        <div style="border: 2px solid ${isExpanded ? '#f39c12' : '#e2e8f0'}; border-radius: 8px; overflow: hidden; transition: all 0.2s;">
+                            <!-- En-tête cliquable de l'admin -->
+                            <div onclick="toggleAdminLocks('${admin.username}')"
+                                 style="padding: 12px 16px; background: ${isExpanded ? 'linear-gradient(135deg, #f39c12 0%, #e67e22 100%)' : '#f7fafc'}; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: all 0.2s;">
+                                <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                                    <div style="font-size: 24px;">${isExpanded ? '🔓' : '🔒'}</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 700; font-size: 14px; color: ${isExpanded ? 'white' : '#1a202c'};">
+                                            ${admin.nom}
+                                        </div>
+                                        <div style="font-size: 11px; color: ${isExpanded ? 'rgba(255,255,255,0.9)' : '#718096'};">
+                                            @${admin.username} • ${admin.email}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div style="font-size: 20px; font-weight: 700; color: ${isExpanded ? 'white' : '#f39c12'};">
+                                        ${admin.count}
+                                    </div>
+                                    <div style="font-size: 10px; color: ${isExpanded ? 'rgba(255,255,255,0.9)' : '#718096'};">
+                                        document${admin.count > 1 ? 's' : ''}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Zone de chargement si étendu -->
+                            ${isExpanded ? `
+                                <div style="padding: 16px; background: white;">
+                                    <div class="loading" style="text-align: center; padding: 20px; color: #718096;">
+                                        ⏳ Chargement des documents...
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Render des documents verrouillés par l'admin sélectionné
+ */
+function renderAdminLockedDocuments() {
+    if (!state.adminLockedDocs || state.adminLockedDocs.length === 0) {
+        return '';
+    }
+
+    return `
+        <div style="margin-top: 16px; margin-bottom: 32px;">
             <table class="documents-table">
                 <thead>
                     <tr>
@@ -2771,27 +2902,40 @@ function renderLockedDocuments() {
                         <th>Titre</th>
                         <th>Catégorie</th>
                         <th>Département</th>
-                        <th>Verrouillé Par</th>
                         <th>Date Verrouillage</th>
+                        <th>Durée</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${filteredDocs.map(doc => `
+                    ${state.adminLockedDocs.map(doc => {
+                        const lockDate = new Date(doc.dateVerrouillage);
+                        const now = new Date();
+                        const diffDays = Math.floor((now - lockDate) / (1000 * 60 * 60 * 24));
+                        const diffHours = Math.floor((now - lockDate) / (1000 * 60 * 60));
+                        const duree = diffDays > 0 ? `${diffDays}j` : `${diffHours}h`;
+
+                        return `
                         <tr>
                             <td><code>${doc.idDocument}</code></td>
                             <td><strong>${doc.titre}</strong></td>
-                            <td>${doc.categorie}</td>
-                            <td>${doc.departement || '-'}</td>
                             <td>
-                                ${doc.verrouilleurNom || doc.verrouilléPar}<br>
-                                <small style="color: #718096;">@${doc.verrouilléPar}</small>
+                                <span style="background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">
+                                    ${doc.categorie}
+                                </span>
                             </td>
+                            <td>${doc.departement || '-'}</td>
                             <td>${formatServerDate(doc.dateVerrouillage)}</td>
+                            <td>
+                                <span style="background: ${diffDays >= 180 ? '#fee2e2' : '#fef3c7'}; color: ${diffDays >= 180 ? '#dc2626' : '#d97706'}; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">
+                                    🔒 ${duree}
+                                </span>
+                            </td>
                         </tr>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </tbody>
             </table>
-            `}
+        </div>
     `;
 }
 
@@ -3591,7 +3735,7 @@ function displayAuditLogs(logs) {
 
     countEl.textContent = `${logs.length} événement${logs.length > 1 ? 's' : ''}`;
 
-    container.innerHTML = logs.map(log => {
+    container.innerHTML = logs.map((log, index) => {
         const date = new Date(log.timestamp);
         const timeAgo = getTimeAgo(date);
         const formattedDate = date.toLocaleString('fr-FR');
@@ -3601,12 +3745,74 @@ function displayAuditLogs(logs) {
                            log.severity === 'WARNING' ? '#f39c12' : '#27ae60';
         const borderColor = bubbleColor;
 
+        // Enrichir les détails avec les informations utilisateur et document
+        let enrichedDetails = '';
+
+        // Informations utilisateur enrichies
+        if (log.userInfo) {
+            enrichedDetails += `
+                <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 10px;">
+                    <div style="font-weight: 700; color: #000000; margin-bottom: 8px; font-size: 13px;">👤 Informations Utilisateur</div>
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px; font-size: 12px;">
+                        <strong style="color: #000000;">Nom complet:</strong> <span>${escapeHtml(log.userInfo.nom)} ${escapeHtml(log.userInfo.prenom)}</span>
+                        <strong style="color: #000000;">Département:</strong> <span>${escapeHtml(log.userInfo.departement || 'N/A')}</span>
+                        <strong style="color: #000000;">Niveau:</strong> <span>Niveau ${log.userInfo.niveau} - ${log.userInfo.role || 'N/A'}</span>
+                        ${log.userInfo.email ? `<strong style="color: #000000;">Email:</strong> <span>${escapeHtml(log.userInfo.email)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Informations document si présent
+        if (log.documentInfo) {
+            enrichedDetails += `
+                <div style="background: #fff3cd; padding: 12px; border-radius: 6px; margin-bottom: 10px;">
+                    <div style="font-weight: 700; color: #000000; margin-bottom: 8px; font-size: 13px;">📄 Document Concerné</div>
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px; font-size: 12px;">
+                        <strong style="color: #000000;">Titre:</strong> <span>${escapeHtml(log.documentInfo.titre || 'N/A')}</span>
+                        <strong style="color: #000000;">Propriétaire:</strong> <span>${escapeHtml(log.documentInfo.proprietaire || 'N/A')}</span>
+                        <strong style="color: #000000;">Statut:</strong> <span>${escapeHtml(log.documentInfo.statut || 'N/A')}</span>
+                        ${log.documentInfo.categorie ? `<strong style="color: #000000;">Catégorie:</strong> <span>${escapeHtml(log.documentInfo.categorie)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Explication détaillée du pourquoi
+        if (log.explanation) {
+            enrichedDetails += `
+                <div style="background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%); padding: 14px; border-radius: 6px; border-left: 4px solid #667eea; margin-bottom: 10px;">
+                    <div style="font-weight: 700; color: #000000; margin-bottom: 8px; font-size: 13px;">💡 Pourquoi ce log ?</div>
+                    <div style="font-size: 12px; color: #000000; line-height: 1.6;">
+                        ${escapeHtml(log.explanation)}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Détails techniques
+        enrichedDetails += `
+            <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #e1e8ed;">
+                <div style="font-weight: 700; color: #000000; margin-bottom: 8px; font-size: 13px;">🔧 Détails Techniques</div>
+                <div style="font-size: 12px; color: #000000;">
+                    <strong>Type d'événement:</strong> ${log.eventType}<br>
+                    <strong>Adresse IP:</strong> ${escapeHtml(log.ip)}<br>
+                    <strong>Navigateur:</strong> ${escapeHtml(log.userAgent)}<br>
+                    ${log.details && log.details.url ? `<strong>URL:</strong> ${escapeHtml(log.details.url)}<br>` : ''}
+                    ${log.details && log.details.method ? `<strong>Méthode:</strong> ${log.details.method}<br>` : ''}
+                    ${log.details && Object.keys(log.details).length > 0 ?
+                        `<br><strong>Données additionnelles:</strong><br><pre style="margin: 4px 0; white-space: pre-wrap; font-family: 'Courier New', monospace; background: #f8f9fa; padding: 8px; border-radius: 4px;">${JSON.stringify(log.details, null, 2)}</pre>`
+                        : ''}
+                </div>
+            </div>
+        `;
+
         return `
-            <div style="display: flex; gap: 12px; padding: 16px; border-radius: 8px; margin-bottom: 12px; background: #fafbfc; border-left: 4px solid ${borderColor}; transition: all 0.2s; cursor: pointer;" onclick="toggleAuditLogDetails(this)">
+            <div style="display: flex; gap: 12px; padding: 16px; border-radius: 8px; margin-bottom: 12px; background: #fafbfc; border-left: 4px solid ${borderColor}; transition: all 0.2s;">
                 <div style="width: 12px; height: 12px; border-radius: 50%; background: ${bubbleColor}; flex-shrink: 0; margin-top: 4px;"></div>
                 <div style="flex: 1;">
                     <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                        <div>
+                        <div style="flex: 1;">
                             <div style="font-size: 15px; font-weight: 600; color: #2c3e50; margin-bottom: 4px;">${escapeHtml(log.message)}</div>
                             <div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #7f8c8d;">
                                 <span style="display: flex; align-items: center; gap: 4px;"><strong>👤</strong> ${escapeHtml(log.username)}</span>
@@ -3615,15 +3821,21 @@ function displayAuditLogs(logs) {
                                 <span style="display: inline-block; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; background: ${log.severity === 'CRITICAL' ? '#fadbd8' : log.severity === 'WARNING' ? '#fef5e7' : '#d5f4e6'}; color: ${bubbleColor};">${log.severity === 'CRITICAL' ? 'CRITIQUE' : log.severity === 'WARNING' ? 'AVERTISSEMENT' : 'INFO'}</span>
                             </div>
                         </div>
-                        <div style="font-size: 12px; color: #95a5a6; white-space: nowrap;">${timeAgo}</div>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+                            <div style="font-size: 12px; color: #95a5a6; white-space: nowrap;">${timeAgo}</div>
+                            <div style="display: flex; gap: 6px;">
+                                <button onclick="toggleAuditLogDetails(event, this)" style="padding: 6px 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.2)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+                                    👁️ Voir détail
+                                </button>
+                                <button onclick="deleteAuditLog(event, '${log._id}')" style="padding: 6px 12px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.2)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+                                    🗑️ Supprimer
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <div class="audit-log-details" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
-                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #e1e8ed; font-size: 12px; color: #7f8c8d; font-family: 'Courier New', monospace; margin-top: 8px;">
-                            <strong>Type :</strong> ${log.eventType}<br>
-                            <strong>Navigateur :</strong> ${escapeHtml(log.userAgent)}<br>
-                            ${log.details && Object.keys(log.details).length > 0 ?
-                                `<strong>Détails :</strong><br><pre style="margin: 4px 0; white-space: pre-wrap;">${JSON.stringify(log.details, null, 2)}</pre>`
-                                : ''}
+                        <div style="margin-top: 12px;">
+                            ${enrichedDetails}
                         </div>
                     </div>
                 </div>
@@ -3635,12 +3847,43 @@ function displayAuditLogs(logs) {
 /**
  * Basculer l'affichage des détails d'un log
  */
-function toggleAuditLogDetails(element) {
-    const details = element.querySelector('.audit-log-details');
+function toggleAuditLogDetails(event, button) {
+    // Empêcher la propagation de l'événement
+    if (event) event.stopPropagation();
+
+    // Trouver le conteneur parent du log
+    const logContainer = button.closest('[style*="border-left"]');
+    const details = logContainer.querySelector('.audit-log-details');
+
     if (details.style.maxHeight === '0px' || !details.style.maxHeight) {
-        details.style.maxHeight = '500px';
+        details.style.maxHeight = '1000px';
+        button.innerHTML = '🔼 Masquer détail';
+        button.style.background = 'linear-gradient(135deg, #fc5c7d 0%, #6a82fb 100%)';
     } else {
         details.style.maxHeight = '0px';
+        button.innerHTML = '👁️ Voir détail';
+        button.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    }
+}
+
+/**
+ * Toggle affichage des dates personnalisées
+ */
+function toggleCustomAuditDates() {
+    const period = document.getElementById('audit-filter-period').value;
+    const customDatesDiv = document.getElementById('audit-custom-dates');
+
+    if (period === 'custom') {
+        customDatesDiv.style.display = 'grid';
+        // Définir les dates par défaut (7 derniers jours)
+        const today = new Date();
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+
+        document.getElementById('audit-custom-end').value = today.toISOString().split('T')[0];
+        document.getElementById('audit-custom-start').value = weekAgo.toISOString().split('T')[0];
+    } else {
+        customDatesDiv.style.display = 'none';
     }
 }
 
@@ -3666,12 +3909,109 @@ function applyAuditFilters() {
             if (period === '24h' && diffHours > 24) return false;
             if (period === '7d' && diffHours > 168) return false;
             if (period === '30d' && diffHours > 720) return false;
+
+            // Période personnalisée
+            if (period === 'custom') {
+                const startDate = document.getElementById('audit-custom-start').value;
+                const endDate = document.getElementById('audit-custom-end').value;
+
+                if (startDate && endDate) {
+                    const start = new Date(startDate);
+                    start.setHours(0, 0, 0, 0);
+                    const end = new Date(endDate);
+                    end.setHours(23, 59, 59, 999);
+
+                    if (logDate < start || logDate > end) return false;
+                }
+            }
         }
 
         return true;
     });
 
     displayAuditLogs(filtered);
+}
+
+/**
+ * Supprimer un log individuel
+ */
+async function deleteAuditLog(event, logId) {
+    // Empêcher la propagation
+    if (event) event.stopPropagation();
+
+    // Confirmation
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce log ?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/security-logs/${logId}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Retirer le log de la liste
+            allAuditLogs = allAuditLogs.filter(log => log._id !== logId);
+
+            // Réappliquer les filtres pour rafraîchir l'affichage
+            applyAuditFilters();
+
+            // Message de succès
+            console.log('✅ Log supprimé avec succès');
+        } else {
+            alert('Erreur lors de la suppression du log: ' + result.message);
+        }
+    } catch (error) {
+        console.error('❌ Erreur suppression log:', error);
+        alert('Erreur lors de la suppression du log');
+    }
+}
+
+/**
+ * Supprimer tous les logs
+ */
+async function deleteAllAuditLogs() {
+    // Confirmation avec avertissement
+    if (!confirm('⚠️ ATTENTION: Vous allez supprimer TOUS les logs de sécurité.\n\nCette action est irréversible!\n\nÊtes-vous absolument sûr de vouloir continuer ?')) {
+        return;
+    }
+
+    // Double confirmation pour être sûr
+    if (!confirm('Dernière confirmation: Voulez-vous vraiment supprimer TOUS les logs ?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/security-logs/all', {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Vider la liste locale
+            allAuditLogs = [];
+
+            // Rafraîchir l'affichage
+            displayAuditLogs([]);
+
+            // Rafraîchir les stats
+            document.getElementById('audit-stat-info').textContent = '0';
+            document.getElementById('audit-stat-warning').textContent = '0';
+            document.getElementById('audit-stat-critical').textContent = '0';
+
+            alert(`✅ ${result.deletedCount} log(s) supprimé(s) avec succès`);
+        } else {
+            alert('Erreur lors de la suppression des logs: ' + result.message);
+        }
+    } catch (error) {
+        console.error('❌ Erreur suppression tous les logs:', error);
+        alert('Erreur lors de la suppression des logs');
+    }
 }
 
 /**
