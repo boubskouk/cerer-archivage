@@ -85,20 +85,29 @@ app.use(cors({
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// ✅ SESSIONS: Configuration MemoryStore (AVANT les routes !)
+// ✅ SESSIONS: Configuration MongoStore (persistance MongoDB - AVANT les routes !)
 app.use(session({
     secret: process.env.SESSION_SECRET || 'changez_ce_secret_en_production',
     resave: false,
     saveUninitialized: false,
     rolling: true,
+    store: MongoStore.create({
+        mongoUrl: MONGO_URI,
+        dbName: DB_NAME,
+        collectionName: 'sessions',
+        touchAfter: 24 * 3600, // Limiter les mises à jour de session à 1x par 24h (optimisation)
+        crypto: {
+            secret: process.env.SESSION_CRYPTO_SECRET || 'changez_ce_secret_crypto_en_production'
+        }
+    }),
     cookie: {
-        secure: false,
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000
     },
     name: 'sessionId'
 }));
-console.log('✅ Sessions configurées (MemoryStore - DEV)');
+console.log('✅ Sessions configurées (MongoStore - PRODUCTION)');
 
 // ✅ MIDDLEWARE DE SÉCURITÉ: Vérifier isOnline et forcer la déconnexion si false
 app.use(async (req, res, next) => {
