@@ -520,6 +520,33 @@ async function logout(isAutoLogout = false) {
     state.documents = [];
     state.categories = [];
 
+    // 🔒 SÉCURITÉ: Nettoyer TOUTES les données utilisateur pour éviter fuite entre sessions
+    state.allUsersForManagement = [];
+    state.shareAvailableUsers = [];
+    state.shareSelectedUsers = [];
+    state.roles = [];
+    state.departements = [];
+    state.services = [];
+    state.allUsers = [];
+    state.messages = [];
+    state.unreadCount = 0;
+
+    // Nettoyer les états d'édition
+    state.editingUser = null;
+    state.editingRole = null;
+    state.editingDepartement = null;
+    state.editingCategory = null;
+
+    // Fermer tous les panneaux
+    state.showUsersManagement = false;
+    state.showRolesManagement = false;
+    state.showDepartementsManagement = false;
+    state.showCategories = false;
+    state.showAdvancedStats = false;
+    state.showMessages = false;
+    state.showMessagingSection = false;
+    state.showComposeMessage = false;
+
     if (isAutoLogout) {
         showNotification('⏰ Déconnexion automatique après 10 minutes d\'inactivité', 'warning');
     } else {
