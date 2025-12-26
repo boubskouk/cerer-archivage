@@ -91,7 +91,10 @@ async function getUnreadCount() {
 
 // Récupérer la liste des utilisateurs
 async function getUsersList() {
-    const response = await fetch('/api/users');
+    // ✅ CORRECTION CRITIQUE: Envoyer les cookies de session
+    const response = await fetch('/api/users', {
+        credentials: 'include'
+    });
     const data = await response.json();
     if (!data.success && !Array.isArray(data)) throw new Error('Erreur de récupération des utilisateurs');
     const users = Array.isArray(data) ? data : data.users;

@@ -2689,20 +2689,27 @@ app.get('/api/users', async (req, res) => {
                             : currentUser.idDepartement;
 
                         // 1. Récupérer tous les services du département du niveau 1
+                        // ✅ CORRECTION: Chercher avec ObjectId ET String pour compatibilité
                         const services = await servicesCollection.find({
-                            idDepartement: deptId
+                            $or: [
+                                { idDepartement: deptId },
+                                { idDepartement: deptId.toString() }
+                            ]
                         }).toArray();
                         const serviceIds = services.map(s => s._id);
+                        const serviceIdsStr = serviceIds.map(s => s.toString());
 
                         console.log(`📋 Services du département: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
 
                         // 2. Récupérer les utilisateurs avec:
-                        //    - idDepartement = département du niveau 1 (utilisateurs directs du département)
-                        //    - OU idService dans la liste des services du département
+                        //    - idDepartement = département du niveau 1 (ObjectId OU String)
+                        //    - OU idService dans la liste des services (ObjectId OU String)
                         const query = {
                             $or: [
-                                { idDepartement: deptId },  // Utilisateurs directement dans le département
-                                { idService: { $in: serviceIds } }  // Utilisateurs dans les services du département
+                                { idDepartement: deptId },  // ObjectId
+                                { idDepartement: deptId.toString() },  // String (compatibilité)
+                                { idService: { $in: serviceIds } },  // ObjectId
+                                { idService: { $in: serviceIdsStr } }  // String (compatibilité)
                             ]
                         };
 
@@ -2715,10 +2722,60 @@ app.get('/api/users', async (req, res) => {
                         console.log(`🔴 SÉCURITÉ CRITIQUE - Niveau 1 (${req.session.userId}) SANS DÉPARTEMENT - Retour liste vide`);
                         return res.json([]); // Retourner immédiatement une liste vide
                     }
-                } else {
-                    // Niveau 0 ou autre: accès à tous les utilisateurs
-                    console.log(`✅ Utilisateur ${req.session.userId} - Niveau ${currentUserRole?.niveau || 'inconnu'} - Accès à tous les utilisateurs`);
+                // 🔒 SÉCURITÉ CRITIQUE: Niveaux 2 et 3 doivent AUSSI être filtrés par département!
+                } else if (currentUserRole && (currentUserRole.niveau == 2 || currentUserRole.niveau == 3)) {
+                    if (currentUser.idDepartement) {
+                        // Utilisateur de niveau 2 ou 3 avec département
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        const services = await servicesCollection.find({
+                            $or: [
+                                { idDepartement: deptId },
+                                { idDepartement: deptId.toString() }
+                            ]
+                        }).toArray();
+                        const serviceIds = services.map(s => s._id);
+                        const serviceIdsStr = serviceIds.map(s => s.toString());
+
+                        const query = {
+                            $or: [
+                                { idDepartement: deptId },
+                                { idDepartement: deptId.toString() },
+                                { idService: { $in: serviceIds } },
+                                { idService: { $in: serviceIdsStr } }
+                            ]
+                        };
+
+                        allUsers = await usersCollection.find(query).toArray();
+                        console.log(`🔒 SÉCURITÉ - Niveau ${currentUserRole.niveau} (${req.session.userId}) - Filtrage par département`);
+                    } else if (currentUser.idService) {
+                        // Utilisateur dans un service: ne voir que les utilisateurs du même service
+                        const serviceId = typeof currentUser.idService === 'string'
+                            ? new ObjectId(currentUser.idService)
+                            : currentUser.idService;
+
+                        allUsers = await usersCollection.find({
+                            $or: [
+                                { idService: serviceId },
+                                { idService: serviceId.toString() }
+                            ]
+                        }).toArray();
+                        console.log(`🔒 SÉCURITÉ - Niveau ${currentUserRole.niveau} (${req.session.userId}) - Filtrage par service`);
+                    } else {
+                        // Niveau 2/3 sans département ni service = AUCUN ACCÈS
+                        console.log(`🔴 SÉCURITÉ CRITIQUE - Niveau ${currentUserRole.niveau} (${req.session.userId}) SANS DÉPARTEMENT - Retour liste vide`);
+                        return res.json([]);
+                    }
+                } else if (currentUserRole && currentUserRole.niveau == 0) {
+                    // SEULEMENT Niveau 0 (Super Admin): accès à tous les utilisateurs
+                    console.log(`✅ Super Admin ${req.session.userId} - Accès à tous les utilisateurs`);
                     allUsers = await usersCollection.find({}).toArray();
+                } else {
+                    // Niveau inconnu: pas d'accès
+                    console.log(`🔴 Niveau inconnu pour ${req.session.userId} - Retour liste vide`);
+                    return res.json([]);
                 }
             } else {
                 // Utilisateur non trouvé
@@ -2787,21 +2844,28 @@ app.get('/api/users-for-sharing/:userId', async (req, res) => {
                         : currentUser.idDepartement;
 
                     // 1. Récupérer tous les services du département du niveau 1
+                    // ✅ CORRECTION: Chercher avec ObjectId ET String pour compatibilité
                     const services = await servicesCollection.find({
-                        idDepartement: deptId
+                        $or: [
+                            { idDepartement: deptId },
+                            { idDepartement: deptId.toString() }
+                        ]
                     }).toArray();
                     const serviceIds = services.map(s => s._id);
+                    const serviceIdsStr = serviceIds.map(s => s.toString());
 
                     console.log(`📋 Services du département pour partage: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
 
                     // 2. Récupérer les utilisateurs (excluant l'utilisateur courant) avec:
-                    //    - idDepartement = département du niveau 1
-                    //    - OU idService dans la liste des services du département
+                    //    - idDepartement = département du niveau 1 (ObjectId OU String)
+                    //    - OU idService dans la liste des services (ObjectId OU String)
                     const query = {
                         username: { $ne: userId },  // Exclure l'utilisateur courant
                         $or: [
-                            { idDepartement: deptId },  // Utilisateurs directement dans le département
-                            { idService: { $in: serviceIds } }  // Utilisateurs dans les services du département
+                            { idDepartement: deptId },  // ObjectId
+                            { idDepartement: deptId.toString() },  // String
+                            { idService: { $in: serviceIds } },  // ObjectId
+                            { idService: { $in: serviceIdsStr } }  // String
                         ]
                     };
 
@@ -2814,9 +2878,59 @@ app.get('/api/users-for-sharing/:userId', async (req, res) => {
                     console.log(`🔴 SÉCURITÉ PARTAGE - Niveau 1 (${userId}) SANS DÉPARTEMENT - Retour liste vide`);
                     return res.json({ success: true, users: [] });
                 }
-            } else {
-                // Niveau 0 ou autre: accès à tous les utilisateurs sauf soi-meme
+            // 🔒 SÉCURITÉ CRITIQUE: Niveaux 2 et 3 doivent AUSSI être filtrés!
+            } else if (currentUserRole && (currentUserRole.niveau == 2 || currentUserRole.niveau == 3)) {
+                if (currentUser.idDepartement) {
+                    const deptId = typeof currentUser.idDepartement === 'string'
+                        ? new ObjectId(currentUser.idDepartement)
+                        : currentUser.idDepartement;
+
+                    const services = await servicesCollection.find({
+                        $or: [
+                            { idDepartement: deptId },
+                            { idDepartement: deptId.toString() }
+                        ]
+                    }).toArray();
+                    const serviceIds = services.map(s => s._id);
+                    const serviceIdsStr = serviceIds.map(s => s.toString());
+
+                    const query = {
+                        username: { $ne: userId },
+                        $or: [
+                            { idDepartement: deptId },
+                            { idDepartement: deptId.toString() },
+                            { idService: { $in: serviceIds } },
+                            { idService: { $in: serviceIdsStr } }
+                        ]
+                    };
+
+                    allUsers = await usersCollection.find(query).toArray();
+                    console.log(`🔒 SÉCURITÉ PARTAGE - Niveau ${currentUserRole.niveau} (${userId}) - Filtrage par département`);
+                } else if (currentUser.idService) {
+                    const serviceId = typeof currentUser.idService === 'string'
+                        ? new ObjectId(currentUser.idService)
+                        : currentUser.idService;
+
+                    allUsers = await usersCollection.find({
+                        username: { $ne: userId },
+                        $or: [
+                            { idService: serviceId },
+                            { idService: serviceId.toString() }
+                        ]
+                    }).toArray();
+                    console.log(`🔒 SÉCURITÉ PARTAGE - Niveau ${currentUserRole.niveau} (${userId}) - Filtrage par service`);
+                } else {
+                    console.log(`🔴 SÉCURITÉ PARTAGE - Niveau ${currentUserRole.niveau} (${userId}) SANS DÉPARTEMENT - Retour liste vide`);
+                    return res.json({ success: true, users: [] });
+                }
+            } else if (currentUserRole && currentUserRole.niveau == 0) {
+                // SEULEMENT Niveau 0: accès à tous les utilisateurs sauf soi-même
+                console.log(`✅ Super Admin ${userId} - Accès à tous pour partage`);
                 allUsers = await usersCollection.find({ username: { $ne: userId } }).toArray();
+            } else {
+                // Niveau inconnu: pas d'accès
+                console.log(`🔴 PARTAGE - Niveau inconnu pour ${userId} - Retour liste vide`);
+                return res.json({ success: true, users: [] });
             }
         } else {
             return res.json({ success: true, users: [] });
@@ -3755,10 +3869,56 @@ app.get('/api/roles', async (req, res) => {
     }
 });
 
-// Récupérer tous les départements
+// Récupérer tous les départements (avec filtrage pour Niveau 1)
 app.get('/api/departements', async (req, res) => {
     try {
-        const departements = await departementsCollection.find({}).sort({ nom: 1 }).toArray();
+        const { ObjectId } = require('mongodb');
+        let departements = [];
+
+        // Vérifier si l'utilisateur est connecté
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+
+            if (currentUser) {
+                // Récupérer le rôle de l'utilisateur
+                const roleId = typeof currentUser.idRole === 'string'
+                    ? new ObjectId(currentUser.idRole)
+                    : currentUser.idRole;
+
+                const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+                console.log(`🔍 /api/departements - User: ${req.session.userId}, Role: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
+
+                // 🔒 Si niveau 1, ne montrer QUE son département
+                if (currentUserRole && currentUserRole.niveau == 1) {
+                    if (currentUser.idDepartement) {
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        // Récupérer UNIQUEMENT le département du niveau 1
+                        const userDept = await departementsCollection.findOne({ _id: deptId });
+                        departements = userDept ? [userDept] : [];
+
+                        console.log(`🔒 NIVEAU 1 - Département filtré: ${userDept?.nom || 'Aucun'}`);
+                    } else {
+                        console.log(`🔴 NIVEAU 1 SANS DÉPARTEMENT - Retour liste vide`);
+                        return res.json({ success: true, departements: [] });
+                    }
+                } else {
+                    // Niveau 0 ou autre: accès à tous les départements
+                    console.log(`✅ Niveau ${currentUserRole?.niveau || 'inconnu'} - Accès à tous les départements`);
+                    departements = await departementsCollection.find({}).sort({ nom: 1 }).toArray();
+                }
+            } else {
+                return res.json({ success: true, departements: [] });
+            }
+        } else {
+            // Pas de session: retourner liste vide
+            return res.json({ success: true, departements: [] });
+        }
+
+        console.log(`📊 /api/departements - ${departements.length} département(s) retourné(s) pour ${req.session.userId}`);
         res.json({ success: true, departements });
     } catch (error) {
         console.error('Erreur récupération départements:', error);
@@ -3766,10 +3926,55 @@ app.get('/api/departements', async (req, res) => {
     }
 });
 
-// Récupérer tous les services
+// Récupérer tous les services (avec filtrage pour Niveau 1)
 app.get('/api/services', async (req, res) => {
     try {
-        const services = await servicesCollection.find({}).sort({ nom: 1 }).toArray();
+        const { ObjectId } = require('mongodb');
+        let services = [];
+
+        // Vérifier si l'utilisateur est connecté
+        if (req.session && req.session.userId) {
+            const currentUser = await usersCollection.findOne({ username: req.session.userId });
+
+            if (currentUser) {
+                // Récupérer le rôle de l'utilisateur
+                const roleId = typeof currentUser.idRole === 'string'
+                    ? new ObjectId(currentUser.idRole)
+                    : currentUser.idRole;
+
+                const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+                console.log(`🔍 /api/services - User: ${req.session.userId}, Role: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
+
+                // 🔒 Si niveau 1, ne montrer QUE les services de son département
+                if (currentUserRole && currentUserRole.niveau == 1) {
+                    if (currentUser.idDepartement) {
+                        const deptId = typeof currentUser.idDepartement === 'string'
+                            ? new ObjectId(currentUser.idDepartement)
+                            : currentUser.idDepartement;
+
+                        // Récupérer UNIQUEMENT les services du département du niveau 1
+                        services = await servicesCollection.find({ idDepartement: deptId }).sort({ nom: 1 }).toArray();
+
+                        console.log(`🔒 NIVEAU 1 - ${services.length} service(s) du département filtré(s)`);
+                    } else {
+                        console.log(`🔴 NIVEAU 1 SANS DÉPARTEMENT - Retour liste vide`);
+                        return res.json({ success: true, services: [] });
+                    }
+                } else {
+                    // Niveau 0 ou autre: accès à tous les services
+                    console.log(`✅ Niveau ${currentUserRole?.niveau || 'inconnu'} - Accès à tous les services`);
+                    services = await servicesCollection.find({}).sort({ nom: 1 }).toArray();
+                }
+            } else {
+                return res.json({ success: true, services: [] });
+            }
+        } else {
+            // Pas de session: retourner liste vide
+            return res.json({ success: true, services: [] });
+        }
+
+        console.log(`📊 /api/services - ${services.length} service(s) retourné(s) pour ${req.session.userId}`);
         res.json({ success: true, services });
     } catch (error) {
         console.error('Erreur récupération services:', error);
