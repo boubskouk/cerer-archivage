@@ -2671,6 +2671,7 @@ app.get('/api/users', async (req, res) => {
                 const currentUserRole = await rolesCollection.findOne({ _id: roleId });
 
                 console.log(`🔍 VÉRIFICATION NIVEAU - User: ${req.session.userId}, Role trouvé: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau} (type: ${typeof currentUserRole?.niveau})`);
+                console.log(`🔍 TEST COMPARAISON - currentUserRole exists: ${!!currentUserRole}, niveau value: ${currentUserRole?.niveau}, niveau == 1: ${currentUserRole?.niveau == 1}, niveau === 1: ${currentUserRole?.niveau === 1}`);
 
                 // ✅ Si niveau 1, filtrer pour ne montrer QUE les utilisateurs de son département ET services
                 // 🔒 SÉCURITÉ CRITIQUE: Utiliser == au lieu de === pour gérer String "1" et Number 1
