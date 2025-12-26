@@ -3759,6 +3759,143 @@ app.get('/api/services', async (req, res) => {
     }
 });
 
+// Créer un service
+app.post('/api/services', async (req, res) => {
+    try {
+        const { nom, code, idDepartement } = req.body;
+
+        if (!nom || !code || !idDepartement) {
+            return res.status(400).json({
+                success: false,
+                message: 'Nom, code et département requis'
+            });
+        }
+
+        // Vérifier que le code n'existe pas déjà
+        const existing = await servicesCollection.findOne({ code });
+        if (existing) {
+            return res.status(400).json({
+                success: false,
+                message: 'Ce code de service existe déjà'
+            });
+        }
+
+        const newService = {
+            _id: new ObjectId(),
+            nom,
+            code,
+            description: req.body.description || '',
+            idDepartement: new ObjectId(idDepartement),
+            dateCreation: new Date()
+        };
+
+        await servicesCollection.insertOne(newService);
+
+        console.log(`✅ Service créé: ${nom} (${code})`);
+        res.json({ success: true, service: newService });
+    } catch (error) {
+        console.error('Erreur création service:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Modifier un service
+app.put('/api/services/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nom, code, description } = req.body;
+
+        if (!nom || !code) {
+            return res.status(400).json({
+                success: false,
+                message: 'Nom et code requis'
+            });
+        }
+
+        // Vérifier que le service existe
+        const service = await servicesCollection.findOne({ _id: new ObjectId(id) });
+        if (!service) {
+            return res.status(404).json({
+                success: false,
+                message: 'Service non trouvé'
+            });
+        }
+
+        // Si on change le code, vérifier qu'il n'existe pas déjà
+        if (code !== service.code) {
+            const existing = await servicesCollection.findOne({ code });
+            if (existing) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Ce code de service existe déjà'
+                });
+            }
+        }
+
+        // Mettre à jour
+        const updateData = {
+            nom,
+            code,
+            description: description || service.description || '',
+            lastModified: new Date()
+        };
+
+        await servicesCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updateData }
+        );
+
+        console.log(`✅ Service modifié: ${nom}`);
+        res.json({ success: true, service: { ...service, ...updateData } });
+    } catch (error) {
+        console.error('Erreur modification service:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Supprimer un service
+app.delete('/api/services/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Vérifier que le service existe
+        const service = await servicesCollection.findOne({ _id: new ObjectId(id) });
+        if (!service) {
+            return res.status(404).json({
+                success: false,
+                message: 'Service non trouvé'
+            });
+        }
+
+        // Vérifier qu'il n'y a pas d'utilisateurs affectés
+        const userCount = await usersCollection.countDocuments({ idService: new ObjectId(id) });
+        if (userCount > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Impossible de supprimer : ${userCount} utilisateur(s) sont affectés à ce service`
+            });
+        }
+
+        // Vérifier qu'il n'y a pas de documents
+        const docCount = await documentsCollection.countDocuments({ idService: new ObjectId(id) });
+        if (docCount > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Impossible de supprimer : ${docCount} document(s) sont associés à ce service`
+            });
+        }
+
+        // Supprimer
+        await servicesCollection.deleteOne({ _id: new ObjectId(id) });
+
+        console.log(`✅ Service supprimé: ${service.nom}`);
+        res.json({ success: true, message: 'Service supprimé' });
+    } catch (error) {
+        console.error('Erreur suppression service:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
 // Récupérer les catégories d'un utilisateur
 app.get('/api/categories/:userId', async (req, res) => {
     try {
