@@ -266,7 +266,7 @@ async function getAccessibleDocuments(userId) {
     let accessibleDocs = [];
 
     // ✅ NIVEAU 0 : Super Admin - Voit TOUS les documents (lecture seule)
-    if (userRole.niveau === 0) {
+    if (userRole.niveau == 0) {
         const allDocs = await documentsCollection.find({
             deleted: { $ne: true }  // ✅ Exclure documents supprimés
         }).toArray();
@@ -276,7 +276,7 @@ async function getAccessibleDocuments(userId) {
     }
 
     // ✅ NIVEAU 1 : Voit les documents de SON département ET des services de ce département
-    if (userRole.niveau === 1) {
+    if (userRole.niveau == 1) {
         // Vérifier que l'utilisateur a un département
         if (!user.idDepartement) {
             console.log(`⚠️ Utilisateur niveau 1 sans département: Aucun document accessible`);
@@ -306,7 +306,7 @@ async function getAccessibleDocuments(userId) {
     }
 
     // ✅ NIVEAU 2 : Voit TOUS les documents de son département
-    if (userRole.niveau === 2) {
+    if (userRole.niveau == 2) {
         // Vérifier que l'utilisateur a un département
         if (!user.idDepartement) {
             console.log(`⚠️ Utilisateur niveau 2 sans département: Aucun document accessible`);
@@ -332,7 +332,7 @@ async function getAccessibleDocuments(userId) {
     }
 
     // ✅ NIVEAU 3 : Voit uniquement ses documents + documents des autres niveau 3 du département + documents partagés
-    if (userRole.niveau === 3) {
+    if (userRole.niveau == 3) {
         // Vérifier que l'utilisateur a un département
         if (!user.idDepartement) {
             console.log(`⚠️ Utilisateur niveau 3 sans département: Aucun document accessible`);
@@ -505,7 +505,7 @@ async function connectDB(retryCount = 0) {
 
                 // 🛡️ VÉRIFIER SI C'EST UN COMPTE SUPER ADMIN (NIVEAU 0)
                 const userRole = await rolesCollection.findOne({ _id: user.idRole });
-                const isSuperAdminAttempt = userRole && userRole.niveau === 0;
+                const isSuperAdminAttempt = userRole && userRole.niveau == 0;
 
                 if (isSuperAdminAttempt) {
                     // Logger TOUTE tentative de connexion à un compte Super Admin
@@ -1367,7 +1367,7 @@ app.post('/api/register', [
                 message: 'Rôle invalide'
             });
         }
-        const isNiveau0 = selectedRole.niveau === 0;
+        const isNiveau0 = selectedRole.niveau == 0;
 
         // 🛡️ SÉCURITÉ: INTERDIRE la création de niveau 0 via l'API
         // Les Super Admins (niveau 0) ne peuvent être créés QUE via un script dédié
@@ -1383,7 +1383,7 @@ app.post('/api/register', [
             const creator = await usersCollection.findOne({ username: req.session.userId });
             if (creator) {
                 const creatorRole = await rolesCollection.findOne({ _id: creator.idRole });
-                if (creatorRole && creatorRole.niveau === 1) {
+                if (creatorRole && creatorRole.niveau == 1) {
                     // Un niveau 1 ne peut créer QUE des utilisateurs niveau 2 ou 3
                     if (selectedRole.niveau !== 2 && selectedRole.niveau !== 3) {
                         return res.status(403).json({
@@ -1395,8 +1395,8 @@ app.post('/api/register', [
                     deptId = creator.idDepartement;
                 }
                 // Si c'est un niveau 0 qui crée un utilisateur, vérifier qu'il ne crée pas un niveau 0
-                else if (creatorRole && creatorRole.niveau === 0) {
-                    if (selectedRole.niveau === 0) {
+                else if (creatorRole && creatorRole.niveau == 0) {
+                    if (selectedRole.niveau == 0) {
                         return res.status(403).json({
                             success: false,
                             message: '❌ ACCÈS REFUSÉ : Même les Super Administrateurs ne peuvent pas créer d\'autres Super Administrateurs via l\'interface. Utilisez le script dédié : npm run create-superadmin'
@@ -1508,7 +1508,7 @@ app.get('/api/users/:username', async (req, res) => {
                 const currentUserRole = await rolesCollection.findOne({ _id: roleId });
 
                 // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
-                if (currentUserRole && currentUserRole.niveau === 1) {
+                if (currentUserRole && currentUserRole.niveau == 1) {
                     if (currentUser.idDepartement) {
                         const deptId = typeof currentUser.idDepartement === 'string'
                             ? new ObjectId(currentUser.idDepartement)
@@ -1595,7 +1595,7 @@ app.put('/api/users/:username', async (req, res) => {
                 const currentUserRole = await rolesCollection.findOne({ _id: roleId });
 
                 // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
-                if (currentUserRole && currentUserRole.niveau === 1) {
+                if (currentUserRole && currentUserRole.niveau == 1) {
                     if (currentUser.idDepartement) {
                         const deptId = typeof currentUser.idDepartement === 'string'
                             ? new ObjectId(currentUser.idDepartement)
@@ -1707,9 +1707,9 @@ app.delete('/api/users/:username', async (req, res) => {
                 const targetUserRole = await rolesCollection.findOne({ _id: targetRoleId });
 
                 // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
-                if (currentUserRole && currentUserRole.niveau === 1) {
+                if (currentUserRole && currentUserRole.niveau == 1) {
                     // Le niveau 1 ne peut pas supprimer un autre niveau 1 ou un niveau 0
-                    if (targetUserRole && (targetUserRole.niveau === 0 || targetUserRole.niveau === 1)) {
+                    if (targetUserRole && (targetUserRole.niveau == 0 || targetUserRole.niveau == 1)) {
                         return res.status(403).json({
                             success: false,
                             message: 'Vous ne pouvez pas supprimer un administrateur de niveau superieur ou egal'
@@ -1796,7 +1796,7 @@ app.post('/api/users/:username/reset-password', async (req, res) => {
                 const currentUserRole = await rolesCollection.findOne({ _id: roleId });
 
                 // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
-                if (currentUserRole && currentUserRole.niveau === 1) {
+                if (currentUserRole && currentUserRole.niveau == 1) {
                     if (currentUser.idDepartement) {
                         const deptId = typeof currentUser.idDepartement === 'string'
                             ? new ObjectId(currentUser.idDepartement)
@@ -1991,7 +1991,7 @@ app.post('/api/documents', security.uploadLimiter, [
         const departement = user.idDepartement ? await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) }) : null;
 
         // ✅ NOUVEAU: Déterminer si c'est un service ou un département
-        const isNiveau123 = role && (role.niveau === 1 || role.niveau === 2 || role.niveau === 3);
+        const isNiveau123 = role && (role.niveau == 1 || role.niveau == 2 || role.niveau == 3);
         const idArchivage = departementArchivage || user.idDepartement;
 
         let serviceArchivage = null;
@@ -2054,8 +2054,8 @@ app.post('/api/documents', security.uploadLimiter, [
             derniereConsultation: null,
             historiqueConsultations: [],
             // ✅ Verrouillage du document (niveau 1 uniquement)
-            locked: locked === true && role && role.niveau === 1 ? true : false,
-            lockedBy: locked === true && role && role.niveau === 1 ? {
+            locked: locked === true && role && role.niveau == 1 ? true : false,
+            lockedBy: locked === true && role && role.niveau == 1 ? {
                 utilisateur: userId,
                 nomComplet: user.nom,
                 email: user.email,
@@ -2670,10 +2670,11 @@ app.get('/api/users', async (req, res) => {
 
                 const currentUserRole = await rolesCollection.findOne({ _id: roleId });
 
-                console.log(`🔍 VÉRIFICATION NIVEAU - User: ${req.session.userId}, Role trouvé: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
+                console.log(`🔍 VÉRIFICATION NIVEAU - User: ${req.session.userId}, Role trouvé: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau} (type: ${typeof currentUserRole?.niveau})`);
 
                 // ✅ Si niveau 1, filtrer pour ne montrer QUE les utilisateurs de son département ET services
-                if (currentUserRole && currentUserRole.niveau === 1) {
+                // 🔒 SÉCURITÉ CRITIQUE: Utiliser == au lieu de === pour gérer String "1" et Number 1
+                if (currentUserRole && currentUserRole.niveau == 1) {
                     if (currentUser.idDepartement) {
                         // Convertir en ObjectId pour la comparaison
                         const deptId = typeof currentUser.idDepartement === 'string'
@@ -2767,10 +2768,11 @@ app.get('/api/users-for-sharing/:userId', async (req, res) => {
 
             const currentUserRole = await rolesCollection.findOne({ _id: roleId });
 
-            console.log(`🔍 VÉRIFICATION PARTAGE - User: ${userId}, Role: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
+            console.log(`🔍 VÉRIFICATION PARTAGE - User: ${userId}, Role: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau} (type: ${typeof currentUserRole?.niveau})`);
 
             // Si niveau 1, ne montrer que les utilisateurs de son département + services
-            if (currentUserRole && currentUserRole.niveau === 1) {
+            // 🔒 SÉCURITÉ CRITIQUE: Utiliser == au lieu de === pour gérer String "1" et Number 1
+            if (currentUserRole && currentUserRole.niveau == 1) {
                 if (currentUser.idDepartement) {
                     // Convertir en ObjectId pour la comparaison
                     const deptId = typeof currentUser.idDepartement === 'string'
@@ -2872,11 +2874,11 @@ app.delete('/api/documents/:userId/delete-all', async (req, res) => {
         let result;
         let query;
 
-        if (userRole.niveau === 1) {
+        if (userRole.niveau == 1) {
             // ✅ NIVEAU 1 : Supprimer TOUS les documents de SON département uniquement
             query = { idDepartement: user.idDepartement };
             console.log('📋 Suppression niveau 1 (ADMIN) - TOUS les documents de SON département');
-        } else if (userRole.niveau === 2) {
+        } else if (userRole.niveau == 2) {
             // ✅ NIVEAU 2 : Supprimer TOUS les documents de son département
             query = { idDepartement: user.idDepartement };
             console.log('📋 Suppression niveau 2 - Documents du département:', user.idDepartement);
@@ -2964,7 +2966,7 @@ app.delete('/api/documents/:userId/:docId', async (req, res) => {
         }
 
         // Vérifier droits: niveau 3 ne peut supprimer que ses propres documents
-        if (userRole.niveau === 3 && document.idUtilisateur !== userId) {
+        if (userRole.niveau == 3 && document.idUtilisateur !== userId) {
             return res.status(403).json({
                 success: false,
                 message: 'Vous ne pouvez supprimer que vos propres documents'
