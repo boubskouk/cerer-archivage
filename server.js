@@ -20,6 +20,7 @@ const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const { body, validationResult } = require('express-validator');
 const security = require('./security-config');
+const { SecurityLogger, EVENT_TYPES, SEVERITY } = require('./security-logger');
 
 // ✅ NOUVEAU: Validation domaines universitaires et envoi email
 const { validateUniversityEmail } = require('./config/allowedDomains');
@@ -56,6 +57,7 @@ let shareHistoryCollection;
 let auditLogsCollection;
 let ipRulesCollection;
 let systemSettingsCollection;
+let securityLogger; // 🔒 Logger de sécurité
 
 // ============================================
 // MIDDLEWARE
@@ -413,6 +415,10 @@ async function connectDB(retryCount = 0) {
         auditLogsCollection = db.collection('auditLogs');
         ipRulesCollection = db.collection('ipRules');
         systemSettingsCollection = db.collection('systemSettings');
+
+        // 🔒 Initialiser le logger de sécurité
+        securityLogger = new SecurityLogger(db);
+        console.log('✅ SecurityLogger initialisé');
 
         // Créer des index
         await documentsCollection.createIndex({ idUtilisateur: 1, dateAjout: -1 });
@@ -892,6 +898,97 @@ async function connectDB(retryCount = 0) {
                 res.json({ username: req.session.userId });
             } else {
                 res.json({ username: null });
+            }
+        });
+
+        // 🔒 ENDPOINT: Logger une violation de session (multi-connexion détectée)
+        app.post('/api/log-session-violation', async (req, res) => {
+            try {
+                const { oldUser, newUser } = req.body;
+
+                await securityLogger.log(
+                    EVENT_TYPES.SESSION_VIOLATION,
+                    oldUser || 'unknown',
+                    {
+                        oldUser,
+                        newUser,
+                        message: `Multi-connexion détectée: ${oldUser} déconnecté car ${newUser} s'est connecté dans le même navigateur`
+                    },
+                    req
+                );
+
+                res.json({ success: true });
+            } catch (error) {
+                console.error('Erreur log session violation:', error);
+                res.status(500).json({ success: false });
+            }
+        });
+
+        // 🔒 ENDPOINT: Récupérer les logs de sécurité (NIVEAU 0 UNIQUEMENT)
+        app.get('/api/security-logs', async (req, res) => {
+            try {
+                // Vérifier que l'utilisateur est connecté
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Non authentifié'
+                    });
+                }
+
+                // Vérifier que c'est un Super Admin (niveau 0)
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Utilisateur non trouvé'
+                    });
+                }
+
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    await securityLogger.log(
+                        EVENT_TYPES.UNAUTHORIZED_ACCESS,
+                        req.session.userId,
+                        { resource: '/api/security-logs', niveau: userRole ? userRole.niveau : null },
+                        req
+                    );
+
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Accès refusé. Réservé aux Super Administrateurs.'
+                    });
+                }
+
+                // Récupérer les filtres de la query string
+                const filters = {
+                    severity: req.query.severity,
+                    eventType: req.query.eventType,
+                    username: req.query.username,
+                    ip: req.query.ip,
+                    startDate: req.query.startDate,
+                    endDate: req.query.endDate,
+                    limit: parseInt(req.query.limit) || 100
+                };
+
+                // Récupérer les logs
+                const logs = await securityLogger.getLogs(filters);
+
+                // Récupérer les statistiques
+                const stats = await securityLogger.getStats(7);
+
+                res.json({
+                    success: true,
+                    logs,
+                    stats,
+                    total: logs.length
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur récupération security logs:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Erreur serveur'
+                });
             }
         });
 

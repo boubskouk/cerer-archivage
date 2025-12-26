@@ -1311,7 +1311,7 @@
                 <button class="nav-tab" data-section="departments" onclick="navigateToSection('departments')" style="padding: 4px 10px; font-size: 11px;">
                     🏢 Depts
                 </button>
-                <button class="nav-tab disabled" title="Prochainement" style="padding: 4px 10px; font-size: 11px;">
+                <button class="nav-tab" data-section="audit" onclick="navigateToSection('audit')" style="padding: 4px 10px; font-size: 11px;">
                     🔒 Audit
                 </button>
             </nav>
@@ -1446,6 +1446,87 @@
             <!-- Section Départements (nouvelle) -->
             <div id="section-departments" style="display: none;">
                 <!-- Le contenu sera généré par JavaScript -->
+            </div>
+
+            <!-- Section Audit / Logs de Sécurité -->
+            <div id="section-audit" style="display: none;">
+                <div style="margin-bottom: 24px;">
+                    <h2 style="font-size: 24px; margin-bottom: 8px;">🔒 Logs de Sécurité</h2>
+                    <p style="color: #000000; font-size: 14px; font-weight: 500;">Surveillance et analyse des événements de sécurité du système</p>
+                </div>
+
+                <!-- Stats Cards -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                    <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #27ae60;">
+                        <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Info</div>
+                        <div style="font-size: 32px; font-weight: 700; color: #27ae60;" id="audit-stat-info">0</div>
+                    </div>
+                    <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #f39c12;">
+                        <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Avertissements</div>
+                        <div style="font-size: 32px; font-weight: 700; color: #f39c12;" id="audit-stat-warning">0</div>
+                    </div>
+                    <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #e74c3c;">
+                        <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Critiques</div>
+                        <div style="font-size: 32px; font-weight: 700; color: #e74c3c;" id="audit-stat-critical">0</div>
+                    </div>
+                </div>
+
+                <!-- Filtres -->
+                <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;">
+                    <h3 style="font-size: 16px; margin-bottom: 16px;">🔍 Filtres</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;">
+                        <div>
+                            <label style="display: block; font-size: 13px; color: #7f8c8d; margin-bottom: 6px;">Gravité</label>
+                            <select id="audit-filter-severity" style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
+                                <option value="">Toutes</option>
+                                <option value="INFO">Info</option>
+                                <option value="WARNING">Avertissement</option>
+                                <option value="CRITICAL">Critique</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 13px; color: #7f8c8d; margin-bottom: 6px;">Utilisateur</label>
+                            <input type="text" id="audit-filter-username" placeholder="Rechercher..." style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 13px; color: #7f8c8d; margin-bottom: 6px;">Adresse IP</label>
+                            <input type="text" id="audit-filter-ip" placeholder="Ex: 192.168.1.1" style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 13px; color: #7f8c8d; margin-bottom: 6px;">Période</label>
+                            <select id="audit-filter-period" style="width: 100%; padding: 8px; border: 2px solid #e1e8ed; border-radius: 6px; font-size: 14px;">
+                                <option value="24h">24 dernières heures</option>
+                                <option value="7d" selected>7 derniers jours</option>
+                                <option value="30d">30 derniers jours</option>
+                                <option value="all">Toute période</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="applyAuditFilters()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;">
+                            Appliquer
+                        </button>
+                        <button onclick="resetAuditFilters()" style="padding: 8px 16px; background: #ecf0f1; color: #2c3e50; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;">
+                            Réinitialiser
+                        </button>
+                        <button onclick="loadAuditLogs()" style="padding: 8px 16px; background: #ecf0f1; color: #2c3e50; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;">
+                            🔄 Actualiser
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Liste des logs -->
+                <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="font-size: 16px;">📋 Événements récents</h3>
+                        <span id="audit-log-count" style="color: #7f8c8d; font-size: 14px;">0 événements</span>
+                    </div>
+                    <div id="audit-logs-list">
+                        <div style="text-align: center; padding: 40px; color: #7f8c8d;">
+                            Chargement des logs...
+                        </div>
+                    </div>
+                </div>
             </div>
 
         </div>

@@ -218,6 +218,22 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 
                 if (sessionData.username && sessionData.username !== state.currentUser) {
                     console.log(`🚨 SÉCURITÉ CRITIQUE: Session changée détectée dans apiCall() - ${state.currentUser} → ${sessionData.username}`);
+
+                    // Logger la violation de session
+                    try {
+                        await fetch(`${API_URL}/log-session-violation`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                oldUser: state.currentUser,
+                                newUser: sessionData.username
+                            })
+                        });
+                    } catch (logError) {
+                        // Ignorer erreurs de log
+                    }
+
                     await logout(true);
                     throw new Error('Session invalide - Déconnexion automatique');
                 }
@@ -334,6 +350,21 @@ function detectSessionChange() {
                 // Si l'utilisateur de la session est différent de celui stocké localement
                 if (response.username !== state.currentUser) {
                     console.log(`🚨 SÉCURITÉ: Session changée de ${state.currentUser} à ${response.username} - Déconnexion automatique`);
+
+                    // Logger la violation de session côté serveur
+                    try {
+                        await fetch(`${API_URL}/log-session-violation`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                oldUser: state.currentUser,
+                                newUser: response.username
+                            })
+                        });
+                    } catch (logError) {
+                        // Ignorer erreurs de log
+                    }
 
                     // Déconnexion silencieuse et automatique (sans message)
                     await logout(true);

@@ -155,6 +155,8 @@ async function loadCurrentSection() {
         await loadDocumentsModule();
     } else if (state.currentSection === 'departments') {
         await loadDepartmentsModule();
+    } else if (state.currentSection === 'audit') {
+        await loadAuditLogs();
     }
 }
 
@@ -3523,6 +3525,190 @@ async function deleteDepartmentConfirmed() {
         showError('Erreur lors de la suppression');
     }
 }
+
+// ============================================
+// GESTION DES LOGS DE SÉCURITÉ (AUDIT)
+// ============================================
+
+let allAuditLogs = [];
+
+/**
+ * Charger les logs de sécurité
+ */
+async function loadAuditLogs() {
+    try {
+        const response = await fetch('/api/security-logs?limit=200', {
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            throw new Error('Erreur chargement logs');
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+            allAuditLogs = data.logs;
+
+            // Mettre à jour les stats
+            document.getElementById('audit-stat-info').textContent = data.stats.INFO || 0;
+            document.getElementById('audit-stat-warning').textContent = data.stats.WARNING || 0;
+            document.getElementById('audit-stat-critical').textContent = data.stats.CRITICAL || 0;
+
+            // Afficher les logs
+            displayAuditLogs(allAuditLogs);
+        }
+    } catch (error) {
+        console.error('Erreur chargement logs:', error);
+        document.getElementById('audit-logs-list').innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #e74c3c;">
+                <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Erreur de chargement</div>
+                <div style="font-size: 14px;">Impossible de charger les logs de sécurité</div>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Afficher les logs dans la liste
+ */
+function displayAuditLogs(logs) {
+    const container = document.getElementById('audit-logs-list');
+    const countEl = document.getElementById('audit-log-count');
+
+    if (!logs || logs.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px; color: #95a5a6;">
+                <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">Aucun log trouvé</div>
+                <div style="font-size: 14px;">Aucun événement de sécurité ne correspond aux critères</div>
+            </div>
+        `;
+        countEl.textContent = '0 événements';
+        return;
+    }
+
+    countEl.textContent = `${logs.length} événement${logs.length > 1 ? 's' : ''}`;
+
+    container.innerHTML = logs.map(log => {
+        const date = new Date(log.timestamp);
+        const timeAgo = getTimeAgo(date);
+        const formattedDate = date.toLocaleString('fr-FR');
+
+        // Couleur de la bulle selon gravité
+        const bubbleColor = log.severity === 'CRITICAL' ? '#e74c3c' :
+                           log.severity === 'WARNING' ? '#f39c12' : '#27ae60';
+        const borderColor = bubbleColor;
+
+        return `
+            <div style="display: flex; gap: 12px; padding: 16px; border-radius: 8px; margin-bottom: 12px; background: #fafbfc; border-left: 4px solid ${borderColor}; transition: all 0.2s; cursor: pointer;" onclick="toggleAuditLogDetails(this)">
+                <div style="width: 12px; height: 12px; border-radius: 50%; background: ${bubbleColor}; flex-shrink: 0; margin-top: 4px;"></div>
+                <div style="flex: 1;">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                        <div>
+                            <div style="font-size: 15px; font-weight: 600; color: #2c3e50; margin-bottom: 4px;">${escapeHtml(log.message)}</div>
+                            <div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #7f8c8d;">
+                                <span style="display: flex; align-items: center; gap: 4px;"><strong>👤</strong> ${escapeHtml(log.username)}</span>
+                                <span style="display: flex; align-items: center; gap: 4px;"><strong>🌐</strong> ${escapeHtml(log.ip)}</span>
+                                <span style="display: flex; align-items: center; gap: 4px;"><strong>📅</strong> ${formattedDate}</span>
+                                <span style="display: inline-block; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; background: ${log.severity === 'CRITICAL' ? '#fadbd8' : log.severity === 'WARNING' ? '#fef5e7' : '#d5f4e6'}; color: ${bubbleColor};">${log.severity === 'CRITICAL' ? 'CRITIQUE' : log.severity === 'WARNING' ? 'AVERTISSEMENT' : 'INFO'}</span>
+                            </div>
+                        </div>
+                        <div style="font-size: 12px; color: #95a5a6; white-space: nowrap;">${timeAgo}</div>
+                    </div>
+                    <div class="audit-log-details" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #e1e8ed; font-size: 12px; color: #7f8c8d; font-family: 'Courier New', monospace; margin-top: 8px;">
+                            <strong>Type :</strong> ${log.eventType}<br>
+                            <strong>Navigateur :</strong> ${escapeHtml(log.userAgent)}<br>
+                            ${log.details && Object.keys(log.details).length > 0 ?
+                                `<strong>Détails :</strong><br><pre style="margin: 4px 0; white-space: pre-wrap;">${JSON.stringify(log.details, null, 2)}</pre>`
+                                : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Basculer l'affichage des détails d'un log
+ */
+function toggleAuditLogDetails(element) {
+    const details = element.querySelector('.audit-log-details');
+    if (details.style.maxHeight === '0px' || !details.style.maxHeight) {
+        details.style.maxHeight = '500px';
+    } else {
+        details.style.maxHeight = '0px';
+    }
+}
+
+/**
+ * Appliquer les filtres
+ */
+function applyAuditFilters() {
+    const severity = document.getElementById('audit-filter-severity').value;
+    const username = document.getElementById('audit-filter-username').value.toLowerCase();
+    const ip = document.getElementById('audit-filter-ip').value;
+    const period = document.getElementById('audit-filter-period').value;
+
+    let filtered = allAuditLogs.filter(log => {
+        if (severity && log.severity !== severity) return false;
+        if (username && !log.username.toLowerCase().includes(username)) return false;
+        if (ip && !log.ip.includes(ip)) return false;
+
+        if (period !== 'all') {
+            const logDate = new Date(log.timestamp);
+            const now = new Date();
+            const diffHours = (now - logDate) / (1000 * 60 * 60);
+
+            if (period === '24h' && diffHours > 24) return false;
+            if (period === '7d' && diffHours > 168) return false;
+            if (period === '30d' && diffHours > 720) return false;
+        }
+
+        return true;
+    });
+
+    displayAuditLogs(filtered);
+}
+
+/**
+ * Réinitialiser les filtres
+ */
+function resetAuditFilters() {
+    document.getElementById('audit-filter-severity').value = '';
+    document.getElementById('audit-filter-username').value = '';
+    document.getElementById('audit-filter-ip').value = '';
+    document.getElementById('audit-filter-period').value = '7d';
+    displayAuditLogs(allAuditLogs);
+}
+
+/**
+ * Obtenir le temps écoulé depuis une date
+ */
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+
+    if (seconds < 60) return 'À l\'instant';
+    if (seconds < 3600) return `Il y a ${Math.floor(seconds / 60)} min`;
+    if (seconds < 86400) return `Il y a ${Math.floor(seconds / 3600)} h`;
+    return `Il y a ${Math.floor(seconds / 86400)} jour${Math.floor(seconds / 86400) > 1 ? 's' : ''}`;
+}
+
+/**
+ * Échapper le HTML pour éviter XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ============================================
+// INITIALISATION
+// ============================================
 
 /**
  * Initialisation au chargement de la page
