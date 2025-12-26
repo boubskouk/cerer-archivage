@@ -3750,14 +3750,25 @@ function displayAuditLogs(logs) {
 
         // Informations utilisateur enrichies
         if (log.userInfo) {
+            // Construire le nom complet intelligemment
+            let nomComplet = log.username; // Par défaut, utiliser le username
+            if (log.userInfo.nom && log.userInfo.nom !== 'N/A' && log.userInfo.prenom && log.userInfo.prenom !== 'N/A') {
+                nomComplet = `${log.userInfo.prenom} ${log.userInfo.nom}`;
+            } else if (log.userInfo.nom && log.userInfo.nom !== 'N/A') {
+                nomComplet = log.userInfo.nom;
+            } else if (log.userInfo.prenom && log.userInfo.prenom !== 'N/A') {
+                nomComplet = log.userInfo.prenom;
+            }
+
             enrichedDetails += `
                 <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 10px;">
                     <div style="font-weight: 700; color: #000000; margin-bottom: 8px; font-size: 13px;">👤 Informations Utilisateur</div>
                     <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px; font-size: 12px;">
-                        <strong style="color: #000000;">Nom complet:</strong> <span>${escapeHtml(log.userInfo.nom)} ${escapeHtml(log.userInfo.prenom)}</span>
-                        <strong style="color: #000000;">Département:</strong> <span>${escapeHtml(log.userInfo.departement || 'N/A')}</span>
-                        <strong style="color: #000000;">Niveau:</strong> <span>Niveau ${log.userInfo.niveau} - ${log.userInfo.role || 'N/A'}</span>
-                        ${log.userInfo.email ? `<strong style="color: #000000;">Email:</strong> <span>${escapeHtml(log.userInfo.email)}</span>` : ''}
+                        <strong style="color: #000000;">Utilisateur:</strong> <span>${escapeHtml(log.username)}</span>
+                        ${nomComplet !== log.username ? `<strong style="color: #000000;">Nom complet:</strong> <span>${escapeHtml(nomComplet)}</span>` : ''}
+                        <strong style="color: #000000;">Département:</strong> <span>${escapeHtml(log.userInfo.departement && log.userInfo.departement !== 'N/A' ? log.userInfo.departement : 'Non renseigné')}</span>
+                        <strong style="color: #000000;">Niveau:</strong> <span>Niveau ${log.userInfo.niveau} - ${escapeHtml(log.userInfo.role && log.userInfo.role !== 'N/A' ? log.userInfo.role : 'Non défini')}</span>
+                        ${log.userInfo.email && log.userInfo.email !== 'N/A' ? `<strong style="color: #000000;">Email:</strong> <span>${escapeHtml(log.userInfo.email)}</span>` : ''}
                     </div>
                 </div>
             `;
@@ -3769,10 +3780,10 @@ function displayAuditLogs(logs) {
                 <div style="background: #fff3cd; padding: 12px; border-radius: 6px; margin-bottom: 10px;">
                     <div style="font-weight: 700; color: #000000; margin-bottom: 8px; font-size: 13px;">📄 Document Concerné</div>
                     <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px; font-size: 12px;">
-                        <strong style="color: #000000;">Titre:</strong> <span>${escapeHtml(log.documentInfo.titre || 'N/A')}</span>
-                        <strong style="color: #000000;">Propriétaire:</strong> <span>${escapeHtml(log.documentInfo.proprietaire || 'N/A')}</span>
-                        <strong style="color: #000000;">Statut:</strong> <span>${escapeHtml(log.documentInfo.statut || 'N/A')}</span>
-                        ${log.documentInfo.categorie ? `<strong style="color: #000000;">Catégorie:</strong> <span>${escapeHtml(log.documentInfo.categorie)}</span>` : ''}
+                        <strong style="color: #000000;">Titre:</strong> <span>${escapeHtml(log.documentInfo.titre && log.documentInfo.titre !== 'N/A' ? log.documentInfo.titre : 'Non renseigné')}</span>
+                        <strong style="color: #000000;">Propriétaire:</strong> <span>${escapeHtml(log.documentInfo.proprietaire && log.documentInfo.proprietaire !== 'N/A' ? log.documentInfo.proprietaire : 'Inconnu')}</span>
+                        <strong style="color: #000000;">Statut:</strong> <span>${escapeHtml(log.documentInfo.statut && log.documentInfo.statut !== 'N/A' ? log.documentInfo.statut : 'Non défini')}</span>
+                        ${log.documentInfo.categorie && log.documentInfo.categorie !== 'N/A' ? `<strong style="color: #000000;">Catégorie:</strong> <span>${escapeHtml(log.documentInfo.categorie)}</span>` : ''}
                     </div>
                 </div>
             `;
