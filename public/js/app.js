@@ -206,6 +206,29 @@ async function apiCall(endpoint, method = 'GET', data = null) {
         if (data) options.body = JSON.stringify(data);
         const response = await fetch(`${API_URL}${endpoint}`, options);
         const result = await response.json();
+
+        // 🔒 SÉCURITÉ: Vérifier si la session a changé (détection instantanée à chaque requête)
+        if (state.isAuthenticated && state.currentUser && endpoint !== '/session-check') {
+            try {
+                const sessionCheck = await fetch(`${API_URL}/session-check`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                const sessionData = await sessionCheck.json();
+
+                if (sessionData.username && sessionData.username !== state.currentUser) {
+                    console.log(`🚨 SÉCURITÉ CRITIQUE: Session changée détectée dans apiCall() - ${state.currentUser} → ${sessionData.username}`);
+                    await logout(true);
+                    throw new Error('Session invalide - Déconnexion automatique');
+                }
+            } catch (sessionError) {
+                // Ignorer les erreurs de vérification de session sauf si c'est une déconnexion
+                if (sessionError.message.includes('Session invalide')) {
+                    throw sessionError;
+                }
+            }
+        }
+
         if (!response.ok) {
             console.error(`❌ API Error [${method} ${endpoint}]:`, result.message || 'Erreur');
             throw new Error(result.message || 'Erreur');
@@ -269,6 +292,9 @@ async function restoreSession() {
             // ✅ Démarrer la vérification automatique de session (déconnexion forcée)
             startSessionCheck();
 
+            // 🔒 SÉCURITÉ: Démarrer la détection de changement de session (sessions multiples)
+            detectSessionChange();
+
             await loadData();
             return true;
         } else {
@@ -291,6 +317,32 @@ function clearSession() {
     } catch (error) {
         console.error('Erreur nettoyage session:', error);
     }
+}
+
+// ===== DÉTECTION CHANGEMENT DE SESSION =====
+// Détecter si un autre onglet se connecte avec un autre compte
+function detectSessionChange() {
+    // Vérifier périodiquement si la session a changé
+    setInterval(async () => {
+        if (!state.isAuthenticated || !state.currentUser) return;
+
+        try {
+            // Appeler un endpoint qui retourne l'utilisateur de la session actuelle
+            const response = await apiCall('/session-check');
+
+            if (response && response.username) {
+                // Si l'utilisateur de la session est différent de celui stocké localement
+                if (response.username !== state.currentUser) {
+                    console.log(`🚨 SÉCURITÉ: Session changée de ${state.currentUser} à ${response.username} - Déconnexion automatique`);
+
+                    // Déconnexion silencieuse et automatique (sans message)
+                    await logout(true);
+                }
+            }
+        } catch (error) {
+            // Ignorer les erreurs de vérification
+        }
+    }, 50); // 🔒 SÉCURITÉ: Vérifier toutes les 50ms pour déconnexion quasi-instantanée
 }
 
 // ===== SYSTÈME DE DÉCONNEXION AUTOMATIQUE =====

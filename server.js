@@ -512,16 +512,22 @@ async function connectDB(retryCount = 0) {
                     await auditLogsCollection.insertOne({
                         timestamp: new Date(),
                         user: username,
-                        action: 'TENTATIVE_CONNEXION_SUPERADMIN',
+                        action: 'TENTATIVE_CONNEXION_SUPERADMIN_BLOQUEE',
                         details: {
                             ip: req.ip,
                             userAgent: req.headers['user-agent'],
-                            statut: 'En tentative'
+                            statut: 'REFUSÉ - Doit utiliser /api/admin-login'
                         },
                         ip: req.ip,
                         userAgent: req.headers['user-agent']
                     });
-                    console.log(`🛡️  TENTATIVE DE CONNEXION AU SUPER ADMIN: ${username} depuis ${req.ip}`);
+                    console.log(`🔒 TENTATIVE BLOQUÉE: Super Admin "${username}" a tenté de se connecter via /api/login`);
+
+                    // 🔒 BLOQUER la connexion - les super admins doivent utiliser /api/admin-login
+                    return res.status(403).json({
+                        success: false,
+                        message: '🔒 Les comptes Super Administrateurs doivent se connecter via l\'interface dédiée'
+                    });
                 }
 
                 // Vérifier le mot de passe
@@ -733,6 +739,159 @@ async function connectDB(retryCount = 0) {
             } catch (error) {
                 console.error('❌ Erreur login:', error);
                 res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        // 🔒 ENDPOINT DÉDIÉ POUR SUPER ADMIN (NIVEAU 0 UNIQUEMENT)
+        app.post('/api/admin-login', security.loginLimiter, async (req, res) => {
+            try {
+                const { username, password } = req.body;
+
+                if (!username || !password) {
+                    security.logLoginFailure(username || 'unknown', req.ip, req.headers['user-agent'], 'missing_credentials');
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Username et password requis'
+                    });
+                }
+
+                // Chercher l'utilisateur
+                const user = await usersCollection.findOne({ username });
+
+                if (!user) {
+                    security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'user_not_found');
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Identifiants incorrects'
+                    });
+                }
+
+                // Vérifier le rôle
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+
+                // 🔒 VÉRIFIER QUE C'EST BIEN UN NIVEAU 0
+                if (!userRole || userRole.niveau !== 0) {
+                    await auditLogsCollection.insertOne({
+                        timestamp: new Date(),
+                        user: username,
+                        action: 'TENTATIVE_ACCES_ADMIN_SANS_NIVEAU_0',
+                        details: {
+                            ip: req.ip,
+                            userAgent: req.headers['user-agent'],
+                            niveau: userRole ? userRole.niveau : null,
+                            statut: 'REFUSÉ'
+                        },
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent']
+                    });
+                    console.log(`🔒 TENTATIVE BLOQUÉE: "${username}" (niveau ${userRole ? userRole.niveau : 'inconnu'}) a tenté d'accéder à /api/admin-login`);
+
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Accès refusé. Cette interface est réservée aux Super Administrateurs.'
+                    });
+                }
+
+                // Vérifier le mot de passe
+                let isValidPassword = false;
+                const isBcryptHash = /^\$2[aby]\$/.test(user.password);
+
+                if (isBcryptHash) {
+                    isValidPassword = await bcrypt.compare(password, user.password);
+                } else {
+                    isValidPassword = (password === user.password);
+                    if (isValidPassword) {
+                        const hashedPassword = await bcrypt.hash(password, 10);
+                        await usersCollection.updateOne(
+                            { _id: user._id },
+                            { $set: { password: hashedPassword } }
+                        );
+                    }
+                }
+
+                if (!isValidPassword) {
+                    security.logLoginFailure(username, req.ip, req.headers['user-agent'], 'wrong_password');
+
+                    await auditLogsCollection.insertOne({
+                        timestamp: new Date(),
+                        user: username,
+                        action: 'ECHEC_CONNEXION_SUPERADMIN',
+                        details: {
+                            ip: req.ip,
+                            userAgent: req.headers['user-agent'],
+                            raison: 'Mot de passe incorrect'
+                        },
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent']
+                    });
+                    console.log(`❌ ÉCHEC CONNEXION SUPER ADMIN: ${username} - Mot de passe incorrect`);
+
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Identifiants incorrects'
+                    });
+                }
+
+                // Récupérer les infos complètes
+                const departement = user.idDepartement ? await departementsCollection.findOne({ _id: user.idDepartement }) : null;
+
+                // Logger la connexion réussie
+                security.logLoginSuccess(username, req.ip, req.headers['user-agent']);
+
+                await auditLogsCollection.insertOne({
+                    timestamp: new Date(),
+                    user: username,
+                    action: 'SUCCES_CONNEXION_SUPERADMIN',
+                    details: {
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent'],
+                        statut: 'Connexion réussie via /api/admin-login'
+                    },
+                    ip: req.ip,
+                    userAgent: req.headers['user-agent']
+                });
+                console.log(`✅ SUCCÈS CONNEXION SUPER ADMIN: ${username} depuis ${req.ip} via /api/admin-login`);
+
+                // Créer la session
+                req.session.userId = username;
+                req.session.user = user;
+                req.session.isAuthenticated = true;
+
+                // Mettre à jour isOnline
+                await usersCollection.updateOne(
+                    { _id: user._id },
+                    { $set: { isOnline: true, derniereConnexion: new Date() } }
+                );
+
+                res.json({
+                    success: true,
+                    username,
+                    mustChangePassword: user.mustChangePassword === true,
+                    firstLogin: user.firstLogin === true,
+                    user: {
+                        username: user.username,
+                        nom: user.nom,
+                        email: user.email,
+                        role: userRole.libelle,
+                        niveau: userRole.niveau,
+                        departement: departement ? departement.nom : 'Aucun (Admin Principal)',
+                        idDepartement: user.idDepartement
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur admin-login:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        // 🔒 SÉCURITÉ: Endpoint pour vérifier l'utilisateur de la session actuelle
+        // Utilisé pour détecter les changements de session (sessions multiples dans même navigateur)
+        app.get('/api/session-check', (req, res) => {
+            if (req.session && req.session.userId) {
+                res.json({ username: req.session.userId });
+            } else {
+                res.json({ username: null });
             }
         });
 
@@ -1697,6 +1856,21 @@ app.delete('/api/users/:username', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Utilisateur non trouve' });
         }
 
+        // 🔒 SÉCURITÉ CRITIQUE: Vérifier le niveau de l'utilisateur cible EN PREMIER
+        const targetRoleId = typeof targetUser.idRole === 'string'
+            ? new ObjectId(targetUser.idRole)
+            : targetUser.idRole;
+        const targetUserRole = await rolesCollection.findOne({ _id: targetRoleId });
+
+        // PROTECTION ABSOLUE: Interdire la suppression d'un admin (niveau 0)
+        if (targetUserRole && targetUserRole.niveau === 0) {
+            console.log(`🔒 TENTATIVE BLOQUÉE: Suppression du Super Admin ${username} refusée`);
+            return res.status(403).json({
+                success: false,
+                message: '🔒 Impossible de supprimer un Super Administrateur (niveau 0)'
+            });
+        }
+
         // Verifier les droits du niveau 1
         if (req.session && req.session.userId) {
             const currentUser = await usersCollection.findOne({ username: req.session.userId });
@@ -1706,19 +1880,13 @@ app.delete('/api/users/:username', async (req, res) => {
                     : currentUser.idRole;
                 const currentUserRole = await rolesCollection.findOne({ _id: roleId });
 
-                // Recuperer le role de l'utilisateur cible pour verifier son niveau
-                const targetRoleId = typeof targetUser.idRole === 'string'
-                    ? new ObjectId(targetUser.idRole)
-                    : targetUser.idRole;
-                const targetUserRole = await rolesCollection.findOne({ _id: targetRoleId });
-
                 // Si niveau 1, verifier que l'utilisateur cible est dans son departement ou services
                 if (currentUserRole && currentUserRole.niveau == 1) {
-                    // Le niveau 1 ne peut pas supprimer un autre niveau 1 ou un niveau 0
-                    if (targetUserRole && (targetUserRole.niveau == 0 || targetUserRole.niveau == 1)) {
+                    // Le niveau 1 ne peut pas supprimer un autre niveau 1
+                    if (targetUserRole && targetUserRole.niveau == 1) {
                         return res.status(403).json({
                             success: false,
-                            message: 'Vous ne pouvez pas supprimer un administrateur de niveau superieur ou egal'
+                            message: 'Vous ne pouvez pas supprimer un autre administrateur de niveau 1'
                         });
                     }
 
@@ -2661,6 +2829,11 @@ app.post('/api/documents/:userId/:docId/toggle-lock', async (req, res) => {
 
 // Récupérer tous les utilisateurs (avec filtrage pour Niveau 1)
 app.get('/api/users', async (req, res) => {
+    // 🔒 SÉCURITÉ CRITIQUE: Désactiver le cache HTTP pour éviter fuite de données entre utilisateurs
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
     try {
         const { ObjectId } = require('mongodb');
         let allUsers = [];
@@ -2817,6 +2990,11 @@ app.get('/api/users', async (req, res) => {
 
 // Récupérer tous les utilisateurs disponibles pour le partage
 app.get('/api/users-for-sharing/:userId', async (req, res) => {
+    // 🔒 SÉCURITÉ CRITIQUE: Désactiver le cache HTTP pour éviter fuite de données entre utilisateurs
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
     try {
         const { userId } = req.params;
         const { ObjectId } = require('mongodb');

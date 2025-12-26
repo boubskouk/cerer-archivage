@@ -312,7 +312,7 @@
             loginBtn.textContent = '⏳ Connexion...';
 
             try {
-                const response = await fetch('/api/login', {
+                const response = await fetch('/api/admin-login', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -324,14 +324,7 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Vérifier que c'est bien un Super Admin (niveau 0)
-                    if (data.user.niveau !== 0) {
-                        showError('Accès refusé. Cette interface est réservée aux Super Administrateurs (Niveau 0).');
-                        loginBtn.disabled = false;
-                        loginBtn.textContent = '🔐 Se connecter';
-                        return;
-                    }
-
+                    // 🔒 La vérification du niveau 0 est faite côté serveur par /api/admin-login
                     showSuccess('✅ Connexion réussie ! Redirection...');
 
                     // Redirection vers le dashboard Super Admin
