@@ -881,8 +881,13 @@ async function initializeDefaultData() {
             console.log(`✅ Utilisateur créé: ${user.username}`);
         }
     }
-    
-    // 4. CATÉGORIES pour chaque utilisateur
+
+    // 4. CATÉGORIES pour chaque utilisateur - DÉSACTIVÉ
+    // ✅ Les catégories ne sont PLUS créées automatiquement
+    // Les catégories sont maintenant gérées manuellement par chaque utilisateur
+    // et partagées au niveau du département
+
+    /*
     const categories = [
         { id: 'factures', nom: 'Factures', couleur: 'bg-blue-100 text-blue-800', icon: '🧾' },
         { id: 'contrats', nom: 'Contrats', couleur: 'bg-purple-100 text-purple-800', icon: '📜' },
@@ -893,12 +898,12 @@ async function initializeDefaultData() {
         { id: 'juridique', nom: 'Juridique', couleur: 'bg-indigo-100 text-indigo-800', icon: '⚖️' },
         { id: 'autre', nom: 'Autre', couleur: 'bg-gray-100 text-gray-800', icon: '📄' }
     ];
-    
+
     for (const user of defaultUsers) {
         for (const cat of categories) {
-            const exists = await categoriesCollection.findOne({ 
+            const exists = await categoriesCollection.findOne({
                 idUtilisateur: user.username,
-                id: cat.id 
+                id: cat.id
             });
             if (!exists) {
                 await categoriesCollection.insertOne({
@@ -908,6 +913,7 @@ async function initializeDefaultData() {
             }
         }
     }
+    */
 }
 
 // ============================================
