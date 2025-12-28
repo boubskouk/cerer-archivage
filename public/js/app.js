@@ -56,6 +56,8 @@ const state = {
     currentUser: null,
     currentUserInfo: null, // Informations complètes de l'utilisateur (nom, rôle, niveau)
     showRegister: false,
+    showProfile: false, // ✅ NOUVEAU : Modal de profil utilisateur
+    profilePhotoPreview: null, // NOUVEAU : Prévisualisation de la photo
     storageInfo: { usedMB: 0, totalMB: 1000, percentUsed: 0 },
     loading: false,
     importProgress: { show: false, current: 0, total: 0, message: '' },
@@ -82,7 +84,7 @@ const state = {
 // Données du formulaire
 let formData = {
     titre: '',
-    categorie: 'factures',
+    categorie: '', // ✅ CORRIGÉ : Pas de valeur par défaut 'factures', l'utilisateur DOIT choisir
     date: new Date().toISOString().split('T')[0],
     departementArchivage: '', // Département d'archivage
     description: '',
@@ -207,43 +209,8 @@ async function apiCall(endpoint, method = 'GET', data = null) {
         const response = await fetch(`${API_URL}${endpoint}`, options);
         const result = await response.json();
 
-        // 🔒 SÉCURITÉ: Vérifier si la session a changé (détection instantanée à chaque requête)
-        if (state.isAuthenticated && state.currentUser && endpoint !== '/session-check') {
-            try {
-                const sessionCheck = await fetch(`${API_URL}/session-check`, {
-                    method: 'GET',
-                    credentials: 'include'
-                });
-                const sessionData = await sessionCheck.json();
-
-                if (sessionData.username && sessionData.username !== state.currentUser) {
-                    console.log(`🚨 SÉCURITÉ CRITIQUE: Session changée détectée dans apiCall() - ${state.currentUser} → ${sessionData.username}`);
-
-                    // Logger la violation de session
-                    try {
-                        await fetch(`${API_URL}/log-session-violation`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'include',
-                            body: JSON.stringify({
-                                oldUser: state.currentUser,
-                                newUser: sessionData.username
-                            })
-                        });
-                    } catch (logError) {
-                        // Ignorer erreurs de log
-                    }
-
-                    await logout(true);
-                    throw new Error('Session invalide - Déconnexion automatique');
-                }
-            } catch (sessionError) {
-                // Ignorer les erreurs de vérification de session sauf si c'est une déconnexion
-                if (sessionError.message.includes('Session invalide')) {
-                    throw sessionError;
-                }
-            }
-        }
+        // Note: La vérification de session est maintenant gérée par detectSessionChange() et checkSessionValidity()
+        // Pas besoin de vérifier à chaque appel API pour éviter les problèmes de performance
 
         if (!response.ok) {
             console.error(`❌ API Error [${method} ${endpoint}]:`, result.message || 'Erreur');
@@ -298,9 +265,34 @@ async function restoreSession() {
         const result = await apiCall('/verify-session', 'POST', { username });
         if (result.success) {
             state.currentUser = username;
-            state.currentUserInfo = userInfo;
+            state.currentUserInfo = result.user; // ✅ CORRECTION: Utiliser les données FRAÎCHES du serveur, pas le cache
             state.isAuthenticated = true;
             state.isCheckingSession = false;
+
+            // 🔒 SÉCURITÉ: Bloquer le niveau 0 (Super Admin)
+            if (state.currentUserInfo && state.currentUserInfo.niveau === 0) {
+                const message = `
+                    ⛔ Accès Refusé
+
+                    Vous êtes Super Administrateur (Niveau 0).
+
+                    👉 Veuillez utiliser l'interface dédiée aux Super Admins.
+
+                    Vous allez être redirigé dans 3 secondes...
+                `;
+
+                alert(message);
+
+                console.log(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
+
+                // Déconnexion et redirection
+                clearSession();
+                setTimeout(() => {
+                    window.location.href = '/super-admin-login.html';
+                }, 3000);
+
+                return false;
+            }
 
             // Démarrer le système de déconnexion automatique
             startInactivityTimer();
@@ -329,7 +321,8 @@ async function restoreSession() {
 // Nettoyer la session
 function clearSession() {
     try {
-        sessionStorage.removeItem('cerer_session');
+        // ✅ CORRECTION: Effacer TOUT le sessionStorage pour éviter les conflits entre versions
+        sessionStorage.clear();
     } catch (error) {
         console.error('Erreur nettoyage session:', error);
     }
@@ -337,19 +330,31 @@ function clearSession() {
 
 // ===== DÉTECTION CHANGEMENT DE SESSION =====
 // Détecter si un autre onglet se connecte avec un autre compte
+let sessionChangeInterval = null; // ✅ Variable pour stocker l'intervalle
+
 function detectSessionChange() {
+    // Arrêter l'intervalle existant si présent
+    if (sessionChangeInterval) {
+        clearInterval(sessionChangeInterval);
+    }
+
     // Vérifier périodiquement si la session a changé
-    setInterval(async () => {
+    sessionChangeInterval = setInterval(async () => {
         if (!state.isAuthenticated || !state.currentUser) return;
 
         try {
-            // Appeler un endpoint qui retourne l'utilisateur de la session actuelle
-            const response = await apiCall('/session-check');
+            // Utiliser fetch directement pour éviter les renders inutiles
+            const response = await fetch(`${API_URL}/session-check`, {
+                method: 'GET',
+                credentials: 'include'
+            });
 
-            if (response && response.username) {
+            const data = await response.json();
+
+            if (data && data.username) {
                 // Si l'utilisateur de la session est différent de celui stocké localement
-                if (response.username !== state.currentUser) {
-                    console.log(`🚨 SÉCURITÉ: Session changée de ${state.currentUser} à ${response.username} - Déconnexion automatique`);
+                if (data.username !== state.currentUser) {
+                    console.log(`🚨 SÉCURITÉ: Session changée de ${state.currentUser} à ${data.username} - Déconnexion automatique`);
 
                     // Logger la violation de session côté serveur
                     try {
@@ -359,7 +364,7 @@ function detectSessionChange() {
                             credentials: 'include',
                             body: JSON.stringify({
                                 oldUser: state.currentUser,
-                                newUser: response.username
+                                newUser: data.username
                             })
                         });
                     } catch (logError) {
@@ -373,7 +378,7 @@ function detectSessionChange() {
         } catch (error) {
             // Ignorer les erreurs de vérification
         }
-    }, 50); // 🔒 SÉCURITÉ: Vérifier toutes les 50ms pour déconnexion quasi-instantanée
+    }, 10000); // 🔒 SÉCURITÉ: Vérifier toutes les 10 secondes (changé de 50ms pour éviter le rate limit)
 }
 
 // ===== SYSTÈME DE DÉCONNEXION AUTOMATIQUE =====
@@ -447,6 +452,30 @@ async function login(username, password) {
             state.currentUser = username;
             state.currentUserInfo = result.user; // Stocker les infos complètes (nom, rôle, niveau)
             state.isAuthenticated = true;
+
+            // 🔒 SÉCURITÉ: Bloquer le niveau 0 (Super Admin)
+            if (result.user && result.user.niveau === 0) {
+                const message = `
+                    ⛔ Accès Refusé
+
+                    Vous êtes Super Administrateur (Niveau 0).
+
+                    👉 Veuillez utiliser l'interface dédiée aux Super Admins.
+
+                    Vous allez être redirigé dans 3 secondes...
+                `;
+
+                alert(message);
+
+                console.log(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
+
+                // Redirection vers interface Super Admin
+                setTimeout(() => {
+                    window.location.href = '/super-admin-login.html';
+                }, 3000);
+
+                return true;
+            }
 
             // ✅ NOUVEAU: Vérifier si l'utilisateur doit changer son mot de passe
             if (result.mustChangePassword || result.firstLogin) {
@@ -588,7 +617,15 @@ async function logout(isAutoLogout = false) {
         window.filterResetTimer = null;
     }
 
-    // Nettoyer la session
+    // ✅ CORRECTION: Détruire la session SERVEUR avant de nettoyer le client
+    try {
+        await apiCall('/logout', 'POST');
+        console.log('✅ Session serveur détruite');
+    } catch (error) {
+        console.error('❌ Erreur destruction session serveur:', error);
+    }
+
+    // Nettoyer la session CLIENT
     clearSession();
 
     // Arrêter le système de détection d'inactivité
@@ -666,7 +703,7 @@ async function loadRolesAndDepartements() {
         state.departements = deptsData.departements || [];
 
         console.log('✅ Rôles et départements chargés:', state.roles.length, 'rôles,', state.departements.length, 'départements');
-        render();
+        // Note: Le render est fait après le chargement des services pour éviter le clignotement
     } catch (error) {
         console.error('❌ Erreur chargement rôles/départements:', error);
     }
@@ -678,7 +715,7 @@ async function loadServices() {
         const servicesData = await apiCall('/services');
         state.services = servicesData.services || [];
         console.log('✅ Services chargés:', state.services.length, 'services');
-        render();
+        render(); // Render final après tout le chargement
     } catch (error) {
         console.error('❌ Erreur chargement services:', error);
         state.services = [];
@@ -1174,7 +1211,7 @@ async function handleFileUpload(e) {
     state.showUploadForm = false;
     formData = {
         titre: '',
-        categorie: 'factures',
+        categorie: '', // ✅ CORRIGÉ : Pas de valeur par défaut 'factures'
         date: new Date().toISOString().split('T')[0],
         departementArchivage: '',
         description: '',
@@ -1566,21 +1603,41 @@ async function importData(e) {
 }
 
 // ===== FONCTIONS DE FORMATAGE =====
-function getCategoryColor(id) { 
-    return state.categories.find(c => c.id === id)?.couleur || 'bg-gray-100 text-gray-800'; 
+function getCategoryColor(nom) {
+    // Chercher par nom de catégorie au lieu d'ID
+    return state.categories.find(c => c.nom === nom)?.couleur || 'bg-gray-100 text-gray-800';
 }
 
-function getCategoryName(id) { 
-    return state.categories.find(c => c.id === id)?.nom || id; 
+function getCategoryName(nom) {
+    // Chercher par nom de catégorie au lieu d'ID
+    return state.categories.find(c => c.nom === nom)?.nom || nom;
 }
 
-function getCategoryIcon(id) { 
-    return state.categories.find(c => c.id === id)?.icon || '📁'; 
+function getCategoryIcon(nom) {
+    // Chercher par nom de catégorie au lieu d'ID
+    return state.categories.find(c => c.nom === nom)?.icon || '📁';
+}
+
+function getSortLabel(sortValue) {
+    const sortLabels = {
+        'date_desc': 'Plus récent document',
+        'date_asc': 'Plus ancien document',
+        'titre_asc': 'A → Z',
+        'titre_desc': 'Z → A',
+        'taille_desc': 'Plus grande taille',
+        'taille_asc': 'Plus petite taille'
+    };
+    return sortLabels[sortValue] || 'Aucun tri';
 }
 
 // ===== NOUVEAU : TRI DES DOCUMENTS =====
 function sortDocuments(docs) {
     const sorted = [...docs];
+
+    // Si "Aucun tri spécifique" (sortBy vide), retourner sans trier
+    if (state.sortBy === '') {
+        return sorted;
+    }
 
     switch(state.sortBy) {
         case 'date_desc':
@@ -1627,7 +1684,8 @@ function getFilteredDocs() {
             doc.categorie === state.selectedCategory;
 
         const matchDepartement = state.selectedDepartement === 'tous' ||
-            doc.departementArchivage === state.selectedDepartement;
+            doc.departementArchivage === state.selectedDepartement ||
+            doc.serviceArchivage === state.selectedDepartement;
 
         let matchDate = true;
         if (state.dateFrom || state.dateTo) {
@@ -1676,10 +1734,17 @@ function toggleMenu() {
     render(); 
 }
 
-function toggleUploadForm() { 
-    state.showUploadForm = !state.showUploadForm; 
-    state.showCategories = false; 
-    render(); 
+function toggleUploadForm() {
+    state.showUploadForm = !state.showUploadForm;
+    state.showCategories = false;
+
+    // Si on ouvre le formulaire, pre-selectionner la premiere categorie par defaut
+    if (state.showUploadForm && state.categories.length > 0 && !formData.categorie) {
+        formData.categorie = state.categories[0].nom;
+        console.log('Categorie par defaut selectionnee:', formData.categorie);
+    }
+
+    render();
 }
 
 function toggleCategories() {
@@ -2587,7 +2652,7 @@ function render() {
     }
 
     const filteredDocs = getFilteredDocs();
-    const activeFilters = state.searchTerm || state.selectedCategory !== 'tous' || state.dateFrom || state.dateTo;
+    const activeFilters = state.searchTerm || state.selectedCategory !== 'tous' || state.selectedDepartement !== 'tous' || state.dateFrom || state.dateTo || state.sortBy;
     
     app.innerHTML = `
         <div class="min-h-screen" style="background: linear-gradient(135deg, #e0f2fe 0%, #d1fae5 100%);">
@@ -2619,6 +2684,14 @@ function render() {
                             <button onclick="toggleFilters()"
                                     class="nav-btn ${state.showFilters ? 'nav-btn-active' : 'nav-btn-inactive'}">
                                 🔍 Filtres
+                            </button>
+                            <button onclick="window.location.href='/new-dashboard.html'"
+                                    class="nav-btn nav-btn-inactive relative group"
+                                    title="Essayer le nouveau design">
+                                🎨 Nouveau Design
+                                <span class="absolute -top-2 -right-2 px-2 py-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xs font-bold rounded-full animate-pulse border-2 border-white shadow-lg">
+                                    BETA
+                                </span>
                             </button>
                             <button onclick="toggleMenu()"
                                     class="px-3 py-2 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg hover:shadow-lg transition">
@@ -2682,7 +2755,7 @@ function render() {
                                     class="px-4 py-2 text-sm border-2 rounded-lg outline-none font-medium">
                                 <option value="tous" ${state.tempSelectedCategory === 'tous' ? 'selected' : ''}>📁 Toutes catégories</option>
                                 ${state.categories.map(cat => `
-                                    <option value="${cat.id}" ${state.tempSelectedCategory === cat.id ? 'selected' : ''}>
+                                    <option value="${cat.nom}" ${state.tempSelectedCategory === cat.nom ? 'selected' : ''}>
                                         ${cat.icon} ${cat.nom}
                                     </option>
                                 `).join('')}
@@ -2774,11 +2847,13 @@ function render() {
                         ${activeFilters ? `
                             <div class="bg-green-50 border-2 border-green-200 rounded-lg p-3">
                                 <p class="text-sm text-green-800">
-                                    <strong>✓ ${filteredDocs.length}</strong> document(s) sur <strong>${state.documents.length}</strong>
-                                    ${state.searchTerm ? ` • "${state.searchTerm}"` : ''}
-                                    ${state.selectedCategory !== 'tous' ? ` • ${getCategoryName(state.selectedCategory)}` : ''}
-                                    ${state.dateFrom ? ` • ${formatDate(state.dateFrom)}` : ''}
-                                    ${state.dateTo ? ` → ${formatDate(state.dateTo)}` : ''}
+                                    <strong>✓ ${filteredDocs.length}</strong> document(s) trouvé(s) sur <strong>${state.documents.length}</strong>
+                                    ${state.searchTerm ? ` • Recherche: "${state.searchTerm}"` : ''}
+                                    ${state.selectedCategory !== 'tous' ? ` • Catégorie: ${getCategoryName(state.selectedCategory)}` : ''}
+                                    ${state.selectedDepartement !== 'tous' ? ` • ${state.currentUserInfo && (state.currentUserInfo.niveau === 1 || state.currentUserInfo.niveau === 2 || state.currentUserInfo.niveau === 3) ? 'Service' : 'Département'}: ${state.selectedDepartement}` : ''}
+                                    ${state.dateFrom ? ` • Du ${formatDate(state.dateFrom)}` : ''}
+                                    ${state.dateTo ? ` au ${formatDate(state.dateTo)}` : ''}
+                                    ${state.sortBy ? ` • Tri: ${getSortLabel(state.sortBy)}` : ''}
                                 </p>
                             </div>
                         ` : ''}
@@ -2937,6 +3012,8 @@ function render() {
                                 ` : ''}
                             </button>
 
+                            <!-- ❌ "Mon Profil" SUPPRIMÉ pour raisons de sécurité (modification niveau possible) -->
+
                             <!-- Déconnexion pour tous les niveaux -->
                             <button onclick="logout()" class="w-full text-left px-4 py-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 rounded-xl transition font-medium">
                                 🚪 Déconnexion
@@ -2955,10 +3032,10 @@ function render() {
                             <input type="text" placeholder="Titre du document *" value="${escapeHtml(formData.titre)}"
                                    oninput="updateFormData('titre', this.value)"
                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                            <select onchange="updateFormData('categorie', this.value)" 
+                            <select onchange="updateFormData('categorie', this.value)"
                                     class="w-full px-4 py-3 border-2 rounded-xl input-modern font-medium">
                                 ${state.categories.map(cat => `
-                                    <option value="${cat.id}" ${formData.categorie === cat.id ? 'selected' : ''}>
+                                    <option value="${cat.nom}" ${formData.categorie === cat.nom ? 'selected' : ''}>
                                         ${cat.icon} ${cat.nom}
                                     </option>
                                 `).join('')}
@@ -3946,6 +4023,83 @@ function render() {
                 </div>
             ` : ''}
 
+            ${false && state.showProfile ? `
+                <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onclick="if(event.target === this) { state.showProfile = false; render(); }">
+                    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+                        <div class="sticky top-0 bg-white border-b border-gray-200 px-8 py-6 flex justify-between items-center">
+                            <h2 class="text-2xl font-bold text-gray-800">👤 Mon Profil</h2>
+                            <button onclick="state.showProfile = false; render()" class="text-2xl text-gray-600 hover:text-gray-800">×</button>
+                        </div>
+
+                        <div class="p-8">
+                            <!-- Photo de profil -->
+                            <div class="text-center mb-8">
+                                <div class="relative inline-block">
+                                    <img id="profilePhotoPreview" src="" alt="Photo de profil" class="w-36 h-36 rounded-full object-cover border-4 border-gray-200 hidden">
+                                    <div id="profilePhotoPlaceholder" class="w-36 h-36 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-4xl font-bold border-4 border-gray-200">
+                                        ${((state.currentUserInfo?.prenom?.[0] || '') + (state.currentUserInfo?.nom?.[0] || '')).toUpperCase() || state.currentUser?.substring(0, 2).toUpperCase()}
+                                    </div>
+                                    <label for="photoUpload" class="absolute bottom-2 right-2 bg-white rounded-full w-10 h-10 flex items-center justify-center cursor-pointer shadow-lg border-2 border-gray-200 hover:bg-gray-50 transition">
+                                        📷
+                                    </label>
+                                    <input type="file" id="photoUpload" accept="image/*" onchange="handlePhotoUpload(event)" class="hidden">
+                                </div>
+                                <div class="mt-3 text-xs text-gray-500">Cliquez sur 📷 pour changer votre photo (max 2MB)</div>
+                            </div>
+
+                            <!-- Formulaire -->
+                            <div class="space-y-6">
+                                <div>
+                                    <label class="block text-sm font-semibold text-gray-700 mb-2">Nom complet <span class="text-red-500">*</span></label>
+                                    <input type="text" id="profile_nom" placeholder="Votre nom complet" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <div class="mt-2 text-xs text-amber-600">⚠️ Vous ne pouvez modifier votre nom qu'une seule fois</div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-semibold text-gray-700 mb-2">Nom d'utilisateur <span class="text-red-500">*</span></label>
+                                    <input type="text" id="profile_username" placeholder="Votre identifiant" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <div class="mt-2 text-xs text-amber-600">⚠️ Vous ne pouvez modifier votre nom d'utilisateur qu'une seule fois</div>
+                                    <div class="mt-1 text-xs text-gray-500">💡 Si vous changez votre nom d'utilisateur, vous devrez vous reconnecter</div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-semibold text-gray-700 mb-2">Email</label>
+                                    <input type="email" id="profile_email" placeholder="votre.email@exemple.com" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                </div>
+
+                                <!-- Informations non modifiables -->
+                                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
+                                    <div class="font-semibold text-gray-800 mb-3">📋 Informations du compte</div>
+                                    <div class="space-y-2 text-sm">
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-600">Rôle :</span>
+                                            <span class="font-semibold text-gray-800">${state.currentUserInfo?.role || 'N/A'}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-600">Niveau :</span>
+                                            <span class="font-semibold text-gray-800">${state.currentUserInfo?.niveau ?? 'N/A'}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-600">Département :</span>
+                                            <span class="font-semibold text-gray-800">${state.currentUserInfo?.departement || 'N/A'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-8 py-4 flex gap-3 justify-end">
+                            <button onclick="state.showProfile = false; state.profilePhotoPreview = null; render()" class="px-6 py-3 border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition">
+                                Annuler
+                            </button>
+                            <button onclick="saveProfile()" class="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 font-medium transition">
+                                💾 Sauvegarder
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+
             ${state.loading ? `
                 <div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center backdrop-blur-sm">
                     <div class="modal-glass p-8 rounded-2xl shadow-2xl">
@@ -3986,21 +4140,65 @@ async function initApp() {
         console.error('Erreur migration storage:', error);
     }
 
-    // Afficher le loader de vérification de session
+    // Vérifier rapidement si une session existe
+    const hasSession = sessionStorage.getItem('cerer_session');
+
+    // Si pas de session, afficher directement la page de connexion (pas de loader)
+    if (!hasSession) {
+        state.isCheckingSession = false;
+        render();
+        return;
+    }
+
+    // Si session existe, afficher le loader PUIS vérifier
     render();
 
-    // Restaurer la session si elle existe
-    const sessionRestored = await restoreSession();
+    // ✅ SÉCURITÉ: Timeout de 10 secondes pour éviter le figement
+    try {
+        const sessionRestored = await Promise.race([
+            restoreSession(),
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout de restauration de session')), 10000)
+            )
+        ]);
 
-    // Afficher l'interface appropriée (connecté ou page de connexion)
-    render();
-
-    // Charger les rôles et départements seulement si authentifié
-    if (sessionRestored) {
-        await loadRolesAndDepartements();
-        await loadServices();
+        // Charger les rôles et départements seulement si authentifié
+        if (sessionRestored) {
+            await loadRolesAndDepartements();
+            await loadServices();
+        }
+    } catch (error) {
+        console.error('❌ Erreur initApp:', error);
+        // En cas d'erreur, afficher la page de connexion
+        state.loading = false;
+        state.isCheckingSession = false;
+        state.isAuthenticated = false;
+        clearSession();
+        render();
     }
 }
 
 // Démarrer l'application
 initApp();
+
+// ✅ NETTOYAGE: Arrêter tous les intervalles avant de quitter la page (évite le clignotement)
+window.addEventListener('beforeunload', () => {
+    // Arrêter tous les intervalles actifs
+    if (sessionCheckInterval) {
+        clearInterval(sessionCheckInterval);
+        sessionCheckInterval = null;
+    }
+    if (sessionChangeInterval) {
+        clearInterval(sessionChangeInterval);
+        sessionChangeInterval = null;
+    }
+    if (window.filterResetTimer) {
+        clearInterval(window.filterResetTimer);
+        window.filterResetTimer = null;
+    }
+    if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+    }
+    console.log('🧹 Nettoyage des intervalles avant changement de page');
+});

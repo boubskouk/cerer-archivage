@@ -87,25 +87,28 @@ app.use(cors({
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// ✅ SESSIONS: Configuration MongoStore (persistance MongoDB - AVANT les routes !)
+// ✅ SESSIONS: Créer le store MongoStore (référence globale pour l'analyse de sessions)
+const sessionStore = MongoStore.create({
+    mongoUrl: MONGO_URI,
+    dbName: DB_NAME,
+    collectionName: 'sessions',
+    touchAfter: 24 * 3600, // Limiter les mises à jour de session à 1x par 24h (optimisation)
+    crypto: {
+        secret: process.env.SESSION_CRYPTO_SECRET || 'changez_ce_secret_crypto_en_production'
+    }
+});
+
+// Configuration express-session avec le store
 app.use(session({
     secret: process.env.SESSION_SECRET || 'changez_ce_secret_en_production',
     resave: false,
     saveUninitialized: false,
     rolling: true,
-    store: MongoStore.create({
-        mongoUrl: MONGO_URI,
-        dbName: DB_NAME,
-        collectionName: 'sessions',
-        touchAfter: 24 * 3600, // Limiter les mises à jour de session à 1x par 24h (optimisation)
-        crypto: {
-            secret: process.env.SESSION_CRYPTO_SECRET || 'changez_ce_secret_crypto_en_production'
-        }
-    }),
+    store: sessionStore,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000
+        maxAge: 10 * 60 * 1000 // ✅ 10 minutes (sécurité renforcée)
     },
     name: 'sessionId'
 }));
@@ -163,6 +166,247 @@ app.use('/api/', security.generalLimiter);
 
 // Fichiers statiques
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ✅ Route racine - Servir index.html par défaut
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ============================================
+// 🔍 SUPER ADMIN: ANALYSER LES SESSIONS ACTIVES
+// ============================================
+app.get('/api/superadmin/analyze-sessions', async (req, res) => {
+    try {
+        // 🔒 Vérifier que l'utilisateur est super admin
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Non authentifié'
+            });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé'
+            });
+        }
+
+        const userRole = await rolesCollection.findOne({ _id: currentUser.idRole });
+        if (!userRole || userRole.niveau !== 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'Accès refusé - Réservé aux Super Administrateurs'
+            });
+        }
+
+        // 1. Récupérer toutes les sessions actives via MongoStore (décodées automatiquement)
+        const activeUsernames = new Set();
+
+        // Wrapper sessionStore.all() dans une Promise
+        const getAllSessions = () => {
+            return new Promise((resolve, reject) => {
+                sessionStore.all((err, sessions) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve(sessions || []);
+                    }
+                });
+            });
+        };
+
+        const sessions = await getAllSessions();
+        console.log('🔍 DEBUG - Nombre de sessions trouvées:', sessions.length);
+
+        sessions.forEach((session, index) => {
+            console.log(`🔍 DEBUG - Session ${index + 1}:`, {
+                hasUserId: !!session.userId,
+                userId: session.userId,
+                sessionKeys: Object.keys(session)
+            });
+
+            if (session.userId) {
+                activeUsernames.add(session.userId);
+            }
+        });
+
+        console.log('🔍 DEBUG - Usernames actifs trouvés:', Array.from(activeUsernames));
+
+        // 2. Récupérer tous les utilisateurs marqués comme "en ligne"
+        const usersMarkedOnline = await usersCollection.find({ isOnline: true }).toArray();
+
+        // 3. Comparer et trouver les incohérences
+        const falsePositives = []; // Marqués online mais pas de session
+        const reallyOnline = []; // Vraiment connectés
+
+        for (const user of usersMarkedOnline) {
+            const hasActiveSession = activeUsernames.has(user.username);
+
+            // Récupérer le niveau de l'utilisateur
+            const userRole = await rolesCollection.findOne({ _id: user.idRole });
+            const niveau = userRole ? userRole.niveau : 'N/A';
+
+            if (hasActiveSession) {
+                reallyOnline.push({
+                    username: user.username,
+                    nom: user.nom,
+                    email: user.email,
+                    niveau: niveau,
+                    lastActivity: user.lastActivity,
+                    sessionID: user.sessionID
+                });
+            } else {
+                falsePositives.push({
+                    username: user.username,
+                    nom: user.nom,
+                    email: user.email,
+                    niveau: niveau,
+                    lastActivity: user.lastActivity,
+                    sessionID: user.sessionID,
+                    markedOnlineSince: user.lastActivity
+                });
+            }
+        }
+
+        // 4. Logger l'action
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: req.session.userId,
+            action: 'SESSIONS_ANALYZED',
+            details: {
+                totalSessionsInDB: sessions.length,
+                usersMarkedOnline: usersMarkedOnline.length,
+                reallyOnline: reallyOnline.length,
+                falsePositives: falsePositives.length,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
+
+        res.json({
+            success: true,
+            analysis: {
+                totalSessionsInDB: sessions.length,
+                usersMarkedOnline: usersMarkedOnline.length,
+                reallyOnline: reallyOnline.length,
+                falsePositives: falsePositives.length
+            },
+            reallyOnline,
+            falsePositives,
+            recommendation: falsePositives.length > 0
+                ? `⚠️ ${falsePositives.length} utilisateur(s) marqué(s) "en ligne" mais sans session active. Utilisez /api/superadmin/fix-sessions pour corriger.`
+                : '✅ Aucune incohérence détectée'
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur analyse sessions:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur',
+            error: error.message
+        });
+    }
+});
+
+// ============================================
+// 🔧 SUPER ADMIN: CORRIGER LES SESSIONS INCOHÉRENTES
+// ============================================
+app.post('/api/superadmin/fix-sessions', async (req, res) => {
+    try {
+        // 🔒 Vérifier que l'utilisateur est super admin
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Non authentifié'
+            });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé'
+            });
+        }
+
+        const userRole = await rolesCollection.findOne({ _id: currentUser.idRole });
+        if (!userRole || userRole.niveau !== 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'Accès refusé - Réservé aux Super Administrateurs'
+            });
+        }
+
+        // 1. Récupérer toutes les sessions actives via MongoStore
+        const activeUsernames = new Set();
+
+        // Wrapper sessionStore.all() dans une Promise
+        const getAllSessions = () => {
+            return new Promise((resolve, reject) => {
+                sessionStore.all((err, sessions) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve(sessions || []);
+                    }
+                });
+            });
+        };
+
+        const sessions = await getAllSessions();
+        sessions.forEach(session => {
+            if (session.userId) {
+                activeUsernames.add(session.userId);
+            }
+        });
+
+        // 2. Mettre à jour isOnline=false pour les utilisateurs sans session active
+        const result = await usersCollection.updateMany(
+            {
+                isOnline: true,
+                username: { $nin: Array.from(activeUsernames) }
+            },
+            {
+                $set: { isOnline: false },
+                $unset: { sessionID: "" }
+            }
+        );
+
+        // 3. Logger l'action
+        await auditLogsCollection.insertOne({
+            timestamp: new Date(),
+            user: req.session.userId,
+            action: 'SESSIONS_FIXED',
+            details: {
+                usersUpdated: result.modifiedCount,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+            ip: req.ip,
+            userAgent: req.headers['user-agent']
+        });
+
+        console.log(`✅ ${result.modifiedCount} utilisateur(s) corrigé(s) (isOnline mis à false)`);
+
+        res.json({
+            success: true,
+            message: `✅ ${result.modifiedCount} utilisateur(s) corrigé(s)`,
+            usersUpdated: result.modifiedCount
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur correction sessions:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur',
+            error: error.message
+        });
+    }
+});
 
 // ============================================
 // GÉNÉRATEUR D'ID UNIQUE POUR LES DOCUMENTS
@@ -480,6 +724,16 @@ async function connectDB(retryCount = 0) {
         // Charger les routes Super Admin
         app.use('/api/superadmin', superAdminRoutes.router);
         console.log('✅ Routes Super Admin (Niveau 0) chargées');
+
+        // Charger les routes de gestion de profil
+        const profileRoutes = require('./routes-profile');
+        profileRoutes(app, {
+            usersCollection,
+            rolesCollection,
+            departementsCollection,
+            auditLogsCollection
+        });
+        console.log('✅ Routes de gestion de profil chargées');
 
         // ============================================
         // ROUTES D'AUTHENTIFICATION (après le middleware de session)
@@ -895,9 +1149,15 @@ async function connectDB(retryCount = 0) {
         // Utilisé pour détecter les changements de session (sessions multiples dans même navigateur)
         app.get('/api/session-check', (req, res) => {
             if (req.session && req.session.userId) {
-                res.json({ username: req.session.userId });
+                res.json({
+                    authenticated: true,
+                    username: req.session.userId
+                });
             } else {
-                res.json({ username: null });
+                res.json({
+                    authenticated: false,
+                    username: null
+                });
             }
         });
 
@@ -1001,16 +1261,29 @@ async function connectDB(retryCount = 0) {
                     try {
                         if (log.details && log.details.documentId) {
                             const documentsCollection = db.collection('documents');
-                            const document = await documentsCollection.findOne({
-                                _id: log.details.documentId
+
+                            // ✅ CORRECTION: Chercher d'abord par idDocument (ID lisible),
+                            // puis par _id (ObjectId) si nécessaire
+                            let document = null;
+
+                            // Essayer de trouver par idDocument (ex: "DOC-20251227-123456789-1234")
+                            document = await documentsCollection.findOne({
+                                idDocument: log.details.documentId
                             });
 
+                            // Si pas trouvé et que documentId ressemble à un ObjectId, essayer par _id
+                            if (!document && log.details.documentId.match(/^[0-9a-fA-F]{24}$/)) {
+                                document = await documentsCollection.findOne({
+                                    _id: new ObjectId(log.details.documentId)
+                                });
+                            }
+
                             if (document) {
-                                const docOwner = await usersCollection.findOne({ username: document.userId });
+                                const docOwner = await usersCollection.findOne({ username: document.idUtilisateur });
                                 enrichedLog.documentInfo = {
                                     titre: document.titre || 'N/A',
-                                    proprietaire: docOwner ? `${docOwner.prenom} ${docOwner.nom}` : document.userId,
-                                    statut: document.statut || 'N/A',
+                                    proprietaire: docOwner ? `${docOwner.prenom || ''} ${docOwner.nom || ''}`.trim() : document.idUtilisateur,
+                                    statut: document.locked ? '🔒 Verrouillé' : '🔓 Déverrouillé',
                                     categorie: document.categorie || null
                                 };
                             }
@@ -1228,15 +1501,15 @@ async function connectDB(retryCount = 0) {
                 // Récupérer tous les documents verrouillés
                 const documentsCollection = db.collection('documents');
                 const lockedDocs = await documentsCollection.find({
-                    statut: 'verrouillé',
-                    verrouilléPar: { $exists: true, $ne: null }
+                    locked: true,
+                    lockedBy: { $exists: true, $ne: null }
                 }).toArray();
 
                 // Grouper par admin niveau 1
                 const adminMap = new Map();
 
                 for (const doc of lockedDocs) {
-                    const adminUsername = doc.verrouilléPar;
+                    const adminUsername = doc.lockedBy?.utilisateur;
 
                     // Vérifier que c'est un admin niveau 1
                     const admin = await usersCollection.findOne({ username: adminUsername });
@@ -1296,33 +1569,41 @@ async function connectDB(retryCount = 0) {
                 const { username, limit } = req.query;
                 const limitNum = parseInt(limit) || 100;
 
-                // Construire le filtre
+                // ✅ CORRECTION: Utiliser les bons champs (locked et lockedBy)
                 const filter = {
-                    statut: 'verrouillé',
-                    verrouilléPar: { $exists: true, $ne: null }
+                    locked: true,
+                    lockedBy: { $exists: true, $ne: null }
                 };
 
                 if (username) {
-                    filter.verrouilléPar = username;
+                    filter['lockedBy.utilisateur'] = username;
                 }
 
                 // Récupérer les documents
                 const documentsCollection = db.collection('documents');
                 const lockedDocs = await documentsCollection
                     .find(filter)
-                    .sort({ dateVerrouillage: -1 })
+                    .sort({ 'lockedBy.date': -1 })
                     .limit(limitNum)
                     .toArray();
 
+                console.log(`🔒 Documents verrouillés trouvés: ${lockedDocs.length}`);
+
                 // Enrichir avec les informations utilisateur
                 const enrichedDocs = await Promise.all(lockedDocs.map(async (doc) => {
-                    const owner = await usersCollection.findOne({ username: doc.userId });
-                    const ownerDept = owner ? await departementsCollection.findOne({ _id: owner.idDepartement }) : null;
+                    const owner = await usersCollection.findOne({ username: doc.idUtilisateur });
+                    const ownerDept = owner && owner.idDepartement
+                        ? await departementsCollection.findOne({ _id: new ObjectId(owner.idDepartement) })
+                        : null;
 
                     return {
                         ...doc,
-                        proprietaire: owner ? `${owner.prenom} ${owner.nom}` : doc.userId,
-                        departementProprietaire: ownerDept ? ownerDept.nom : 'N/A'
+                        titre: doc.titre,
+                        proprietaire: owner ? `${owner.prenom || ''} ${owner.nom || ''}`.trim() : doc.idUtilisateur,
+                        departementProprietaire: ownerDept ? ownerDept.nom : 'N/A',
+                        verrouilléPar: doc.lockedBy?.utilisateur || 'N/A',
+                        dateVerrouillage: doc.lockedBy?.date || doc.createdAt,
+                        nomCompletVerrouilleur: doc.lockedBy?.nomComplet || 'N/A'
                     };
                 }));
 
@@ -1336,6 +1617,194 @@ async function connectDB(retryCount = 0) {
 
             } catch (error) {
                 console.error('❌ Erreur documents locked:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Liste des utilisateurs avec pagination et filtres (Super Admin)
+         */
+        app.get('/api/superadmin/users', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Paramètres de pagination
+                const page = parseInt(req.query.page) || 1;
+                const limit = 15; // 15 utilisateurs par page
+                const skip = (page - 1) * limit;
+
+                // Paramètres de filtrage
+                const { search, role, status, period, startDate, endDate } = req.query;
+
+                // Construire le filtre de recherche
+                const filter = {};
+
+                // Recherche par username, nom, ou email
+                if (search && search.trim()) {
+                    const searchRegex = new RegExp(search.trim(), 'i');
+                    filter.$or = [
+                        { username: searchRegex },
+                        { nom: searchRegex },
+                        { prenom: searchRegex },
+                        { email: searchRegex }
+                    ];
+                }
+
+                // Filtre par rôle
+                if (role && role !== 'all') {
+                    filter.idRole = new ObjectId(role);
+                }
+
+                // Filtre par statut
+                if (status === 'active') {
+                    filter.blocked = { $ne: true };
+                } else if (status === 'blocked') {
+                    filter.blocked = true;
+                }
+
+                // Filtre par période de création
+                if (period && period !== 'all') {
+                    const now = new Date();
+                    let startPeriod;
+
+                    if (period === '24h') {
+                        startPeriod = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                    } else if (period === '7d') {
+                        startPeriod = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    } else if (period === '30d') {
+                        startPeriod = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    } else if (period === 'custom' && startDate && endDate) {
+                        startPeriod = new Date(startDate);
+                        const endPeriod = new Date(endDate);
+                        filter.createdAt = { $gte: startPeriod, $lte: endPeriod };
+                    }
+
+                    if (startPeriod && period !== 'custom') {
+                        filter.createdAt = { $gte: startPeriod };
+                    }
+                }
+
+                // Compter le total d'utilisateurs correspondant aux filtres
+                const totalUsers = await usersCollection.countDocuments(filter);
+                const totalPages = Math.ceil(totalUsers / limit);
+
+                // Récupérer les utilisateurs avec pagination
+                const users = await usersCollection
+                    .find(filter)
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .toArray();
+
+                // Enrichir avec les informations de rôle et département
+                const enrichedUsers = await Promise.all(users.map(async (u) => {
+                    const role = await rolesCollection.findOne({ _id: u.idRole });
+                    const dept = u.idDepartement ? await departementsCollection.findOne({ _id: u.idDepartement }) : null;
+
+                    return {
+                        _id: u._id,
+                        username: u.username,
+                        nom: u.nom || 'N/A',
+                        prenom: u.prenom || 'N/A',
+                        email: u.email || 'N/A',
+                        role: role ? role.nom : 'N/A',
+                        niveau: role ? role.niveau : null,
+                        departement: dept ? dept.nom : 'N/A',
+                        blocked: u.blocked || false,
+                        blockedReason: u.blockedReason || null,
+                        createdAt: u.createdAt || null,
+                        lastLogin: u.lastLogin || null
+                    };
+                }));
+
+                // Calculer les statistiques
+                const totalCount = await usersCollection.countDocuments();
+                const activeCount = await usersCollection.countDocuments({ blocked: { $ne: true } });
+                const blockedCount = await usersCollection.countDocuments({ blocked: true });
+
+                res.json({
+                    success: true,
+                    data: {
+                        users: enrichedUsers,
+                        pagination: {
+                            page,
+                            totalPages,
+                            totalUsers
+                        },
+                        stats: {
+                            total: totalCount,
+                            active: activeCount,
+                            blocked: blockedCount
+                        }
+                    }
+                });
+
+                console.log(`📊 Liste utilisateurs: page ${page}/${totalPages}, ${enrichedUsers.length} utilisateurs`);
+
+            } catch (error) {
+                console.error('❌ Erreur liste utilisateurs:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Statistiques des départements et services
+         */
+        app.get('/api/superadmin/departments/stats', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Compter tous les départements
+                const totalDepartments = await departementsCollection.countDocuments();
+
+                // Compter les départements principaux (ceux qui ont isPrincipal: true)
+                const mainDepartments = await departementsCollection.countDocuments({ isPrincipal: true });
+
+                // Compter tous les services
+                const servicesCollection = db.collection('services');
+                const totalServices = await servicesCollection.countDocuments();
+
+                res.json({
+                    success: true,
+                    data: {
+                        total: totalDepartments,
+                        main: mainDepartments,
+                        services: totalServices
+                    }
+                });
+
+                console.log(`📊 Statistiques départements: ${totalDepartments} depts, ${mainDepartments} principaux, ${totalServices} services`);
+
+            } catch (error) {
+                console.error('❌ Erreur statistiques départements:', error);
                 res.status(500).json({ success: false, message: 'Erreur serveur' });
             }
         });
@@ -2553,7 +3022,7 @@ app.post('/api/documents', security.uploadLimiter, [
         const role = await rolesCollection.findOne({ _id: new ObjectId(user.idRole) });
         const departement = user.idDepartement ? await departementsCollection.findOne({ _id: new ObjectId(user.idDepartement) }) : null;
 
-        // ✅ NOUVEAU: Déterminer si c'est un service ou un département
+        // ✅ Déterminer si c'est un service ou un département
         const isNiveau123 = role && (role.niveau == 1 || role.niveau == 2 || role.niveau == 3);
         const idArchivage = departementArchivage || user.idDepartement;
 
@@ -2562,19 +3031,35 @@ app.post('/api/documents', security.uploadLimiter, [
         let deptArchivage = null;
         let idDeptArchivage = null;
 
+        console.log(`📝 Archivage - Niveau: ${role?.niveau}, idArchivage: ${idArchivage}`);
+
         if (isNiveau123 && idArchivage) {
             // Niveaux 1/2/3 : chercher dans les services
-            const service = await servicesCollection.findOne({ _id: new ObjectId(idArchivage) });
-            if (service) {
-                serviceArchivage = service.nom;
-                idServiceArchivage = idArchivage;
+            try {
+                const service = await servicesCollection.findOne({ _id: new ObjectId(idArchivage) });
+                if (service) {
+                    serviceArchivage = service.nom;
+                    idServiceArchivage = idArchivage;
+                    console.log(`✅ Service trouvé: ${service.nom}`);
+                } else {
+                    console.warn(`⚠️ Service non trouvé avec ID: ${idArchivage}`);
+                }
+            } catch (error) {
+                console.error(`❌ Erreur recherche service:`, error.message);
             }
         } else if (idArchivage) {
             // Niveau 0 : chercher dans les départements
-            const dept = await departementsCollection.findOne({ _id: new ObjectId(idArchivage) });
-            if (dept) {
-                deptArchivage = dept.nom;
-                idDeptArchivage = idArchivage;
+            try {
+                const dept = await departementsCollection.findOne({ _id: new ObjectId(idArchivage) });
+                if (dept) {
+                    deptArchivage = dept.nom;
+                    idDeptArchivage = idArchivage;
+                    console.log(`✅ Département trouvé: ${dept.nom}`);
+                } else {
+                    console.warn(`⚠️ Département non trouvé avec ID: ${idArchivage}`);
+                }
+            } catch (error) {
+                console.error(`❌ Erreur recherche département:`, error.message);
             }
         }
 
@@ -3185,20 +3670,24 @@ app.post('/api/documents/:userId/:docId/toggle-lock', async (req, res) => {
             { $set: updateData }
         );
 
-        // Logger l'action dans auditLogs avec heure système
+        // ✅ Logger l'action dans auditLogs avec informations enrichies
         await auditLogsCollection.insertOne({
             timestamp: new Date(),
-            user: userId,
-            action: newLockedState ? 'DOCUMENT_VERROUILLE' : 'DOCUMENT_DEVERROUILLE',
+            username: userId,
+            eventType: newLockedState ? 'DOCUMENT_VERROUILLE' : 'DOCUMENT_DEVERROUILLE',
+            severity: 'INFO',
             details: {
                 documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
                 titre: document.titre,
                 ip: req.ip,
                 userAgent: req.headers['user-agent']
             },
-            documentId: document.idDocument || docId,  // Utiliser idDocument (ID lisible)
+            documentId: document.idDocument || docId,  // Pour compatibilité
             ip: req.ip,
-            userAgent: req.headers['user-agent']
+            userAgent: req.headers['user-agent'],
+            explanation: newLockedState
+                ? `Le document "${document.titre}" a été verrouillé par ${user.nom || userId} (Niveau ${role.niveau}). Les utilisateurs ne pourront plus modifier ou supprimer ce document tant qu'il reste verrouillé.`
+                : `Le document "${document.titre}" a été déverrouillé par ${user.nom || userId} (Niveau ${role.niveau}). Le document peut maintenant être modifié ou supprimé par son propriétaire.`
         });
 
         console.log(`🔒 Document ${docId} ${newLockedState ? 'verrouillé' : 'déverrouillé'} par ${userId}`);
@@ -4456,25 +4945,26 @@ app.get('/api/departements', async (req, res) => {
 
                 console.log(`🔍 /api/departements - User: ${req.session.userId}, Role: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
 
-                // 🔒 Si niveau 1, ne montrer QUE son département
-                if (currentUserRole && currentUserRole.niveau == 1) {
+                // 🔒 CORRECTION: Niveaux 1, 2, 3 ne voient QUE leur département
+                // Seul le niveau 0 (Super Admin) voit tous les départements
+                if (currentUserRole && currentUserRole.niveau >= 1) {
                     if (currentUser.idDepartement) {
                         const deptId = typeof currentUser.idDepartement === 'string'
                             ? new ObjectId(currentUser.idDepartement)
                             : currentUser.idDepartement;
 
-                        // Récupérer UNIQUEMENT le département du niveau 1
+                        // Récupérer UNIQUEMENT le département de l'utilisateur
                         const userDept = await departementsCollection.findOne({ _id: deptId });
                         departements = userDept ? [userDept] : [];
 
-                        console.log(`🔒 NIVEAU 1 - Département filtré: ${userDept?.nom || 'Aucun'}`);
+                        console.log(`🔒 NIVEAU ${currentUserRole.niveau} - Département filtré: ${userDept?.nom || 'Aucun'}`);
                     } else {
-                        console.log(`🔴 NIVEAU 1 SANS DÉPARTEMENT - Retour liste vide`);
+                        console.log(`🔴 NIVEAU ${currentUserRole.niveau} SANS DÉPARTEMENT - Retour liste vide`);
                         return res.json({ success: true, departements: [] });
                     }
                 } else {
-                    // Niveau 0 ou autre: accès à tous les départements
-                    console.log(`✅ Niveau ${currentUserRole?.niveau || 'inconnu'} - Accès à tous les départements`);
+                    // Niveau 0 (Super Admin): accès à tous les départements
+                    console.log(`✅ Niveau 0 (Super Admin) - Accès à tous les départements`);
                     departements = await departementsCollection.find({}).sort({ nom: 1 }).toArray();
                 }
             } else {
@@ -4485,10 +4975,118 @@ app.get('/api/departements', async (req, res) => {
             return res.json({ success: true, departements: [] });
         }
 
-        console.log(`📊 /api/departements - ${departements.length} département(s) retourné(s) pour ${req.session.userId}`);
-        res.json({ success: true, departements });
+        // ✅ Enrichir chaque département avec des statistiques réelles
+        const enrichedDepartements = await Promise.all(departements.map(async (dept) => {
+            // Compter les services
+            const servicesCount = await servicesCollection.countDocuments({
+                idDepartement: dept._id
+            });
+
+            // Compter les documents du département
+            const documentsCount = await documentsCollection.countDocuments({
+                idDepartement: dept._id,
+                deleted: { $ne: true }
+            });
+
+            // Calculer la taille totale des documents
+            const documents = await documentsCollection.find({
+                idDepartement: dept._id,
+                deleted: { $ne: true }
+            }).toArray();
+            const totalSize = documents.reduce((sum, doc) => sum + (doc.taille || 0), 0);
+
+            // Compter les utilisateurs du département
+            const usersCount = await usersCollection.countDocuments({
+                idDepartement: dept._id
+            });
+
+            // Trouver la dernière activité (dernier document ajouté)
+            const lastDoc = await documentsCollection.findOne(
+                { idDepartement: dept._id, deleted: { $ne: true } },
+                { sort: { dateAjout: -1 } }
+            );
+            const lastActivity = lastDoc?.dateAjout || dept.dateCreation || new Date();
+
+            return {
+                ...dept,
+                servicesCount,
+                documentsCount,
+                totalSize,
+                usersCount,
+                lastActivity
+            };
+        }));
+
+        console.log(`📊 /api/departements - ${enrichedDepartements.length} département(s) retourné(s) pour ${req.session.userId}`);
+        res.json({ success: true, departements: enrichedDepartements });
     } catch (error) {
         console.error('Erreur récupération départements:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Créer un nouveau département
+app.post('/api/departements', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const { nom, icon, description } = req.body;
+
+        // Vérifier si l'utilisateur est connecté
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Récupérer le rôle de l'utilisateur
+        const roleId = typeof currentUser.idRole === 'string'
+            ? new ObjectId(currentUser.idRole)
+            : currentUser.idRole;
+        const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+        // Vérifier les permissions (Niveau 0 ou 1 seulement)
+        if (!currentUserRole || currentUserRole.niveau > 1) {
+            return res.status(403).json({
+                success: false,
+                message: 'Accès refusé: vous devez être Admin (Niveau 0 ou 1)'
+            });
+        }
+
+        // Validation
+        if (!nom || nom.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Le nom du département est obligatoire'
+            });
+        }
+
+        // Créer le département
+        const newDepartment = {
+            nom: nom.trim(),
+            icon: icon || '',
+            description: description || '',
+            dateCreation: new Date(),
+            createdBy: req.session.userId
+        };
+
+        const result = await departementsCollection.insertOne(newDepartment);
+
+        console.log(`✅ Département créé: ${nom} par ${req.session.userId}`);
+
+        res.json({
+            success: true,
+            message: 'Département créé avec succès',
+            departement: {
+                _id: result.insertedId,
+                ...newDepartment
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur création département:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
@@ -4513,24 +5111,24 @@ app.get('/api/services', async (req, res) => {
 
                 console.log(`🔍 /api/services - User: ${req.session.userId}, Role: ${currentUserRole?.nom}, Niveau: ${currentUserRole?.niveau}`);
 
-                // 🔒 Si niveau 1, ne montrer QUE les services de son département
-                if (currentUserRole && currentUserRole.niveau == 1) {
+                // 🔒 CORRECTION: Niveaux 1, 2, 3 ne voient QUE les services de LEUR département
+                if (currentUserRole && (currentUserRole.niveau == 1 || currentUserRole.niveau == 2 || currentUserRole.niveau == 3)) {
                     if (currentUser.idDepartement) {
                         const deptId = typeof currentUser.idDepartement === 'string'
                             ? new ObjectId(currentUser.idDepartement)
                             : currentUser.idDepartement;
 
-                        // Récupérer UNIQUEMENT les services du département du niveau 1
+                        // Récupérer UNIQUEMENT les services du département de l'utilisateur
                         services = await servicesCollection.find({ idDepartement: deptId }).sort({ nom: 1 }).toArray();
 
-                        console.log(`🔒 NIVEAU 1 - ${services.length} service(s) du département filtré(s)`);
+                        console.log(`🔒 NIVEAU ${currentUserRole.niveau} - ${services.length} service(s) du département filtré(s)`);
                     } else {
-                        console.log(`🔴 NIVEAU 1 SANS DÉPARTEMENT - Retour liste vide`);
+                        console.log(`🔴 NIVEAU ${currentUserRole.niveau} SANS DÉPARTEMENT - Retour liste vide`);
                         return res.json({ success: true, services: [] });
                     }
                 } else {
-                    // Niveau 0 ou autre: accès à tous les services
-                    console.log(`✅ Niveau ${currentUserRole?.niveau || 'inconnu'} - Accès à tous les services`);
+                    // Niveau 0 (Super Admin): accès à tous les services
+                    console.log(`✅ Niveau ${currentUserRole?.niveau || 'inconnu'} (Super Admin) - Accès à tous les services`);
                     services = await servicesCollection.find({}).sort({ nom: 1 }).toArray();
                 }
             } else {
@@ -4593,12 +5191,12 @@ app.post('/api/services', async (req, res) => {
 app.put('/api/services/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { nom, code, description } = req.body;
+        const { nom, icon, description } = req.body;
 
-        if (!nom || !code) {
+        if (!nom) {
             return res.status(400).json({
                 success: false,
-                message: 'Nom et code requis'
+                message: 'Le nom du service est obligatoire'
             });
         }
 
@@ -4611,21 +5209,10 @@ app.put('/api/services/:id', async (req, res) => {
             });
         }
 
-        // Si on change le code, vérifier qu'il n'existe pas déjà
-        if (code !== service.code) {
-            const existing = await servicesCollection.findOne({ code });
-            if (existing) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Ce code de service existe déjà'
-                });
-            }
-        }
-
         // Mettre à jour
         const updateData = {
             nom,
-            code,
+            icon: icon || service.icon || '',
             description: description || service.description || '',
             lastModified: new Date()
         };
@@ -4734,12 +5321,12 @@ app.post('/api/categories', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
         }
 
-        // 🔒 VÉRIFIER QUE L'UTILISATEUR EST NIVEAU 1
+        // 🔒 VÉRIFIER QUE L'UTILISATEUR EST NIVEAU 0, 1 ou 2
         const userRole = await rolesCollection.findOne({ _id: user.idRole });
-        if (!userRole || userRole.niveau !== 1) {
+        if (!userRole || userRole.niveau > 2) {
             return res.status(403).json({
                 success: false,
-                message: 'Seuls les utilisateurs niveau 1 peuvent créer des catégories'
+                message: 'Seuls les utilisateurs niveau 0, 1 ou 2 peuvent créer des catégories'
             });
         }
 
@@ -4894,6 +5481,772 @@ app.delete('/api/categories/:userId/:catId', async (req, res) => {
         res.json({ success: true, message: 'Catégorie supprimée' });
     } catch (error) {
         console.error('Erreur suppression catégorie:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// NOUVELLES ROUTES POUR DASHBOARD HIÉRARCHIQUE
+// ============================================
+
+// Récupérer les services d'un département spécifique
+app.get('/api/departments/:deptId/services', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const { deptId } = req.params;
+
+        // Vérifier si l'utilisateur est connecté
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Récupérer le rôle de l'utilisateur
+        const roleId = typeof currentUser.idRole === 'string'
+            ? new ObjectId(currentUser.idRole)
+            : currentUser.idRole;
+        const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+        // Convertir deptId en ObjectId
+        const departmentId = new ObjectId(deptId);
+
+        // 🔒 SÉCURITÉ : Vérifier les permissions selon le niveau
+        const userLevel = currentUserRole ? currentUserRole.niveau : 3;
+        const userDeptId = typeof currentUser.idDepartement === 'string'
+            ? new ObjectId(currentUser.idDepartement)
+            : currentUser.idDepartement;
+
+        // Niveau 1, 2, 3 : Ne peuvent accéder QU'À LEUR propre département
+        if (userLevel >= 1 && userLevel <= 3) {
+            if (!userDeptId || !userDeptId.equals(departmentId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Accès refusé: vous ne pouvez accéder qu\'aux services de votre propre département'
+                });
+            }
+        }
+        // Niveau 0 (Super Admin) : Accès à tous les départements ✅
+
+        // Récupérer les services du département
+        const services = await servicesCollection
+            .find({ idDepartement: departmentId })
+            .sort({ nom: 1 })
+            .toArray();
+
+        // ✅ Enrichir chaque service avec le nombre de catégories
+        const enrichedServices = await Promise.all(services.map(async (service) => {
+            // Compter les catégories (en utilisant l'ancienne collection categories)
+            const categoriesCount = await categoriesCollection.countDocuments({});
+
+            // Compter les documents du service
+            const documentsCount = await documentsCollection.countDocuments({
+                idService: service._id,
+                deleted: { $ne: true }
+            });
+
+            return {
+                ...service,
+                categoriesCount,
+                documentsCount
+            };
+        }));
+
+        console.log(`📂 /api/departments/${deptId}/services - ${enrichedServices.length} service(s) trouvé(s)`);
+        res.json({ success: true, services: enrichedServices });
+    } catch (error) {
+        console.error('Erreur récupération services du département:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Créer un nouveau service dans un département
+app.post('/api/departments/:deptId/services', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const { deptId } = req.params;
+        const { nom, icon, description } = req.body;
+
+        // Vérifier si l'utilisateur est connecté
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Récupérer le rôle de l'utilisateur
+        const roleId = typeof currentUser.idRole === 'string'
+            ? new ObjectId(currentUser.idRole)
+            : currentUser.idRole;
+        const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+        // Vérifier les permissions (Niveau 0, 1 ou 2 autorisés)
+        if (!currentUserRole || currentUserRole.niveau > 2) {
+            return res.status(403).json({
+                success: false,
+                message: 'Accès refusé: vous devez être Niveau 0, 1 ou 2'
+            });
+        }
+
+        // Validation
+        if (!nom || nom.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Le nom du service est obligatoire'
+            });
+        }
+
+        // Convertir deptId en ObjectId
+        const departmentId = new ObjectId(deptId);
+
+        // Vérifier que le département existe
+        const department = await departementsCollection.findOne({ _id: departmentId });
+        if (!department) {
+            return res.status(404).json({
+                success: false,
+                message: 'Département non trouvé'
+            });
+        }
+
+        // Créer le service
+        const newService = {
+            nom: nom.trim(),
+            icon: icon || '',
+            description: description || '',
+            idDepartement: departmentId,
+            dateCreation: new Date(),
+            createdBy: req.session.userId
+        };
+
+        const result = await servicesCollection.insertOne(newService);
+
+        console.log(`✅ Service créé: ${nom} (département: ${deptId})`);
+
+        res.json({
+            success: true,
+            message: 'Service créé avec succès',
+            service: {
+                _id: result.insertedId,
+                ...newService
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur création service:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les catégories d'un service spécifique
+app.get('/api/services/:serviceId/categories', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const { serviceId } = req.params;
+
+        // Vérifier si l'utilisateur est connecté
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Valider le format de l'ObjectId
+        if (!ObjectId.isValid(serviceId)) {
+            return res.status(400).json({ success: false, message: 'ID de service invalide' });
+        }
+
+        // Récupérer le service pour obtenir son département
+        const serviceObjectId = new ObjectId(serviceId);
+        const service = await servicesCollection.findOne({ _id: serviceObjectId });
+
+        if (!service) {
+            return res.status(404).json({ success: false, message: 'Service non trouvé' });
+        }
+
+        // Récupérer le rôle de l'utilisateur
+        const roleId = typeof currentUser.idRole === 'string'
+            ? new ObjectId(currentUser.idRole)
+            : currentUser.idRole;
+        const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+        // 🔒 Si niveau 1, vérifier que le service appartient à son département
+        if (currentUserRole && currentUserRole.niveau == 1) {
+            const userDeptId = typeof currentUser.idDepartement === 'string'
+                ? new ObjectId(currentUser.idDepartement)
+                : currentUser.idDepartement;
+
+            const serviceDeptId = typeof service.idDepartement === 'string'
+                ? new ObjectId(service.idDepartement)
+                : service.idDepartement;
+
+            if (!userDeptId.equals(serviceDeptId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Accès refusé: ce service n\'appartient pas à votre département'
+                });
+            }
+        }
+
+        // Récupérer toutes les catégories de tous les utilisateurs du département
+        const deptId = typeof service.idDepartement === 'string'
+            ? new ObjectId(service.idDepartement)
+            : service.idDepartement;
+
+        const deptUsers = await usersCollection
+            .find({ idDepartement: deptId })
+            .toArray();
+        const deptUsernames = deptUsers.map(u => u.username);
+
+        // Récupérer les catégories qui correspondent au service
+        const categories = await categoriesCollection
+            .find({
+                idUtilisateur: { $in: deptUsernames },
+                idService: serviceId
+            })
+            .sort({ nom: 1 })
+            .toArray();
+
+        console.log(`🏷️ /api/services/${serviceId}/categories - ${categories.length} catégorie(s) trouvée(s)`);
+        res.json({ success: true, categories });
+    } catch (error) {
+        console.error('Erreur récupération catégories du service:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Créer une nouvelle catégorie dans un service
+app.post('/api/services/:serviceId/categories', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const { serviceId } = req.params;
+        const { nom, icon, description } = req.body;
+
+        // Vérifier si l'utilisateur est connecté
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Récupérer le rôle de l'utilisateur
+        const roleId = typeof currentUser.idRole === 'string'
+            ? new ObjectId(currentUser.idRole)
+            : currentUser.idRole;
+        const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+        // Vérifier les permissions (Niveau 0, 1 ou 2 autorisés)
+        if (!currentUserRole || currentUserRole.niveau > 2) {
+            return res.status(403).json({
+                success: false,
+                message: 'Accès refusé: vous devez être Niveau 0, 1 ou 2'
+            });
+        }
+
+        // Validation
+        if (!nom || nom.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Le nom de la catégorie est obligatoire'
+            });
+        }
+
+        // Convertir serviceId en ObjectId
+        const serviceObjectId = new ObjectId(serviceId);
+
+        // Vérifier que le service existe
+        const service = await servicesCollection.findOne({ _id: serviceObjectId });
+        if (!service) {
+            return res.status(404).json({
+                success: false,
+                message: 'Service non trouvé'
+            });
+        }
+
+        // Créer un ID unique pour la catégorie (les catégories sont stockées dans le service)
+        const categoryId = new ObjectId().toString();
+
+        // Ajouter la catégorie au service
+        const category = {
+            id: categoryId,
+            nom: nom.trim(),
+            icon: icon || '',
+            description: description || '',
+            dateCreation: new Date(),
+            createdBy: req.session.userId,
+            documentsCount: 0
+        };
+
+        await servicesCollection.updateOne(
+            { _id: serviceObjectId },
+            {
+                $push: { categories: category },
+                $set: { lastModified: new Date() }
+            }
+        );
+
+        console.log(`✅ Catégorie créée: ${nom} (service: ${serviceId})`);
+
+        res.json({
+            success: true,
+            message: 'Catégorie créée avec succès',
+            category
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur création catégorie:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// Récupérer les documents d'une catégorie avec pagination et tri
+app.get('/api/categories/:categoryId/documents', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const { categoryId } = req.params;
+        const { page = 1, limit = 20, sortBy = 'date', order = 'desc' } = req.query;
+
+        // Vérifier si l'utilisateur est connecté
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUser = await usersCollection.findOne({ username: req.session.userId });
+        if (!currentUser) {
+            return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        // Récupérer le rôle de l'utilisateur
+        const roleId = typeof currentUser.idRole === 'string'
+            ? new ObjectId(currentUser.idRole)
+            : currentUser.idRole;
+        const currentUserRole = await rolesCollection.findOne({ _id: roleId });
+
+        // Récupérer la catégorie pour vérifier les permissions
+        const category = await categoriesCollection.findOne({ id: categoryId });
+
+        if (!category) {
+            return res.status(404).json({ success: false, message: 'Catégorie non trouvée' });
+        }
+
+        // Déterminer les usernames autorisés selon le niveau
+        let allowedUsernames = [];
+
+        if (currentUserRole && currentUserRole.niveau == 1) {
+            // Niveau 1: documents de tous les utilisateurs du département
+            const deptId = typeof currentUser.idDepartement === 'string'
+                ? new ObjectId(currentUser.idDepartement)
+                : currentUser.idDepartement;
+
+            const deptUsers = await usersCollection
+                .find({ idDepartement: deptId })
+                .toArray();
+            allowedUsernames = deptUsers.map(u => u.username);
+        } else if (currentUserRole && currentUserRole.niveau == 0) {
+            // Niveau 0: tous les documents
+            const allUsers = await usersCollection.find({}).toArray();
+            allowedUsernames = allUsers.map(u => u.username);
+        } else {
+            // Autres niveaux: uniquement leurs documents
+            allowedUsernames = [currentUser.username];
+        }
+
+        // Construire le critère de tri
+        let sortCriteria = {};
+        switch (sortBy) {
+            case 'date':
+                sortCriteria.dateAjout = order === 'asc' ? 1 : -1;
+                break;
+            case 'name':
+                sortCriteria.titre = order === 'asc' ? 1 : -1;
+                break;
+            case 'size':
+                sortCriteria.taille = order === 'asc' ? 1 : -1;
+                break;
+            default:
+                sortCriteria.dateAjout = -1; // Par défaut: plus récent
+        }
+
+        // Calculer la pagination
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
+
+        // Récupérer les documents avec pagination
+        const documents = await documentsCollection
+            .find({
+                idUtilisateur: { $in: allowedUsernames },
+                categorie: categoryId
+            })
+            .sort(sortCriteria)
+            .skip(skip)
+            .limit(limitNum)
+            .toArray();
+
+        // Compter le total pour la pagination
+        const totalDocuments = await documentsCollection.countDocuments({
+            idUtilisateur: { $in: allowedUsernames },
+            categorie: categoryId
+        });
+
+        const totalPages = Math.ceil(totalDocuments / limitNum);
+
+        // Retirer le contenu binaire
+        documents.forEach(doc => delete doc.contenu);
+
+        console.log(`📄 /api/categories/${categoryId}/documents - Page ${page}/${totalPages} - ${documents.length}/${totalDocuments} document(s)`);
+
+        res.json({
+            success: true,
+            documents,
+            pagination: {
+                currentPage: pageNum,
+                totalPages,
+                totalDocuments,
+                limit: limitNum,
+                hasNextPage: pageNum < totalPages,
+                hasPrevPage: pageNum > 1
+            }
+        });
+    } catch (error) {
+        console.error('Erreur récupération documents de la catégorie:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================================
+// ROUTES POUR LE NOUVEAU DASHBOARD
+// ============================================
+
+/**
+ * Recherche globale - Services, Catégories, Documents
+ */
+app.get('/api/search', async (req, res) => {
+    try {
+        const { q } = req.query;
+
+        if (!q || q.trim().length < 2) {
+            return res.json({
+                success: true,
+                services: [],
+                categories: [],
+                documents: []
+            });
+        }
+
+        const searchTerm = q.trim();
+        const searchRegex = new RegExp(searchTerm, 'i');
+
+        // Récupérer l'utilisateur
+        const userId = req.session.userId;
+        const currentUserData = await usersCollection.findOne({ username: userId });
+
+        if (!currentUserData) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const userLevel = currentUserData.niveau || 3;
+        const userDeptId = currentUserData.idDepartement;
+
+        // Recherche dans les services
+        let servicesQuery = { nom: searchRegex };
+        if (userLevel === 1 && userDeptId) {
+            servicesQuery.idDepartement = userDeptId;
+        }
+
+        const services = await servicesCollection.find(servicesQuery).limit(20).toArray();
+
+        // Enrichir avec les noms de départements
+        for (let service of services) {
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(service.idDepartement) });
+            service.departmentName = dept?.nom;
+            service.departmentId = service.idDepartement;
+        }
+
+        // Recherche dans les catégories
+        let categoriesQuery = { nom: searchRegex };
+        if (userLevel === 1 && userDeptId) {
+            categoriesQuery.idDepartement = userDeptId;
+        }
+
+        const categories = await categoriesCollection.find(categoriesQuery).limit(20).toArray();
+
+        // Enrichir avec les noms de départements et services
+        for (let category of categories) {
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(category.idDepartement) });
+            const service = await servicesCollection.findOne({ _id: new ObjectId(category.idService) });
+            category.departmentName = dept?.nom;
+            category.departmentId = category.idDepartement;
+            category.serviceName = service?.nom;
+            category.serviceId = category.idService;
+        }
+
+        // Recherche dans les documents (titre, ID, nom de fichier, description)
+        // ✅ CORRECTION: Rechercher par idDocument (ID lisible) au lieu de _id (ObjectId)
+        let documentsQuery = {
+            $or: [
+                { titre: searchRegex },
+                { idDocument: searchRegex },  // ID lisible (ex: DOC-20251227-...)
+                { nomFichier: searchRegex },
+                { description: searchRegex }
+            ],
+            deleted: { $ne: true }  // Exclure les documents supprimés
+        };
+
+        // Filtrer par département/utilisateur selon le niveau
+        if (userLevel === 1 && userDeptId) {
+            documentsQuery.idDepartement = userDeptId;
+        } else if (userLevel === 2) {
+            documentsQuery.idUtilisateur = userId;
+        } else if (userLevel === 3) {
+            documentsQuery.idUtilisateur = userId;
+        }
+
+        const documents = await documentsCollection.find(documentsQuery).limit(20).toArray();
+
+        // Enrichir avec les noms
+        for (let doc of documents) {
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(doc.idDepartement) });
+            const service = await servicesCollection.findOne({ _id: new ObjectId(doc.idService) });
+            const category = await categoriesCollection.findOne({ id: doc.categorie });
+            doc.departmentName = dept?.nom;
+            doc.serviceName = service?.nom;
+            doc.categoryName = category?.nom;
+        }
+
+        console.log(`🔍 Recherche "${searchTerm}" - ${services.length} services, ${categories.length} catégories, ${documents.length} documents`);
+
+        res.json({
+            success: true,
+            services,
+            categories,
+            documents
+        });
+    } catch (error) {
+        console.error('Erreur recherche globale:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+/**
+ * Mes documents
+ */
+app.get('/api/documents/my', async (req, res) => {
+    try {
+        const userId = req.session.userId;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const limit = parseInt(req.query.limit) || 50;
+
+        const documents = await documentsCollection.find({
+            idUtilisateur: userId,
+            deleted: { $ne: true }
+        })
+        .sort({ dateAjout: -1 })
+        .limit(limit)
+        .toArray();
+
+        // Enrichir avec les noms
+        for (let doc of documents) {
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(doc.idDepartement) });
+            const service = await servicesCollection.findOne({ _id: new ObjectId(doc.idService) });
+            const category = await categoriesCollection.findOne({ id: doc.categorie });
+            doc.departmentName = dept?.nom;
+            doc.serviceName = service?.nom;
+            doc.categoryName = category?.nom;
+            delete doc.contenu;
+        }
+
+        res.json({
+            success: true,
+            documents,
+            total: documents.length
+        });
+    } catch (error) {
+        console.error('Erreur récupération mes documents:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+/**
+ * Documents récents
+ */
+app.get('/api/documents/recent', async (req, res) => {
+    try {
+        const userId = req.session.userId;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUserData = await usersCollection.findOne({ username: userId });
+        if (!currentUserData) {
+            return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        const userLevel = currentUserData.niveau || 3;
+        const userDeptId = currentUserData.idDepartement;
+        const limit = parseInt(req.query.limit) || 50;
+
+        let query = { deleted: { $ne: true } };
+
+        // Filtrer selon le niveau
+        if (userLevel === 1 && userDeptId) {
+            // Niveau 1 : Documents de son département OU sans département (legacy)
+            query.$or = [
+                { idDepartement: userDeptId },
+                { idDepartement: { $exists: false } },
+                { idDepartement: null }
+            ];
+        } else if (userLevel >= 2) {
+            query.idUtilisateur = userId;
+        }
+
+        const documents = await documentsCollection.find(query)
+            .sort({ dateAjout: -1 })
+            .limit(limit)
+            .toArray();
+
+        // Enrichir avec les noms
+        for (let doc of documents) {
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(doc.idDepartement) });
+            const service = await servicesCollection.findOne({ _id: new ObjectId(doc.idService) });
+            const category = await categoriesCollection.findOne({ id: doc.categorie });
+            doc.departmentName = dept?.nom;
+            doc.serviceName = service?.nom;
+            doc.categoryName = category?.nom;
+            delete doc.contenu;
+        }
+
+        res.json({
+            success: true,
+            documents,
+            total: documents.length
+        });
+    } catch (error) {
+        console.error('Erreur récupération documents récents:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+/**
+ * Favoris
+ */
+app.get('/api/documents/favorites', async (req, res) => {
+    try {
+        const userId = req.session.userId;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const limit = parseInt(req.query.limit) || 50;
+
+        const documents = await documentsCollection.find({
+            favoris: userId,
+            deleted: { $ne: true }
+        })
+        .sort({ dateAjout: -1 })
+        .limit(limit)
+        .toArray();
+
+        // Enrichir avec les noms
+        for (let doc of documents) {
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(doc.idDepartement) });
+            const service = await servicesCollection.findOne({ _id: new ObjectId(doc.idService) });
+            const category = await categoriesCollection.findOne({ id: doc.categorie });
+            doc.departmentName = dept?.nom;
+            doc.serviceName = service?.nom;
+            doc.categoryName = category?.nom;
+            delete doc.contenu;
+        }
+
+        res.json({
+            success: true,
+            documents,
+            total: documents.length
+        });
+    } catch (error) {
+        console.error('Erreur récupération favoris:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+/**
+ * Nouveaux documents (derniers X jours)
+ */
+app.get('/api/documents/new', async (req, res) => {
+    try {
+        const userId = req.session.userId;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Non authentifié' });
+        }
+
+        const currentUserData = await usersCollection.findOne({ username: userId });
+        if (!currentUserData) {
+            return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+        }
+
+        const userLevel = currentUserData.niveau || 3;
+        const userDeptId = currentUserData.idDepartement;
+        const days = parseInt(req.query.days) || 7;
+        const limit = parseInt(req.query.limit) || 50;
+
+        // Date limite (X jours en arrière)
+        const dateLimit = new Date();
+        dateLimit.setDate(dateLimit.getDate() - days);
+
+        let query = {
+            deleted: { $ne: true },
+            dateAjout: { $gte: dateLimit.toISOString() }
+        };
+
+        // Filtrer selon le niveau
+        if (userLevel === 1 && userDeptId) {
+            // Niveau 1 : Documents de son département OU sans département (legacy)
+            query.idDepartement = { $in: [userDeptId, null, undefined] };
+        } else if (userLevel >= 2) {
+            query.idUtilisateur = userId;
+        }
+
+        const documents = await documentsCollection.find(query)
+            .sort({ dateAjout: -1 })
+            .limit(limit)
+            .toArray();
+
+        // Enrichir avec les noms
+        for (let doc of documents) {
+            const dept = await departementsCollection.findOne({ _id: new ObjectId(doc.idDepartement) });
+            const service = await servicesCollection.findOne({ _id: new ObjectId(doc.idService) });
+            const category = await categoriesCollection.findOne({ id: doc.categorie });
+            doc.departmentName = dept?.nom;
+            doc.serviceName = service?.nom;
+            doc.categoryName = category?.nom;
+            delete doc.contenu;
+        }
+
+        res.json({
+            success: true,
+            documents,
+            total: documents.length
+        });
+    } catch (error) {
+        console.error('Erreur récupération nouveaux documents:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });

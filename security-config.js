@@ -57,11 +57,11 @@ if (process.env.NODE_ENV !== 'production') {
 // RATE LIMITING
 // ============================================
 
-// Rate limiter général (500 requêtes par 15 minutes)
-// ✅ OPTIMISÉ pour environnement universitaire (plusieurs utilisateurs derrière même IP)
+// Rate limiter général (2000 requêtes par 15 minutes)
+// ✅ OPTIMISÉ pour environnement universitaire (20-50 utilisateurs simultanés derrière même IP)
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 500, // ✅ 500 requêtes max (adapté pour un campus)
+    max: 2000, // ✅ 2000 requêtes max (adapté pour 20-50 users simultanés)
     message: 'Trop de requêtes depuis cette IP. Veuillez réessayer dans 15 minutes.',
     standardHeaders: true,
     legacyHeaders: false,
@@ -79,10 +79,10 @@ const generalLimiter = rateLimit({
     }
 });
 
-// Rate limiter strict pour login (5 tentatives par 15 minutes)
+// Rate limiter strict pour login (15 tentatives par 15 minutes)
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // 5 tentatives max
+    max: 15, // 15 tentatives max (tolérance pour campus avec plusieurs users/IP)
     skipSuccessfulRequests: true, // Ne pas compter les connexions réussies
     message: 'Trop de tentatives de connexion. Réessayez dans 15 minutes.',
     standardHeaders: true,
@@ -101,11 +101,11 @@ const loginLimiter = rateLimit({
     }
 });
 
-// Rate limiter pour uploads (50 par heure)
-// ✅ OPTIMISÉ pour permettre plus d'uploads simultanés
+// Rate limiter pour uploads (100 par heure)
+// ✅ OPTIMISÉ pour permettre plus d'uploads simultanés (20-50 users)
 const uploadLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 heure
-    max: 50, // ✅ 50 uploads max (augmenté de 10 à 50)
+    max: 100, // ✅ 100 uploads max (adapté pour 20-50 users simultanés)
     message: 'Trop d\'uploads. Réessayez dans 1 heure.',
     standardHeaders: true,
     legacyHeaders: false,
@@ -140,7 +140,7 @@ const helmetConfig = helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com"],
             imgSrc: ["'self'", "data:", "https:", "blob:"],
             connectSrc: ["'self'", "blob:"], // ✅ blob: pour pdf.js
-            fontSrc: ["'self'", "data:"],
+            fontSrc: ["'self'", "data:", "https://r2cdn.perplexity.ai"],
             objectSrc: ["'self'", "data:", "blob:"], // ✅ Permet les PDFs avec <object> ou <embed>
             mediaSrc: ["'self'"],
             frameSrc: [

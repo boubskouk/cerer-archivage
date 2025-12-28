@@ -159,11 +159,11 @@ async function handleFileUpload(e) {
 
         await saveDocument(newDoc);
         state.showUploadForm = false;
-        
+
         // Réinitialiser le formulaire
         formData = {
             titre: '',
-            categorie: 'factures',
+            categorie: '', // ✅ CORRIGÉ : Pas de valeur par défaut 'factures'
             date: new Date().toISOString().split('T')[0],
             description: '',
             tags: ''

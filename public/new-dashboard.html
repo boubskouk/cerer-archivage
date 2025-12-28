@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nouveau Dashboard - GED CERER</title>
+    <link rel="stylesheet" href="/css/new-dashboard.css">
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <div class="topbar">
+        <div class="topbar-logo">
+            <div class="topbar-logo-icon">🎓</div>
+            <div class="topbar-logo-text">
+                <h2>GED CERER</h2>
+                <p>Gestion Électronique Documents</p>
+            </div>
+        </div>
+
+        <div class="topbar-user">
+            <button onclick="window.location.href='/'"
+                    class="version-switch-btn"
+                    title="Retour à la version classique">
+                📊 Version Classique
+            </button>
+            <div class="user-info">
+                <div class="user-name" id="userName">Chargement...</div>
+                <div class="user-role">
+                    <span id="userDepartment">-</span>
+                    <span class="role-badge" id="userLevel">-</span>
+                </div>
+            </div>
+            <div class="user-avatar" onclick="toggleUserMenu()" id="userAvatar" style="position: relative; overflow: hidden;">
+                <img id="avatarPhoto" src="" alt="Photo de profil"
+                     onerror="this.style.display='none'; document.getElementById('avatarInitials').style.display='flex';"
+                     style="width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; display: none;">
+                <div id="avatarInitials" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-weight: 600;">
+                    --
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Beta Banner -->
+    <div class="beta-banner">
+        <div class="beta-banner-content">
+            <span class="beta-badge">BETA</span>
+            <span class="beta-text">🎨 Vous utilisez le nouveau design ! Testez les nouvelles fonctionnalités et donnez-nous votre avis.</span>
+        </div>
+    </div>
+
+    <!-- User Menu Dropdown -->
+    <div id="userMenu" class="user-menu">
+        <div class="user-menu-header">
+            <div class="user-menu-name" id="menuUserName">-</div>
+            <div class="user-menu-email" id="menuUserEmail">-</div>
+        </div>
+        <!-- "Mon Profil" SUPPRIMÉ pour raisons de sécurité (modification niveau en beta) -->
+        <div class="user-menu-item" onclick="alert('Fonctionnalité en développement')">
+            <span>⚙️</span>
+            <span>Paramètres</span>
+        </div>
+        <div class="user-menu-item" onclick="alert('Fonctionnalité en développement')">
+            <span>🔔</span>
+            <span>Notifications</span>
+        </div>
+        <!-- ❌ "Déconnexion" SUPPRIMÉ - Ne pas se déconnecter depuis la version beta -->
+    </div>
+
+    <div class="container">
+        <!-- HOME VIEW -->
+        <div id="homeView">
+            <!-- Header -->
+            <div class="header">
+                <h1>📊 Tableau de Bord</h1>
+                <p>Bienvenue dans votre espace de gestion documentaire</p>
+            </div>
+
+            <!-- Stats Overview -->
+            <div class="stats-overview" id="statsOverview">
+                <div class="stat-card">
+                    <div class="stat-icon">🏢</div>
+                    <div class="stat-info">
+                        <h3>Départements</h3>
+                        <p id="statDepts">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📂</div>
+                    <div class="stat-info">
+                        <h3>Services</h3>
+                        <p id="statServices">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📄</div>
+                    <div class="stat-info">
+                        <h3>Documents</h3>
+                        <p id="statDocuments">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">💾</div>
+                    <div class="stat-info">
+                        <h3>Stockage</h3>
+                        <p id="statStorage">0 MB</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Search Section -->
+            <div class="search-section">
+                <div class="search-bar">
+                    <input type="text" id="globalSearchInput" class="search-input"
+                           placeholder="🔍 Rechercher par titre, ID, département, service, catégorie..."
+                           onkeyup="if(event.key === 'Enter') performGlobalSearch()">
+                    <button class="search-btn" onclick="performGlobalSearch()">Rechercher</button>
+                </div>
+                <div class="search-filters">
+                    <span class="filter-label">Filtrer par:</span>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" id="filterServices" checked>
+                        <span>Services</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" id="filterCategories" checked>
+                        <span>Catégories</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" id="filterDocuments" checked>
+                        <span>Documents</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Search Results (Hidden by default) -->
+            <div id="searchResults" class="search-results hidden">
+                <!-- Results will be dynamically inserted here -->
+            </div>
+
+            <!-- Section Title -->
+            <div class="section-title">
+                <h2>🏢 Départements</h2>
+            </div>
+
+            <!-- Departments Grid -->
+            <div class="departments-grid" id="departmentsGrid">
+                <!-- Departments will be dynamically loaded here -->
+                <div class="loading">Chargement des départements...</div>
+            </div>
+        </div>
+
+        <!-- DEPARTMENT VIEW (Hidden by default) -->
+        <div id="departmentView" class="department-view">
+            <button class="back-btn" onclick="showHome()">← Retour à l'accueil</button>
+
+            <!-- Breadcrumb -->
+            <div class="breadcrumb">
+                <a onclick="showHome()">Accueil</a>
+                <span>›</span>
+                <strong id="currentDeptName">-</strong>
+            </div>
+
+            <!-- Department Header -->
+            <div class="header">
+                <h1 id="deptTitle">📊 Chargement...</h1>
+                <p>Explorez les services et documents de ce département</p>
+            </div>
+
+            <!-- Department Stats -->
+            <div class="stats-overview" id="deptStats">
+                <div class="stat-card">
+                    <div class="stat-icon">📂</div>
+                    <div class="stat-info">
+                        <h3>Services</h3>
+                        <p id="deptStatServices">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📄</div>
+                    <div class="stat-info">
+                        <h3>Documents</h3>
+                        <p id="deptStatDocuments">0</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Services Accordion with Add Service Button -->
+            <div class="section-title">
+                <h2>📂 Services du département</h2>
+                <button class="add-btn" onclick="openAddServiceModal()">
+                    ➕ Ajouter un service
+                </button>
+            </div>
+
+            <div class="accordion" id="servicesAccordion">
+                <!-- Services will be dynamically loaded here -->
+                <div class="loading">Chargement des services...</div>
+            </div>
+
+            <!-- Documents Section (Hidden until category clicked) -->
+            <div id="documentsSection" class="hidden" style="margin-top: 30px;">
+                <div class="breadcrumb">
+                    <a onclick="showHome()">Accueil</a>
+                    <span>›</span>
+                    <a onclick="hideDocuments()"><span id="breadcrumbDept">-</span></a>
+                    <span>›</span>
+                    <span id="currentServiceName">-</span>
+                    <span>›</span>
+                    <strong id="currentCategoryName">-</strong>
+                </div>
+
+                <div class="section-title">
+                    <h2>📄 <span id="categoryTitle">-</span> (<span id="docCount">0</span> documents)</h2>
+                    <button class="add-btn" onclick="openAddDocumentModal()">
+                        ➕ Ajouter un document
+                    </button>
+                </div>
+
+                <!-- Document Filter -->
+                <div class="document-filter">
+                    <input type="text" id="documentFilterInput" class="filter-input"
+                           placeholder="🔍 Filtrer les documents par titre, auteur, date..."
+                           oninput="debounceFilter()">
+                </div>
+
+                <!-- Document Controls (Tri et Pagination) -->
+                <div class="document-controls">
+                    <div class="control-group">
+                        <span class="control-label">Trier par:</span>
+                        <select class="control-select" id="sortSelect" onchange="sortDocuments()">
+                            <option value="date-desc">Date (Plus récent)</option>
+                            <option value="date-asc">Date (Plus ancien)</option>
+                            <option value="name-asc">Nom (A-Z)</option>
+                            <option value="name-desc">Nom (Z-A)</option>
+                            <option value="size-desc">Taille (Plus grand)</option>
+                            <option value="size-asc">Taille (Plus petit)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <span class="control-label">Afficher:</span>
+                        <select class="control-select" id="perPageSelect" onchange="changePerPage()">
+                            <option value="20">20 par page</option>
+                            <option value="50">50 par page</option>
+                            <option value="100">100 par page</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="documents-grid" id="documentsGrid">
+                    <!-- Documents will be dynamically loaded here -->
+                </div>
+
+                <!-- Pagination -->
+                <div class="pagination-container" id="paginationContainer">
+                    <div class="pagination-info" id="paginationInfo">
+                        Affichage 0-0 sur 0 documents
+                    </div>
+                    <div class="pagination" id="pagination">
+                        <!-- Pagination buttons will be dynamically generated -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Department Modal -->
+
+    <!-- Add Service Modal -->
+    <div id="addServiceModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="serviceModalTitle">📂 Ajouter un service</h2>
+                <span class="modal-close" onclick="closeAddServiceModal()">×</span>
+            </div>
+            <form onsubmit="submitService(event)">
+                <input type="hidden" id="serviceId" value="">
+                <div class="form-group">
+                    <label class="form-label">Nom du service *</label>
+                    <input type="text" class="form-input" id="serviceName" placeholder="Ex: Biologie Moléculaire" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Icône (emoji)</label>
+                    <input type="text" class="form-input" id="serviceIcon" placeholder="Ex: 🧬" maxlength="2">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-textarea" id="serviceDescription" placeholder="Description du service..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="closeAddServiceModal()">Annuler</button>
+                    <button type="submit" class="btn-submit" id="serviceSubmitBtn">Créer le service</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Document Modal -->
+    <div id="addDocumentModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📤 Ajouter un document</h2>
+                <span class="modal-close" onclick="closeAddDocumentModal()">×</span>
+            </div>
+            <form onsubmit="submitDocument(event)">
+                <!-- Contexte d'ajout -->
+                <div id="contextInfo" style="display: none;"></div>
+
+                <div class="form-group">
+                    <label class="form-label">Titre du document *</label>
+                    <input type="text" class="form-input" id="docTitle" placeholder="Ex: Mémoire de Master 2024" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Catégorie *</label>
+                    <select class="form-select" id="docCategory" required onchange="updateArchivePath()">
+                        <option value="">-- Sélectionner une catégorie --</option>
+                    </select>
+                    <div id="archivePath" style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 3px solid #3b82f6; border-radius: 4px; display: none;">
+                        <div style="font-size: 12px; color: #1e40af; font-weight: 600; margin-bottom: 5px;">📁 Chemin d'archivage :</div>
+                        <div id="archivePathText" style="font-size: 13px; color: #1e3a8a;"></div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-textarea" id="docDescription" placeholder="Description du document (optionnelle)"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Fichier *</label>
+                    <div class="file-upload" onclick="document.getElementById('fileInput').click()">
+                        <div class="file-upload-icon">📁</div>
+                        <div class="file-upload-text">Cliquez pour sélectionner un fichier ou glissez-le ici</div>
+                        <div class="file-upload-text" style="margin-top: 5px; font-size: 12px; color: #999;">
+                            PDF, Word, Excel, PowerPoint - Max 50 MB
+                        </div>
+                    </div>
+                    <input type="file" id="fileInput" style="display: none;"
+                           accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" required>
+                    <div id="fileInfo" style="margin-top: 10px; color: #666; font-size: 14px;"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="closeAddDocumentModal()">Annuler</button>
+                    <button type="submit" class="btn-submit">📤 Téléverser</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Category Modal -->
+    <div id="addCategoryModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🏷️ Ajouter une catégorie</h2>
+                <span class="modal-close" onclick="closeAddCategoryModal()">×</span>
+            </div>
+            <form onsubmit="submitCategory(event)">
+                <div class="form-group">
+                    <label class="form-label">Nom de la catégorie *</label>
+                    <input type="text" class="form-input" id="categoryName" placeholder="Ex: Mémoires" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Icône (emoji)</label>
+                    <input type="text" class="form-input" id="categoryIcon" placeholder="Ex: 📚" maxlength="2">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-textarea" id="categoryDescription" placeholder="Description de la catégorie..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="closeAddCategoryModal()">Annuler</button>
+                    <button type="submit" class="btn-submit">Créer la catégorie</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ===== MODAL DE PROFIL SUPPRIMÉE =====
+         Raison : Risque de sécurité (modification niveau en version beta)
+         La gestion du profil se fait uniquement en version classique
+    -->
+
+    <script src="/js/profile-functions.js?v=2025122701"></script>
+    <script src="/js/new-dashboard.js?v=20251227e"></script>
+
+    <!-- 🔐 Déconnexion automatique après 30 minutes d'inactivité (TOUS les utilisateurs) -->
+    <script src="/js/auto-logout.js?v=20251228"></script>
+</body>
+</html>

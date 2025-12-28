@@ -538,30 +538,30 @@ function displayStats(stats) {
 
     // Ressources système
     if (stats.system.resources) {
-        const cpu = stats.system.resources.cpu;
         const memory = stats.system.resources.memory;
         const uptime = stats.system.resources.uptime;
 
-        // CPU
-        document.getElementById('cpuUsage').textContent = cpu.usage + '%';
-        document.getElementById('cpuCores').textContent = cpu.cores;
-        document.getElementById('cpuPercent').textContent = cpu.usage + '%';
-
-        const cpuProgress = document.getElementById('cpuProgress');
-        cpuProgress.style.width = cpu.usage + '%';
-        cpuProgress.className = 'progress-fill ' + getProgressClass(cpu.usage);
-
         // Mémoire
-        document.getElementById('memoryPercent').textContent =
-            `${memory.percentage}% (${memory.used} / ${memory.total})`;
+        if (memory && document.getElementById('memoryPercent')) {
+            document.getElementById('memoryPercent').textContent =
+                `${memory.percentage}% (${memory.used} / ${memory.total})`;
 
-        const memProgress = document.getElementById('memoryProgress');
-        memProgress.style.width = memory.percentage + '%';
-        memProgress.className = 'progress-fill ' + getProgressClass(memory.percentage);
+            const memProgress = document.getElementById('memoryProgress');
+            if (memProgress) {
+                memProgress.style.width = memory.percentage + '%';
+                memProgress.className = 'progress-fill ' + getProgressClass(memory.percentage);
+            }
+        }
 
         // Uptime
-        document.getElementById('systemUptime').textContent = formatUptime(uptime.system);
-        document.getElementById('processUptime').textContent = formatUptime(uptime.process);
+        if (uptime) {
+            if (document.getElementById('systemUptime')) {
+                document.getElementById('systemUptime').textContent = formatUptime(uptime.system);
+            }
+            if (document.getElementById('processUptime')) {
+                document.getElementById('processUptime').textContent = formatUptime(uptime.process);
+            }
+        }
     }
 
     // Sécurité
@@ -3735,7 +3735,15 @@ function displayAuditLogs(logs) {
 
     countEl.textContent = `${logs.length} événement${logs.length > 1 ? 's' : ''}`;
 
-    container.innerHTML = logs.map((log, index) => {
+    // ✅ CORRECTION: Trier par date décroissante (LIFO - Last In First Out)
+    // Les événements les plus récents s'affichent en premier
+    const sortedLogs = [...logs].sort((a, b) => {
+        const dateA = new Date(a.timestamp);
+        const dateB = new Date(b.timestamp);
+        return dateB - dateA; // Ordre décroissant (plus récent en premier)
+    });
+
+    container.innerHTML = sortedLogs.map((log, index) => {
         const date = new Date(log.timestamp);
         const timeAgo = getTimeAgo(date);
         const formattedDate = date.toLocaleString('fr-FR');
@@ -4058,6 +4066,28 @@ function escapeHtml(text) {
 }
 
 // ============================================
+// NAVIGATION VERS LES PAGES DE TRAÇABILITÉ
+// ============================================
+
+/**
+ * Navigation vers la page des logs de changements de profil
+ * Réservée aux Super Administrateurs (Niveau 0)
+ */
+function navigateToProfileLogs() {
+    console.log('🔐 Navigation vers logs de traçabilité...');
+    window.location.href = '/profile-changes-logs.html';
+}
+
+/**
+ * Navigation vers la page de gestion des sessions
+ * Réservée aux Super Administrateurs (Niveau 0)
+ */
+function navigateToSessionsManagement() {
+    console.log('🔐 Navigation vers gestion des sessions...');
+    window.location.href = '/sessions-management.html';
+}
+
+// ============================================
 // INITIALISATION
 // ============================================
 
@@ -4074,4 +4104,61 @@ document.addEventListener('DOMContentLoaded', () => {
             loadDashboard();
         }
     }, 30000);
+
+    // ✅ Déconnexion automatique après 5 minutes d'inactivité
+    let inactivityTimer;
+    const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes en millisecondes
+
+    function resetInactivityTimer() {
+        // Annuler le timer précédent
+        if (inactivityTimer) {
+            clearTimeout(inactivityTimer);
+        }
+
+        // Créer un nouveau timer
+        inactivityTimer = setTimeout(async () => {
+            console.log('⏱️ Déconnexion automatique après 5 minutes d\'inactivité');
+
+            // Afficher une notification
+            const shouldLogout = await customConfirm({
+                title: '⏱️ Session inactive',
+                message: 'Vous allez être déconnecté dans 10 secondes en raison d\'inactivité.\n\nSouhaitez-vous rester connecté ?',
+                confirmText: 'Rester connecté',
+                cancelText: 'Se déconnecter',
+                type: 'warning',
+                icon: '⏱️'
+            });
+
+            if (shouldLogout) {
+                // L'utilisateur a choisi de rester connecté, réinitialiser le timer
+                console.log('✅ Utilisateur actif, réinitialisation du timer');
+                resetInactivityTimer();
+            } else {
+                // Déconnexion automatique
+                try {
+                    await fetch('/api/logout', {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+
+                    alert('🚪 Vous avez été déconnecté pour inactivité.\n\nVeuillez vous reconnecter.');
+                    window.location.href = '/super-admin-login.html';
+                } catch (error) {
+                    console.error('Erreur déconnexion:', error);
+                    window.location.href = '/super-admin-login.html';
+                }
+            }
+        }, INACTIVITY_TIMEOUT);
+    }
+
+    // Événements qui réinitialisent le timer (activité de l'utilisateur)
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach(event => {
+        document.addEventListener(event, resetInactivityTimer, true);
+    });
+
+    // Initialiser le timer au chargement
+    resetInactivityTimer();
+
+    console.log('✅ Déconnexion automatique activée (5 min d\'inactivité)');
 });

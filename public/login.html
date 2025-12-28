@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion - GED CERER</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-container {
+            background: white;
+            padding: 50px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 450px;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-icon {
+            font-size: 64px;
+            margin-bottom: 10px;
+        }
+
+        .logo h1 {
+            font-size: 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 5px;
+        }
+
+        .logo p {
+            color: #666;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #e1e8ed;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .loading {
+            text-align: center;
+            color: #666;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <div class="logo-icon">🎓</div>
+            <h1>GED CERER</h1>
+            <p>Gestion Électronique Documents</p>
+        </div>
+
+        <div id="errorMessage" class="error-message"></div>
+
+        <form id="loginForm" onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label class="form-label">Nom d'utilisateur</label>
+                <input type="text" id="username" class="form-input" placeholder="Entrez votre nom d'utilisateur" required autofocus>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Mot de passe</label>
+                <input type="password" id="password" class="form-input" placeholder="Entrez votre mot de passe" required>
+            </div>
+
+            <button type="submit" class="btn-login" id="btnLogin">
+                Se connecter
+            </button>
+        </form>
+
+        <div id="loadingMessage" class="loading" style="display: none;">
+            Connexion en cours...
+        </div>
+    </div>
+
+    <script>
+        async function handleLogin(event) {
+            event.preventDefault();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('errorMessage');
+            const btnLogin = document.getElementById('btnLogin');
+            const loadingMsg = document.getElementById('loadingMessage');
+
+            // Masquer les erreurs précédentes
+            errorDiv.classList.remove('show');
+            errorDiv.textContent = '';
+
+            // Désactiver le bouton
+            btnLogin.disabled = true;
+            loadingMsg.style.display = 'block';
+
+            try {
+                console.log('🔐 Tentative de connexion:', username);
+
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Erreur de connexion');
+                }
+
+                console.log('✅ Connexion réussie:', data);
+
+                // Stocker le username dans sessionStorage
+                sessionStorage.setItem('username', username);
+
+                // Rediriger vers le nouveau dashboard
+                window.location.href = '/new-dashboard.html';
+
+            } catch (error) {
+                console.error('❌ Erreur connexion:', error);
+                errorDiv.textContent = error.message || 'Erreur de connexion. Veuillez réessayer.';
+                errorDiv.classList.add('show');
+                btnLogin.disabled = false;
+                loadingMsg.style.display = 'none';
+            }
+        }
+
+        // Vérifier si déjà connecté
+        async function checkIfLoggedIn() {
+            try {
+                const response = await fetch('/api/session-check', {
+                    credentials: 'include'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.authenticated) {
+                        // Déjà connecté, rediriger
+                        window.location.href = '/new-dashboard.html';
+                    }
+                }
+            } catch (error) {
+                // Ignorer les erreurs
+            }
+        }
+
+        // Vérifier au chargement
+        checkIfLoggedIn();
+    </script>
+</body>
+</html>
