@@ -26,7 +26,7 @@ function toggleProfile() {
 
 async function loadUserPhoto() {
     try {
-        const apiUrl = window.API_URL || 'http://localhost:4000/api';
+        const apiUrl = '/api';
         const response = await fetch(`${apiUrl}/profile/photo/${state.currentUser}`, {
             credentials: 'include'
         });
@@ -91,7 +91,7 @@ function handlePhotoUpload(event) {
 
 async function saveProfile() {
     try {
-        const apiUrl = window.API_URL || 'http://localhost:4000/api';
+        const apiUrl = '/api';
         const nom = document.getElementById('profile_nom').value.trim();
         const username = document.getElementById('profile_username').value.trim();
         const email = document.getElementById('profile_email').value.trim();
@@ -196,7 +196,7 @@ async function saveProfile() {
 
 function getProfilePhotoUrl(username) {
     // Retourner l'URL de la photo ou une photo par défaut
-    const apiUrl = window.API_URL || 'http://localhost:4000/api';
+    const apiUrl = '/api';
     return `${apiUrl}/profile/photo/${username}`;
 }
 
@@ -308,7 +308,7 @@ function closeProfileModal() {
 // Charger la photo utilisateur (version beta)
 async function loadUserPhotoBeta() {
     try {
-        const apiUrl = 'http://localhost:4000/api';
+        const apiUrl = '/api';
         const response = await fetch(`${apiUrl}/profile/photo/${currentUser.username}`, {
             credentials: 'include'
         });

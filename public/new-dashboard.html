@@ -416,6 +416,23 @@
 
                 <!-- Formulaire de profil -->
                 <div style="display: grid; gap: 20px;">
+                    <!-- Avertissement contrainte de modification -->
+                    <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); padding: 16px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                        <div style="display: flex; align-items: start; gap: 12px;">
+                            <div style="font-size: 24px;">⚠️</div>
+                            <div>
+                                <div style="font-weight: 600; margin-bottom: 6px; color: #92400e;">
+                                    Limitation importante
+                                </div>
+                                <div style="font-size: 13px; color: #78350f; line-height: 1.5;">
+                                    Vous ne pouvez modifier votre <strong>nom</strong> et votre <strong>nom d'utilisateur</strong> qu'<strong>une seule fois</strong> chacun.
+                                    <br>
+                                    <em style="font-size: 12px;">bayil di changer sa tour bi Rék 😊</em>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div>
                         <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151;">
                             Nom <span style="color: #ef4444;">*</span>
@@ -425,6 +442,9 @@
                                placeholder="Votre nom"
                                required
                                style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box;">
+                        <div style="margin-top: 6px; font-size: 12px; color: #6b7280;">
+                            ⚠️ Modification autorisée <strong>une seule fois</strong>
+                        </div>
                     </div>
 
                     <div>
@@ -438,6 +458,8 @@
                                style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box;">
                         <div style="margin-top: 6px; font-size: 12px; color: #6b7280;">
                             💡 Si vous changez votre nom d'utilisateur, vous devrez vous reconnecter
+                            <br>
+                            ⚠️ Modification autorisée <strong>une seule fois</strong>
                         </div>
                     </div>
 
