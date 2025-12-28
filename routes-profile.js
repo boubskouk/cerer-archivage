@@ -48,8 +48,8 @@ ${'='.repeat(80)}
    - Session ID: ${logData.sessionId || 'N/A'}
 
 ⚠️ STATUT:
-   ${logData.nomChangeCount >= 1 ? '🔒 Nom verrouillé (limite atteinte) - bayil di changer sa tour bi\' CHANGER Rék' : '✅ Nom modifiable'}
-   ${logData.usernameChangeCount >= 1 ? '🔒 Username verrouillé (limite atteinte) - bayil di changer sa tour bi\' CHANGER Rék' : '✅ Username modifiable'}
+   ${logData.nomChangeCount >= 1 ? '🔒 Nom verrouillé (limite atteinte) - bayil di changer sa tour bi Rék 😊' : '✅ Nom modifiable'}
+   ${logData.usernameChangeCount >= 1 ? '🔒 Username verrouillé (limite atteinte) - bayil di changer sa tour bi Rék 😊' : '✅ Username modifiable'}
 
 🔄 MISE À JOUR GLOBALE:
    ${logData.usernameChanged ? '✅ Tous les documents, catégories, services et logs mis à jour' : '⏭️ Aucune mise à jour globale nécessaire'}
@@ -108,7 +108,7 @@ ${'='.repeat(80)}
                 return res.status(403).json({
                     success: false,
                     message: '🔒 Modification du nom bloquée',
-                    messageDetails: 'Vous avez déjà modifié votre nom une fois. bayil di changer sa tour bi\' CHANGER Rék',
+                    messageDetails: 'Vous avez déjà modifié votre nom une fois. bayil di changer sa tour bi Rék 😊',
                     contactAdmin: true
                 });
             }
@@ -119,7 +119,7 @@ ${'='.repeat(80)}
                 return res.status(403).json({
                     success: false,
                     message: '🔒 Modification du nom d\'utilisateur bloquée',
-                    messageDetails: 'Vous avez déjà modifié votre nom d\'utilisateur une fois. bayil di changer sa tour bi\' CHANGER Rék',
+                    messageDetails: 'Vous avez déjà modifié votre nom d\'utilisateur une fois. bayil di changer sa tour bi Rék 😊',
                     contactAdmin: true
                 });
             }
