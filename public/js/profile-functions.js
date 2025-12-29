@@ -53,13 +53,13 @@ function handlePhotoUpload(event) {
 
     // Vérifier que c'est une image
     if (!file.type.startsWith('image/')) {
-        alert('⚠️ Veuillez sélectionner une image');
+        showNotification('Veuillez sélectionner une image', 'warning', 4000);
         return;
     }
 
     // Vérifier la taille (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
-        alert('⚠️ La photo est trop grande (max 2MB)');
+        showNotification('La photo est trop grande\n\nTaille maximale: 2MB', 'warning', 4000);
         return;
     }
 
@@ -97,7 +97,7 @@ async function saveProfile() {
         const email = document.getElementById('profile_email').value.trim();
 
         if (!nom || !username) {
-            alert('⚠️ Le nom et le username sont requis');
+            showNotification('Le nom et le nom d\'utilisateur sont requis', 'warning', 4000);
             return;
         }
 
@@ -118,12 +118,12 @@ async function saveProfile() {
         if (!response.ok) {
             if (response.status === 409) {
                 // Username déjà utilisé
-                alert(result.message + '\n\n' + result.messageDetails);
+                showNotification(result.message + '\n\n' + result.messageDetails, 'error', 0);
             } else if (response.status === 403 && result.contactAdmin) {
-                // Limite de modifications atteinte
-                alert('🔒 ' + result.message + '\n\n' + result.messageDetails);
+                // Limite de modifications atteinte - Message wolof avec emoji souriant
+                showNotification(result.message + '\n\n' + result.messageDetails, 'smile', 0);
             } else {
-                alert('❌ ' + result.message);
+                showNotification(result.message, 'error', 0);
             }
             return;
         }
@@ -153,13 +153,13 @@ async function saveProfile() {
             }
 
             // Afficher message avec infos sur les modifications restantes
-            let message = '✅ Profil mis à jour avec succès';
+            let message = 'Profil mis à jour avec succès';
             if (result.remainingChanges) {
                 message += '\n\n📊 Modifications restantes:';
                 message += '\n• Nom: ' + result.remainingChanges.nom + '/1';
                 message += '\n• Username: ' + result.remainingChanges.username + '/1';
             }
-            alert(message);
+            showNotification(message, 'success', 5000);
 
             closeProfileModal();
             betaProfilePhotoPreview = null;
@@ -190,7 +190,7 @@ async function saveProfile() {
 
     } catch (error) {
         console.error('Erreur sauvegarde profil:', error);
-        alert('❌ Erreur lors de la sauvegarde du profil');
+        showNotification('Erreur lors de la sauvegarde du profil\n\nVeuillez réessayer', 'error', 0);
     }
 }
 

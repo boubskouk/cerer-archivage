@@ -20,6 +20,124 @@ let currentSortOrder = 'desc';
 let totalDocuments = 0;
 
 // ============================================
+// SYSTÈME DE NOTIFICATIONS ÉLÉGANT
+// ============================================
+
+/**
+ * Affiche une notification élégante (remplace alert)
+ * @param {string} message - Le message à afficher
+ * @param {string} type - Type: 'success', 'error', 'warning', 'info'
+ * @param {number} duration - Durée en ms (0 = nécessite clic pour fermer)
+ */
+function showNotification(message, type = 'info', duration = 5000) {
+    // Supprimer les anciennes notifications
+    const existingNotif = document.getElementById('customNotification');
+    if (existingNotif) {
+        existingNotif.remove();
+    }
+
+    // Configuration des types
+    const config = {
+        success: {
+            emoji: '✅',
+            gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            shadow: '0 10px 40px rgba(16, 185, 129, 0.3)'
+        },
+        error: {
+            emoji: '❌',
+            gradient: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+            shadow: '0 10px 40px rgba(239, 68, 68, 0.3)'
+        },
+        warning: {
+            emoji: '⚠️',
+            gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+            shadow: '0 10px 40px rgba(245, 158, 11, 0.3)'
+        },
+        info: {
+            emoji: 'ℹ️',
+            gradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+            shadow: '0 10px 40px rgba(59, 130, 246, 0.3)'
+        },
+        smile: {
+            emoji: '😊',
+            gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+            shadow: '0 10px 40px rgba(139, 92, 246, 0.3)'
+        }
+    };
+
+    const style = config[type] || config.info;
+
+    // Créer la notification
+    const notification = document.createElement('div');
+    notification.id = 'customNotification';
+    notification.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.7);
+        background: ${style.gradient};
+        color: white;
+        padding: 30px 40px;
+        border-radius: 20px;
+        box-shadow: ${style.shadow};
+        z-index: 999999;
+        max-width: 500px;
+        min-width: 300px;
+        opacity: 0;
+        transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        backdrop-filter: blur(10px);
+        text-align: center;
+    `;
+
+    notification.innerHTML = `
+        <div style="font-size: 64px; margin-bottom: 20px; animation: bounce 0.6s ease;">${style.emoji}</div>
+        <div style="font-size: 18px; line-height: 1.6; margin-bottom: 25px; white-space: pre-wrap;">${message}</div>
+        <button onclick="this.closest('#customNotification').remove()" style="
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.2s;
+            backdrop-filter: blur(5px);
+        " onmouseover="this.style.background='rgba(255,255,255,0.3)'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'; this.style.transform='scale(1)'">
+            OK
+        </button>
+    `;
+
+    // Ajouter les animations CSS
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+        }
+    `;
+    document.head.appendChild(styleEl);
+
+    // Ajouter au DOM
+    document.body.appendChild(notification);
+
+    // Animation d'entrée
+    setTimeout(() => {
+        notification.style.opacity = '1';
+        notification.style.transform = 'translate(-50%, -50%) scale(1)';
+    }, 10);
+
+    // Auto-fermeture
+    if (duration > 0) {
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            notification.style.transform = 'translate(-50%, -50%) scale(0.7)';
+            setTimeout(() => notification.remove(), 300);
+        }, duration);
+    }
+}
+
+// ============================================
 // INITIALISATION
 // ============================================
 
@@ -103,7 +221,7 @@ function showAccessDeniedMessage() {
         👉 Vous allez être redirigé vers la page de connexion principale...
     `;
 
-    alert(message);
+    showNotification(message);
 
     console.log('🚫 Tentative d\'accès direct à la version BETA bloquée');
 
@@ -175,7 +293,7 @@ async function loadUserData() {
                 Vous allez être redirigé dans 3 secondes...
             `;
 
-            alert(message);
+            showNotification(message);
 
             console.log(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
 
@@ -231,7 +349,7 @@ function updateUserInterface() {
 // Charger la photo de profil dans l'avatar
 async function loadAvatarPhoto(username) {
     try {
-        const apiUrl = 'http://localhost:4000/api';
+        const apiUrl = '/api';
         const response = await fetch(`${apiUrl}/profile/photo/${username}`, {
             credentials: 'include'
         });
@@ -401,7 +519,7 @@ async function showDepartment(deptId) {
         currentDepartment = allDepartments.find(d => d._id.toString() === deptId.toString());
 
         if (!currentDepartment) {
-            alert('Département non trouvé');
+            showNotification('Département non trouvé');
             return;
         }
 
@@ -1126,7 +1244,7 @@ function navigateToCategory(departmentId, serviceId, categoryId, categoryName) {
 function openAddDepartmentModal() {
     // Vérifier les permissions (SEUL Niveau 0 = Super Admin)
     if (!currentUser || currentUser.niveau !== 0) {
-        alert('⛔ Accès refusé\n\nSeul le Super Administrateur (Niveau 0) peut créer des départements.');
+        showNotification(' Accès refusé\n\nSeul le Super Administrateur (Niveau 0) peut créer des départements.');
         return;
     }
 
@@ -1151,7 +1269,7 @@ async function submitDepartment(event) {
         const deptDescription = document.getElementById('deptDescription').value.trim();
 
         if (!deptName) {
-            alert('⚠️ Le nom du département est obligatoire');
+            showNotification(' Le nom du département est obligatoire');
             return;
         }
 
@@ -1184,24 +1302,24 @@ async function submitDepartment(event) {
         // Recharger les départements
         await loadDepartments();
 
-        alert(`✅ Département "${deptName}" créé avec succès !`);
+        showNotification(` Département "${deptName}" créé avec succès !`);
 
     } catch (error) {
         console.error('❌ Erreur création département:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
 function openAddServiceModal() {
     // Vérifier qu'on est dans un département
     if (!currentDepartment) {
-        alert('⚠️ Veuillez d\'abord sélectionner un département');
+        showNotification(' Veuillez d\'abord sélectionner un département');
         return;
     }
 
     // Vérifier les permissions (Niveau 0, 1 ou 2)
     if (!currentUser || currentUser.niveau > 2) {
-        alert('⛔ Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour créer un service.');
+        showNotification(' Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour créer un service.');
         return;
     }
 
@@ -1219,7 +1337,7 @@ function openAddServiceModal() {
 function openEditServiceModal(serviceId, serviceName, serviceIcon, serviceDescription) {
     // Vérifier les permissions (Niveau 0, 1 ou 2)
     if (!currentUser || currentUser.niveau > 2) {
-        alert('⛔ Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour modifier un service.');
+        showNotification(' Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour modifier un service.');
         return;
     }
 
@@ -1248,12 +1366,12 @@ async function submitService(event) {
         const serviceDescription = document.getElementById('serviceDescription').value.trim();
 
         if (!serviceName) {
-            alert('⚠️ Le nom du service est obligatoire');
+            showNotification(' Le nom du service est obligatoire');
             return;
         }
 
         if (!currentDepartment) {
-            alert('⚠️ Erreur: aucun département sélectionné');
+            showNotification(' Erreur: aucun département sélectionné');
             return;
         }
 
@@ -1291,20 +1409,20 @@ async function submitService(event) {
         // Recharger les services
         await loadServices(currentDepartment._id);
 
-        alert(isEditing
+        showNotification(isEditing
             ? `✅ Service "${serviceName}" modifié avec succès !`
             : `✅ Service "${serviceName}" créé avec succès !`);
 
     } catch (error) {
         console.error('❌ Erreur:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
 async function deleteService(serviceId, serviceName) {
     // Vérifier les permissions (Niveau 0, 1 ou 2)
     if (!currentUser || currentUser.niveau > 2) {
-        alert('⛔ Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour supprimer un service.');
+        showNotification(' Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour supprimer un service.');
         return;
     }
 
@@ -1333,11 +1451,11 @@ async function deleteService(serviceId, serviceName) {
         // Recharger les services
         await loadServices(currentDepartment._id);
 
-        alert(`✅ Service "${serviceName}" supprimé avec succès !`);
+        showNotification(` Service "${serviceName}" supprimé avec succès !`);
 
     } catch (error) {
         console.error('❌ Erreur suppression service:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
@@ -1347,7 +1465,7 @@ let currentServiceForCategory = null;
 function openAddCategoryModal(serviceId) {
     // Vérifier les permissions (Niveau 0, 1 ou 2)
     if (!currentUser || currentUser.niveau > 2) {
-        alert('⛔ Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour créer une catégorie.');
+        showNotification(' Accès refusé\n\nVous devez être Niveau 0, 1 ou 2 pour créer une catégorie.');
         return;
     }
 
@@ -1376,12 +1494,12 @@ async function submitCategory(event) {
         const categoryDescription = document.getElementById('categoryDescription').value.trim();
 
         if (!categoryName || categoryName.length < 2) {
-            alert('⚠️ Le nom de la catégorie est obligatoire (min 2 caractères)');
+            showNotification(' Le nom de la catégorie est obligatoire (min 2 caractères)');
             return;
         }
 
         if (!currentServiceForCategory) {
-            alert('⚠️ Erreur: aucun service sélectionné');
+            showNotification(' Erreur: aucun service sélectionné');
             return;
         }
 
@@ -1390,7 +1508,7 @@ async function submitCategory(event) {
 
         const username = currentUser?.username || sessionStorage.getItem('username');
         if (!username) {
-            alert('⚠️ Session expirée');
+            showNotification(' Session expirée');
             return;
         }
 
@@ -1428,18 +1546,18 @@ async function submitCategory(event) {
         // Recharger les catégories du service
         await loadCategories(serviceId);
 
-        alert(`✅ Catégorie "${categoryName}" créée avec succès !`);
+        showNotification(` Catégorie "${categoryName}" créée avec succès !`);
 
     } catch (error) {
         console.error('❌ Erreur création catégorie:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
 async function openAddDocumentModal() {
     // Vérifier les permissions - Tous les utilisateurs authentifiés peuvent ajouter des documents
     if (!currentUser) {
-        alert('⛔ Accès refusé\n\nVous devez être connecté pour ajouter un document.');
+        showNotification(' Accès refusé\n\nVous devez être connecté pour ajouter un document.');
         return;
     }
 
@@ -1612,17 +1730,17 @@ async function submitDocument(event) {
 
         // Validations
         if (!docTitle) {
-            alert('⚠️ Le titre du document est obligatoire');
+            showNotification(' Le titre du document est obligatoire');
             return;
         }
 
         if (!docCategory) {
-            alert('⚠️ Veuillez sélectionner une catégorie');
+            showNotification(' Veuillez sélectionner une catégorie');
             return;
         }
 
         if (!fileInput.files || fileInput.files.length === 0) {
-            alert('⚠️ Veuillez sélectionner un fichier');
+            showNotification(' Veuillez sélectionner un fichier');
             return;
         }
 
@@ -1631,7 +1749,7 @@ async function submitDocument(event) {
         // Vérifier la taille (max 50 MB)
         const maxSize = 50 * 1024 * 1024; // 50 MB
         if (file.size > maxSize) {
-            alert('⚠️ Le fichier est trop volumineux (max 50 MB)');
+            showNotification(' Le fichier est trop volumineux (max 50 MB)');
             return;
         }
 
@@ -1648,7 +1766,7 @@ async function submitDocument(event) {
 
         if (!isAllowed) {
             const ext = fileName.substring(fileName.lastIndexOf('.'));
-            alert(`⚠️ Extension "${ext}" non autorisée. Seuls les documents, images et archives sont acceptés.`);
+            showNotification(`⚠️ Extension "${ext}" non autorisée. Seuls les documents, images et archives sont acceptés.`);
             return;
         }
 
@@ -1662,14 +1780,14 @@ async function submitDocument(event) {
 
         if (isBlocked) {
             const ext = fileName.substring(fileName.lastIndexOf('.'));
-            alert(`🚫 Les fichiers ${ext} (vidéos, audio, exécutables) ne sont pas autorisés`);
+            showNotification(`🚫 Les fichiers ${ext} (vidéos, audio, exécutables) ne sont pas autorisés`);
             return;
         }
 
         console.log('📤 Upload document:', { docTitle, docCategory, file: file.name });
 
         // Afficher un indicateur de chargement
-        alert('📤 Traitement du fichier en cours...');
+        showNotification('📤 Traitement du fichier en cours...');
 
         // Convertir le fichier en base64 (comme dans la version classique)
         const contenu = await new Promise((resolve, reject) => {
@@ -1682,7 +1800,7 @@ async function submitDocument(event) {
         // Récupérer le username
         const username = currentUser?.username || sessionStorage.getItem('username');
         if (!username) {
-            alert('⚠️ Session expirée');
+            showNotification(' Session expirée');
             window.location.href = '/login.html';
             return;
         }
@@ -1738,11 +1856,11 @@ async function submitDocument(event) {
             await loadDocuments();
         }
 
-        alert(`✅ Document "${docTitle}" uploadé avec succès !`);
+        showNotification(` Document "${docTitle}" uploadé avec succès !`);
 
     } catch (error) {
         console.error('❌ Erreur upload document:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
@@ -1764,7 +1882,7 @@ window.onclick = function(event) {
 async function showMyDocuments() {
     try {
         if (!currentUser) {
-            alert('⚠️ Veuillez vous connecter');
+            showNotification(' Veuillez vous connecter');
             return;
         }
 
@@ -1840,7 +1958,7 @@ async function showRecentDocuments() {
 async function showFavorites() {
     try {
         if (!currentUser) {
-            alert('⚠️ Veuillez vous connecter');
+            showNotification(' Veuillez vous connecter');
             return;
         }
 
@@ -1975,7 +2093,7 @@ async function openDocument(docId) {
         // Charger les détails du document
         const username = currentUser?.username || sessionStorage.getItem('username');
         if (!username) {
-            alert('⚠️ Session expirée');
+            showNotification(' Session expirée');
             window.location.href = '/login.html';
             return;
         }
@@ -1996,7 +2114,7 @@ async function openDocument(docId) {
 
     } catch (error) {
         console.error('❌ Erreur ouverture document:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
@@ -2180,7 +2298,7 @@ async function downloadDocument(docId) {
 
     } catch (error) {
         console.error('❌ Erreur téléchargement:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
@@ -2207,11 +2325,11 @@ async function shareDocument(docId) {
             throw new Error(error.message || 'Erreur partage');
         }
 
-        alert(`✅ Document partagé avec ${userToShare}`);
+        showNotification(` Document partagé avec ${userToShare}`);
 
     } catch (error) {
         console.error('❌ Erreur partage:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
@@ -2233,7 +2351,7 @@ async function toggleLock(docId, isCurrentlyLocked) {
             throw new Error(`Erreur ${action}`);
         }
 
-        alert(`✅ Document ${isCurrentlyLocked ? 'déverrouillé' : 'verrouillé'}`);
+        showNotification(` Document ${isCurrentlyLocked ? 'déverrouillé' : 'verrouillé'}`);
 
         // Recharger le modal
         closeDocumentModal();
@@ -2241,7 +2359,7 @@ async function toggleLock(docId, isCurrentlyLocked) {
 
     } catch (error) {
         console.error('❌ Erreur verrouillage:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
@@ -2263,7 +2381,7 @@ async function confirmDeleteDocument(docId) {
             throw new Error(error.message || 'Erreur suppression');
         }
 
-        alert('✅ Document supprimé (déplacé dans la corbeille)');
+        showNotification(' Document supprimé (déplacé dans la corbeille)');
 
         // Fermer le modal et recharger les documents
         closeDocumentModal();
@@ -2273,7 +2391,7 @@ async function confirmDeleteDocument(docId) {
 
     } catch (error) {
         console.error('❌ Erreur suppression:', error);
-        alert(`❌ Erreur: ${error.message}`);
+        showNotification(` Erreur: ${error.message}`);
     }
 }
 
