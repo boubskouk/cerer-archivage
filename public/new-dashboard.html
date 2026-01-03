@@ -59,11 +59,11 @@
             <span>👤</span>
             <span>Mon Profil</span>
         </div>
-        <div class="user-menu-item" onclick="alert('Fonctionnalité en développement')">
+        <div class="user-menu-item" onclick="customAlert('Cette fonctionnalité sera bientôt disponible !', 'Paramètres', '⚙️')">
             <span>⚙️</span>
             <span>Paramètres</span>
         </div>
-        <div class="user-menu-item" onclick="alert('Fonctionnalité en développement')">
+        <div class="user-menu-item" onclick="customAlert('Cette fonctionnalité sera bientôt disponible !', 'Notifications', '🔔')">
             <span>🔔</span>
             <span>Notifications</span>
         </div>
@@ -100,13 +100,6 @@
                     <div class="stat-info">
                         <h3>Documents</h3>
                         <p id="statDocuments">0</p>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon">💾</div>
-                    <div class="stat-info">
-                        <h3>Stockage</h3>
-                        <p id="statStorage">0 MB</p>
                     </div>
                 </div>
             </div>
@@ -314,8 +307,8 @@
                     <input type="text" class="form-input" id="docTitle" placeholder="Ex: Mémoire de Master 2024" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Catégorie *</label>
-                    <select class="form-select" id="docCategory" required onchange="updateArchivePath()">
+                    <label class="form-label">Catégorie * <span style="color: #ef4444; font-size: 12px;">(Obligatoire)</span></label>
+                    <select class="form-select" id="docCategory" required onchange="updateArchivePath(); checkUploadAreaState();">
                         <option value="">-- Sélectionner une catégorie --</option>
                     </select>
                     <div id="archivePath" style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 3px solid #3b82f6; border-radius: 4px; display: none;">
@@ -324,14 +317,21 @@
                     </div>
                 </div>
                 <div class="form-group">
+                    <label class="form-label">📄 Date du document *</label>
+                    <input type="date" class="form-input" id="docDate" required>
+                    <div style="margin-top: 5px; font-size: 12px; color: #6b7280;">
+                        La date du document doit être égale ou antérieure à aujourd'hui
+                    </div>
+                </div>
+                <div class="form-group">
                     <label class="form-label">Description</label>
                     <textarea class="form-textarea" id="docDescription" placeholder="Description du document (optionnelle)"></textarea>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Fichier *</label>
-                    <div class="file-upload" onclick="document.getElementById('fileInput').click()">
+                    <div id="fileUploadArea" class="file-upload" onclick="checkBeforeFileSelect()">
                         <div class="file-upload-icon">📁</div>
-                        <div class="file-upload-text">Cliquez pour sélectionner un fichier ou glissez-le ici</div>
+                        <div class="file-upload-text" id="fileUploadText">Cliquez pour sélectionner un fichier ou glissez-le ici</div>
                         <div class="file-upload-text" style="margin-top: 5px; font-size: 12px; color: #999;">
                             PDF, Word, Excel, PowerPoint - Max 50 MB
                         </div>
@@ -339,6 +339,10 @@
                     <input type="file" id="fileInput" style="display: none;"
                            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" required>
                     <div id="fileInfo" style="margin-top: 10px; color: #666; font-size: 14px;"></div>
+                    <div id="fileUploadWarning" style="display: none; margin-top: 10px; padding: 12px; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px;">
+                        <p style="font-size: 13px; font-weight: 600; color: #92400e; margin: 0 0 8px 0;">⚠️ Veuillez d'abord sélectionner :</p>
+                        <ul id="missingFieldsList" style="font-size: 12px; color: #78350f; margin: 0; padding-left: 20px;"></ul>
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-cancel" onclick="closeAddDocumentModal()">Annuler</button>
@@ -478,10 +482,6 @@
                         </div>
                         <div style="display: grid; gap: 8px; font-size: 14px;">
                             <div style="display: flex; justify-content: space-between;">
-                                <span style="color: #6b7280;">Rôle :</span>
-                                <span id="profile_role" style="font-weight: 500; color: #1f2937;">N/A</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between;">
                                 <span style="color: #6b7280;">Niveau :</span>
                                 <span id="profile_niveau" style="font-weight: 500; color: #1f2937;">N/A</span>
                             </div>
@@ -503,6 +503,64 @@
                 <button onclick="saveProfile()"
                         style="padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500;">
                     💾 Sauvegarder
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modales personnalisées UI/UX -->
+    <div id="customAlertModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px 12px 0 0;">
+                <h2 id="customAlertTitle" style="margin: 0; font-size: 20px; font-weight: 600;">ℹ️ Information</h2>
+            </div>
+            <div style="padding: 30px; text-align: center;">
+                <div id="customAlertIcon" style="font-size: 64px; margin-bottom: 20px;">ℹ️</div>
+                <p id="customAlertMessage" style="font-size: 16px; line-height: 1.6; color: #374151; margin: 0;"></p>
+            </div>
+            <div style="padding: 0 30px 30px; text-align: center;">
+                <button onclick="closeCustomAlert()" style="padding: 12px 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;">
+                    OK
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="customConfirmModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 20px; border-radius: 12px 12px 0 0;">
+                <h2 id="customConfirmTitle" style="margin: 0; font-size: 20px; font-weight: 600;">⚠️ Confirmation</h2>
+            </div>
+            <div style="padding: 30px; text-align: center;">
+                <div id="customConfirmIcon" style="font-size: 64px; margin-bottom: 20px;">⚠️</div>
+                <p id="customConfirmMessage" style="font-size: 16px; line-height: 1.6; color: #374151; margin: 0; white-space: pre-line;"></p>
+            </div>
+            <div style="display: flex; gap: 12px; padding: 0 30px 30px; justify-content: center;">
+                <button onclick="resolveCustomConfirm(false)" style="padding: 12px 32px; background: #e5e7eb; color: #374151; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;">
+                    Annuler
+                </button>
+                <button onclick="resolveCustomConfirm(true)" style="padding: 12px 32px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;">
+                    Confirmer
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="customPromptModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; padding: 20px; border-radius: 12px 12px 0 0;">
+                <h2 id="customPromptTitle" style="margin: 0; font-size: 20px; font-weight: 600;">✏️ Saisie</h2>
+            </div>
+            <div style="padding: 30px;">
+                <p id="customPromptMessage" style="font-size: 16px; line-height: 1.6; color: #374151; margin: 0 0 20px 0;"></p>
+                <input type="text" id="customPromptInput" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 15px; box-sizing: border-box;" placeholder="Entrez votre réponse...">
+            </div>
+            <div style="display: flex; gap: 12px; padding: 0 30px 30px; justify-content: center;">
+                <button onclick="resolveCustomPrompt(null)" style="padding: 12px 32px; background: #e5e7eb; color: #374151; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;">
+                    Annuler
+                </button>
+                <button onclick="resolveCustomPrompt(document.getElementById('customPromptInput').value)" style="padding: 12px 32px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;">
+                    Valider
                 </button>
             </div>
         </div>

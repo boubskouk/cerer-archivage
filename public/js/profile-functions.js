@@ -278,8 +278,7 @@ function openProfileModalBeta() {
     document.getElementById('profile_email').value = currentUser.email || '';
 
     // Afficher les infos non modifiables
-    document.getElementById('profile_role').textContent = currentUser.role || 'N/A';
-    document.getElementById('profile_niveau').textContent = currentUser.niveau !== undefined ? currentUser.niveau : 'N/A';
+    document.getElementById('profile_niveau').textContent = currentUser.niveau !== undefined ? `Niveau ${currentUser.niveau}` : 'N/A';
     document.getElementById('profile_departement').textContent = currentUser.departement || 'N/A';
 
     // Mettre à jour le placeholder avec les initiales du nom

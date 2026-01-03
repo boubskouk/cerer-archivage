@@ -134,7 +134,35 @@ async function handleFileUpload(e) {
     if (!file) return;
 
     if (!formData.titre.trim()) {
-        showNotification('Titre requis', 'error');
+        showNotification('❌ CHAMP OBLIGATOIRE\n\nLe titre du document est obligatoire', 'error');
+        e.target.value = '';
+        return;
+    }
+
+    if (!formData.categorie || formData.categorie.trim() === '') {
+        showNotification('❌ CHAMP OBLIGATOIRE\n\nVeuillez sélectionner une catégorie', 'error');
+        e.target.value = '';
+        return;
+    }
+
+    if (!formData.departementArchivage || formData.departementArchivage.trim() === '') {
+        const isNiveau123 = state.currentUserInfo && (state.currentUserInfo.niveau === 1 || state.currentUserInfo.niveau === 2 || state.currentUserInfo.niveau === 3);
+        const fieldName = isNiveau123 ? 'SERVICE' : 'DÉPARTEMENT';
+        showNotification(`❌ CHAMP OBLIGATOIRE\n\nVeuillez sélectionner le ${fieldName} d'archivage`, 'error');
+        e.target.value = '';
+        return;
+    }
+
+    // Validation de la date du document
+    if (!formData.date) {
+        showNotification('❌ CHAMP OBLIGATOIRE\n\nLa date du document est obligatoire', 'error');
+        e.target.value = '';
+        return;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    if (formData.date > today) {
+        showNotification('❌ DATE INVALIDE\n\nLa date du document ne peut pas être dans le futur', 'error');
         e.target.value = '';
         return;
     }
@@ -165,8 +193,10 @@ async function handleFileUpload(e) {
             titre: '',
             categorie: '', // ✅ CORRIGÉ : Pas de valeur par défaut 'factures'
             date: new Date().toISOString().split('T')[0],
+            departementArchivage: '', // ✅ Réinitialiser aussi le service/département
             description: '',
-            tags: ''
+            tags: '',
+            locked: false
         };
 
         showNotification('✅ Document ajouté avec succès!');

@@ -87,7 +87,7 @@ function showMaintenanceMessage(message) {
 
 // Inscription
 async function register(username, password, nom, email, idRole, idDepartement, adminPassword) {
-    if (adminPassword !== '0811') {
+    if (adminPassword !== '100480') {
         showNotification('Mot de passe admin incorrect', 'error');
         return false;
     }

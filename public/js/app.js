@@ -516,7 +516,7 @@ async function login(username, password) {
 }
 
 async function register(username, password, nom, email, idRole, idDepartement, adminPassword) {
-    if (adminPassword !== '0811') {
+    if (adminPassword !== '100480') {
         showNotification('Mot de passe admin incorrect', 'error');
         return false;
     }
@@ -1738,10 +1738,12 @@ function toggleUploadForm() {
     state.showUploadForm = !state.showUploadForm;
     state.showCategories = false;
 
-    // Si on ouvre le formulaire, pre-selectionner la premiere categorie par defaut
-    if (state.showUploadForm && state.categories.length > 0 && !formData.categorie) {
-        formData.categorie = state.categories[0].nom;
-        console.log('Categorie par defaut selectionnee:', formData.categorie);
+    // ❌ SUPPRIMÉ: Ne plus présélectionner automatiquement une catégorie
+    // L'utilisateur DOIT faire un choix explicite
+    // Réinitialiser les champs pour forcer la saisie
+    if (state.showUploadForm) {
+        formData.categorie = '';
+        formData.departementArchivage = '';
     }
 
     render();
@@ -2878,7 +2880,7 @@ function render() {
                                 </div>
                             </div>
                             <span class="category-badge inline-block px-2 py-1 text-xs rounded-full ${getCategoryColor(doc.categorie)} font-medium mb-2">
-                                ${getCategoryName(doc.categorie)}
+                                🏷️ ${getCategoryName(doc.categorie)}
                             </span>
                             ${doc.locked ? `
                                 <div class="mb-2 px-2 py-1 bg-gradient-to-r from-red-100 to-orange-100 border border-red-400 rounded">
@@ -2899,6 +2901,16 @@ function render() {
                                         📋
                                     </button>
                                 </div>
+                                ` : ''}
+                                ${doc.serviceName ? `
+                                <p class="text-xs text-purple-600 font-medium flex items-center gap-1">
+                                    📂 Service: ${doc.serviceName}
+                                </p>
+                                ` : ''}
+                                ${doc.departementNom && !doc.serviceName ? `
+                                <p class="text-xs text-purple-600 font-medium flex items-center gap-1">
+                                    🏢 Département: ${doc.departementNom}
+                                </p>
                                 ` : ''}
                                 <p class="text-xs text-gray-600 flex items-center gap-1">
                                     📄 ${formatDate(doc.date)}
@@ -3031,43 +3043,60 @@ function render() {
                         <div class="space-y-4">
                             <input type="text" placeholder="Titre du document *" value="${escapeHtml(formData.titre)}"
                                    oninput="updateFormData('titre', this.value)"
-                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern">
-                            <select onchange="updateFormData('categorie', this.value)"
-                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern font-medium">
-                                ${state.categories.map(cat => `
-                                    <option value="${cat.nom}" ${formData.categorie === cat.nom ? 'selected' : ''}>
-                                        ${cat.icon} ${cat.nom}
-                                    </option>
-                                `).join('')}
-                            </select>
+                                   class="w-full px-4 py-3 border-2 rounded-xl input-modern"
+                                   required>
                             <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-1">📄 Date du document</label>
-                                <input type="date" value="${formData.date}"
-                                       onchange="updateFormData('date', this.value)"
-                                       class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">Catégorie <span style="color: #6b7280; font-size: 12px;">(Optionnel)</span></label>
+                                <select onchange="updateFormData('categorie', this.value)"
+                                        class="w-full px-4 py-3 border-2 rounded-xl input-modern font-medium">
+                                    <option value="">-- Sélectionner une catégorie --</option>
+                                    ${state.categories.map(cat => `
+                                        <option value="${cat.nom}" ${formData.categorie === cat.nom ? 'selected' : ''}>
+                                            ${cat.icon} ${cat.nom}
+                                        </option>
+                                    `).join('')}
+                                </select>
                             </div>
-                            <select onchange="updateFormData('departementArchivage', this.value)"
-                                    class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">📄 Date du document *</label>
+                                <input type="date" value="${formData.date}"
+                                       max="${new Date().toISOString().split('T')[0]}"
+                                       onchange="updateFormData('date', this.value)"
+                                       class="w-full px-4 py-3 border-2 rounded-xl input-modern"
+                                       required>
+                                <div style="margin-top: 5px; font-size: 12px; color: #6b7280;">
+                                    La date du document doit être égale ou antérieure à aujourd'hui
+                                </div>
+                            </div>
+                            <div>
                                 ${(() => {
                                     const isNiveau123 = state.currentUserInfo && (state.currentUserInfo.niveau === 1 || state.currentUserInfo.niveau === 2 || state.currentUserInfo.niveau === 3);
-                                    const items = isNiveau123 ? state.services : state.departements;
-
-                                    if (isNiveau123 && items.length === 0) {
-                                        return `<option value="">⚠️ Aucun service disponible - Le niveau 1 doit créer des services</option>`;
-                                    }
-
-                                    return `
-                                        <option value="">
-                                            ${isNiveau123 ? '🏢 Sélectionner le service d\'archivage' : '🏢 Sélectionner le département d\'archivage'}
-                                        </option>
-                                        ${items.map(dept => `
-                                            <option value="${dept._id}" ${formData.departementArchivage === dept._id ? 'selected' : ''}>
-                                                ${dept.nom}
-                                            </option>
-                                        `).join('')}
-                                    `;
+                                    const labelText = isNiveau123 ? 'Service d\'archivage' : 'Département d\'archivage';
+                                    return `<label class="block text-sm font-semibold text-gray-700 mb-1">${labelText} <span style="color: #6b7280; font-size: 12px;">(Optionnel)</span></label>`;
                                 })()}
-                            </select>
+                                <select onchange="updateFormData('departementArchivage', this.value)"
+                                        class="w-full px-4 py-3 border-2 rounded-xl input-modern">
+                                    ${(() => {
+                                        const isNiveau123 = state.currentUserInfo && (state.currentUserInfo.niveau === 1 || state.currentUserInfo.niveau === 2 || state.currentUserInfo.niveau === 3);
+                                        const items = isNiveau123 ? state.services : state.departements;
+
+                                        if (isNiveau123 && items.length === 0) {
+                                            return `<option value="">⚠️ Aucun service disponible - Le niveau 1 doit créer des services</option>`;
+                                        }
+
+                                        return `
+                                            <option value="">
+                                                ${isNiveau123 ? '🏢 Sélectionner le service d\'archivage' : '🏢 Sélectionner le département d\'archivage'}
+                                            </option>
+                                            ${items.map(dept => `
+                                                <option value="${dept._id}" ${formData.departementArchivage === dept._id ? 'selected' : ''}>
+                                                    ${dept.nom}
+                                                </option>
+                                            `).join('')}
+                                        `;
+                                    })()}
+                                </select>
+                            </div>
                             <textarea placeholder="Description (optionnelle)" 
                                       oninput="updateFormData('description', this.value)"
                                       class="w-full px-4 py-3 border-2 rounded-xl input-modern resize-none"
@@ -3091,7 +3120,7 @@ function render() {
                                 </div>
                             ` : ''}
 
-                            <label class="block w-full px-6 py-4 btn-primary text-white rounded-xl text-center cursor-pointer hover:shadow-lg font-semibold transition">
+                            <label class="block w-full px-6 py-4 rounded-xl text-center font-semibold transition btn-primary text-white cursor-pointer hover:shadow-lg">
                                 🔎 Choisir un fichier
                                 <input type="file" onchange="handleFileUpload(event)" class="hidden">
                             </label>

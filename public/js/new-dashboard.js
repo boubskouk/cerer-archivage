@@ -4,6 +4,79 @@
  */
 
 // ============================================
+// MODALES PERSONNALISÉES UI/UX
+// ============================================
+
+let customConfirmResolve = null;
+let customPromptResolve = null;
+
+// Fonction pour afficher une alerte personnalisée
+function customAlert(message, title = 'Information', icon = 'ℹ️') {
+    return new Promise((resolve) => {
+        document.getElementById('customAlertTitle').textContent = `${icon} ${title}`;
+        document.getElementById('customAlertIcon').textContent = icon;
+        document.getElementById('customAlertMessage').textContent = message;
+        document.getElementById('customAlertModal').classList.add('active');
+
+        window.closeCustomAlert = () => {
+            document.getElementById('customAlertModal').classList.remove('active');
+            resolve();
+        };
+    });
+}
+
+// Fonction pour afficher une confirmation personnalisée
+function customConfirm(message, title = 'Confirmation', icon = '⚠️') {
+    return new Promise((resolve) => {
+        customConfirmResolve = resolve;
+        document.getElementById('customConfirmTitle').textContent = `${icon} ${title}`;
+        document.getElementById('customConfirmIcon').textContent = icon;
+        document.getElementById('customConfirmMessage').textContent = message;
+        document.getElementById('customConfirmModal').classList.add('active');
+    });
+}
+
+window.resolveCustomConfirm = (result) => {
+    document.getElementById('customConfirmModal').classList.remove('active');
+    if (customConfirmResolve) {
+        customConfirmResolve(result);
+        customConfirmResolve = null;
+    }
+};
+
+// Fonction pour afficher un prompt personnalisé
+function customPrompt(message, title = 'Saisie', placeholder = 'Entrez votre réponse...') {
+    return new Promise((resolve) => {
+        customPromptResolve = resolve;
+        document.getElementById('customPromptTitle').textContent = `✏️ ${title}`;
+        document.getElementById('customPromptMessage').textContent = message;
+        document.getElementById('customPromptInput').value = '';
+        document.getElementById('customPromptInput').placeholder = placeholder;
+        document.getElementById('customPromptModal').classList.add('active');
+
+        // Focus sur l'input
+        setTimeout(() => {
+            document.getElementById('customPromptInput').focus();
+        }, 100);
+
+        // Permettre la validation avec Enter
+        document.getElementById('customPromptInput').onkeyup = (e) => {
+            if (e.key === 'Enter') {
+                resolveCustomPrompt(document.getElementById('customPromptInput').value);
+            }
+        };
+    });
+}
+
+window.resolveCustomPrompt = (result) => {
+    document.getElementById('customPromptModal').classList.remove('active');
+    if (customPromptResolve) {
+        customPromptResolve(result);
+        customPromptResolve = null;
+    }
+};
+
+// ============================================
 // VARIABLES GLOBALES
 // ============================================
 
@@ -493,18 +566,15 @@ function updateStats() {
     // Calculer les statistiques globales
     let totalServices = 0;
     let totalDocs = 0;
-    let totalStorage = 0;
 
     allDepartments.forEach(dept => {
         totalServices += dept.servicesCount || 0;
         totalDocs += dept.documentsCount || 0;
-        totalStorage += dept.totalSize || 0;
     });
 
     document.getElementById('statDepts').textContent = allDepartments.length;
     document.getElementById('statServices').textContent = totalServices;
     document.getElementById('statDocuments').textContent = totalDocs;
-    document.getElementById('statStorage').textContent = formatFileSize(totalStorage);
 }
 
 // ============================================
@@ -600,7 +670,7 @@ function displayServices(services) {
                     <span>${escapeHtml(service.nom)}</span>
                     <span class="accordion-badge" id="service-badge-${service._id}"></span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 16px;">
                     <button class="action-btn edit-btn" onclick="event.stopPropagation(); openEditServiceModal('${service._id}', '${escapeHtml(service.nom)}', '${service.icon || ''}', '${escapeHtml(service.description || '')}')" title="Modifier">✏️</button>
                     <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteService('${service._id}', '${escapeHtml(service.nom)}')" title="Supprimer">🗑️</button>
                     <span class="accordion-icon">▼</span>
@@ -673,12 +743,15 @@ async function loadCategories(serviceId) {
         if (documentsResponse.ok) {
             const allDocuments = await documentsResponse.json();
 
-            // Compter le nombre de documents par catégorie
+            // ✅ CORRECTION: Compter le nombre de documents par catégorie ET par service
             categories.forEach(cat => {
-                cat.documentsCount = allDocuments.filter(doc => doc.categorie === cat.nom).length;
+                cat.documentsCount = allDocuments.filter(doc =>
+                    doc.categorie === cat.nom &&
+                    (!currentServiceName || doc.serviceArchivage === currentServiceName)
+                ).length;
             });
 
-            console.log(`📊 Comptage documents par catégorie effectué`);
+            console.log(`📊 Comptage documents par catégorie effectué pour le service "${currentServiceName}"`);
         } else {
             console.warn('⚠️ Impossible de charger les documents pour le comptage');
         }
@@ -744,9 +817,11 @@ function displayCategories(serviceId, categories) {
 
 async function showDocuments(categoryId, categoryName) {
     try {
-        console.log(`📄 Affichage documents de la catégorie ${categoryId}...`);
+        console.log(`📄 Affichage documents de la catégorie ${categoryName}...`);
 
-        currentCategory = categoryId;
+        // ✅ CORRECTION: Utiliser le NOM de la catégorie pour le filtrage, pas l'ID
+        // car doc.categorie contient le nom, pas l'ID
+        currentCategory = categoryName;
         currentPage = 1; // Reset à la page 1
 
         // Mettre à jour le breadcrumb et titre
@@ -800,16 +875,29 @@ async function loadDocuments() {
             console.log(`📊 DEBUG: Premier document:`, allDocuments[0]);
         }
 
-        // Filtrer par catégorie actuelle
+        // ✅ CORRECTION: Filtrer par catégorie ET par service
         let documents = allDocuments.filter(doc => {
-            const match = doc.categorie === currentCategory;
+            // Filtrage par catégorie
+            const matchCategory = doc.categorie === currentCategory;
+
+            // ✅ NOUVEAU: Filtrage par service (similitude avec version classique)
+            // Si on est dans un service, ne montrer QUE les documents de ce service
+            const matchService = !currentServiceName || doc.serviceArchivage === currentServiceName;
+
+            const match = matchCategory && matchService;
+
             if (!match && allDocuments.length < 20) { // Log seulement si peu de docs
-                console.log(`📊 DEBUG: Document "${doc.titre}" - catégorie="${doc.categorie}" ne match pas "${currentCategory}"`);
+                if (!matchCategory) {
+                    console.log(`📊 DEBUG: Document "${doc.titre}" - catégorie="${doc.categorie}" ne match pas "${currentCategory}"`);
+                }
+                if (!matchService) {
+                    console.log(`📊 DEBUG: Document "${doc.titre}" - service="${doc.serviceArchivage}" ne match pas "${currentServiceName}"`);
+                }
             }
             return match;
         });
 
-        console.log(`📊 DEBUG: ${documents.length} document(s) après filtrage par catégorie`);
+        console.log(`📊 DEBUG: ${documents.length} document(s) après filtrage par catégorie${currentServiceName ? ' et service' : ''}`);
 
         // Tri
         documents = sortDocumentsArray(documents, currentSortBy, currentSortOrder);
@@ -888,11 +976,13 @@ function displayDocuments(documents) {
     grid.innerHTML = documents.map(doc => `
         <div class="doc-card" onclick="openDocument('${doc._id}')" data-id="${escapeHtml(doc.idDocument || doc._id || '')}">
             <div class="doc-icon">${getFileIcon(doc.titre)}</div>
-            <div class="doc-title">${escapeHtml(doc.titre)}</div>
+            <div class="doc-title" title="${escapeHtml(doc.titre)}">${escapeHtml(doc.titre)}</div>
             <div class="doc-meta">
-                <div>📅 ${formatDate(doc.dateAjout)}</div>
-                <div>💾 ${formatFileSize(doc.taille)}</div>
-                <div>👤 ${escapeHtml(doc.idUtilisateur)}</div>
+                ${doc.categorie ? `<div title="Catégorie">🏷️ ${escapeHtml(doc.categorie)}</div>` : ''}
+                ${doc.serviceName ? `<div title="Service">📂 ${escapeHtml(doc.serviceName)}</div>` :
+                  doc.departementNom ? `<div title="Département">🏢 ${escapeHtml(doc.departementNom)}</div>` : ''}
+                <div title="Date d'ajout">📅 ${formatDate(doc.dateAjout)}</div>
+                <div title="Taille">💾 ${formatFileSize(doc.taille)}</div>
             </div>
         </div>
     `).join('');
@@ -1427,7 +1517,11 @@ async function deleteService(serviceId, serviceName) {
     }
 
     // Demander confirmation
-    const confirmation = confirm(`⚠️ ATTENTION\n\nÊtes-vous sûr de vouloir supprimer le service "${serviceName}" ?\n\nCette action supprimera également toutes les catégories et documents associés.\n\nCette action est IRRÉVERSIBLE !`);
+    const confirmation = await customConfirm(
+        `Êtes-vous sûr de vouloir supprimer le service "${serviceName}" ?\n\nCette action supprimera également toutes les catégories et documents associés.\n\nCette action est IRRÉVERSIBLE !`,
+        'ATTENTION - Suppression de service',
+        '🗑️'
+    );
 
     if (!confirmation) {
         return;
@@ -1561,14 +1655,31 @@ async function openAddDocumentModal() {
         return;
     }
 
+    // ✅ CORRECTION: Pour les niveaux 1/2/3, obliger l'utilisateur à être dans un service
+    if (currentUser.niveau >= 1 && currentUser.niveau <= 3 && !currentService) {
+        showNotification('⚠️ Veuillez d\'abord sélectionner un service\n\nOuvrez un service dans la liste ci-dessus, puis ajoutez le document.');
+        return;
+    }
+
     // Réinitialiser le formulaire
     document.getElementById('docTitle').value = '';
     document.getElementById('docDescription').value = '';
     document.getElementById('fileInput').value = '';
     document.getElementById('fileInfo').textContent = '';
 
+    // ✅ Réinitialiser aussi le select de catégorie pour forcer la sélection
+    document.getElementById('docCategory').value = '';
+
+    // Initialiser la date à aujourd'hui
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('docDate').value = today;
+    document.getElementById('docDate').max = today; // Empêcher la sélection de dates futures
+
     // Charger les catégories disponibles
     await loadCategoriesForUpload();
+
+    // Initialiser l'état de la zone d'upload (désactivée par défaut)
+    checkUploadAreaState();
 
     // Afficher un message contextuel si on est dans un emplacement spécifique
     const contextInfo = document.getElementById('contextInfo');
@@ -1719,23 +1830,142 @@ function closeAddDocumentModal() {
     document.getElementById('addDocumentModal').classList.remove('active');
 }
 
+// Vérifier les champs obligatoires avant de permettre la sélection de fichier
+function checkBeforeFileSelect() {
+    const docCategory = document.getElementById('docCategory').value;
+    const missingFields = [];
+
+    // Vérifier la catégorie
+    if (!docCategory) {
+        missingFields.push('Une catégorie');
+    }
+
+    // Vérifier le service (pour les niveaux 1/2/3)
+    if (currentUser && currentUser.niveau >= 1 && currentUser.niveau <= 3 && !currentService) {
+        missingFields.push('Un service d\'archivage');
+    }
+
+    // Si des champs manquent, afficher l'avertissement
+    if (missingFields.length > 0) {
+        const warningDiv = document.getElementById('fileUploadWarning');
+        const missingList = document.getElementById('missingFieldsList');
+        const uploadArea = document.getElementById('fileUploadArea');
+
+        // Mettre à jour la liste des champs manquants
+        missingList.innerHTML = missingFields.map(field => `<li>✗ ${field}</li>`).join('');
+
+        // Afficher l'avertissement
+        warningDiv.style.display = 'block';
+
+        // Changer le style de la zone d'upload pour indiquer qu'elle est désactivée
+        uploadArea.style.opacity = '0.5';
+        uploadArea.style.cursor = 'not-allowed';
+        uploadArea.style.backgroundColor = '#f3f4f6';
+
+        // Afficher une notification
+        showNotification('❌ CHAMPS OBLIGATOIRES MANQUANTS\n\nVeuillez d\'abord sélectionner : ' + missingFields.join(', '), 'error');
+
+        return;
+    }
+
+    // Si tout est OK, masquer l'avertissement et permettre la sélection
+    document.getElementById('fileUploadWarning').style.display = 'none';
+    const uploadArea = document.getElementById('fileUploadArea');
+    uploadArea.style.opacity = '1';
+    uploadArea.style.cursor = 'pointer';
+    uploadArea.style.backgroundColor = '';
+
+    // Ouvrir le sélecteur de fichier
+    document.getElementById('fileInput').click();
+}
+
+// Mettre à jour l'état de la zone d'upload quand la catégorie change
+function updateArchivePath() {
+    const docCategory = document.getElementById('docCategory').value;
+    const archivePath = document.getElementById('archivePath');
+    const archivePathText = document.getElementById('archivePathText');
+
+    if (docCategory) {
+        // Construire le chemin d'archivage
+        let path = '';
+        if (currentDepartment) {
+            path += currentDepartment.nom + ' / ';
+        }
+        if (currentService) {
+            path += currentServiceName + ' / ';
+        }
+        path += docCategory;
+
+        archivePathText.textContent = path;
+        archivePath.style.display = 'block';
+
+        // Réactiver la zone d'upload si la catégorie est sélectionnée
+        checkUploadAreaState();
+    } else {
+        archivePath.style.display = 'none';
+    }
+}
+
+// Vérifier et mettre à jour l'état de la zone d'upload
+function checkUploadAreaState() {
+    const docCategory = document.getElementById('docCategory').value;
+    const uploadArea = document.getElementById('fileUploadArea');
+    const uploadText = document.getElementById('fileUploadText');
+
+    const hasService = currentUser && currentUser.niveau >= 1 && currentUser.niveau <= 3 ? currentService : true;
+
+    if (docCategory && hasService) {
+        // Tout est OK
+        uploadArea.style.opacity = '1';
+        uploadArea.style.cursor = 'pointer';
+        uploadArea.style.backgroundColor = '';
+        uploadText.textContent = 'Cliquez pour sélectionner un fichier ou glissez-le ici';
+        document.getElementById('fileUploadWarning').style.display = 'none';
+    } else {
+        // Champs manquants
+        uploadArea.style.opacity = '0.5';
+        uploadArea.style.cursor = 'not-allowed';
+        uploadArea.style.backgroundColor = '#f3f4f6';
+        uploadText.textContent = '🔒 Veuillez d\'abord sélectionner une catégorie' + (!hasService ? ' et un service' : '');
+    }
+}
+
 async function submitDocument(event) {
     event.preventDefault();
 
     try {
         const docTitle = document.getElementById('docTitle').value.trim();
         const docCategory = document.getElementById('docCategory').value;
+        const docDate = document.getElementById('docDate').value;
         const docDescription = document.getElementById('docDescription').value.trim();
         const fileInput = document.getElementById('fileInput');
 
         // Validations
         if (!docTitle) {
-            showNotification(' Le titre du document est obligatoire');
+            showNotification('❌ CHAMP OBLIGATOIRE\n\nLe titre du document est obligatoire', 'error');
             return;
         }
 
         if (!docCategory) {
-            showNotification(' Veuillez sélectionner une catégorie');
+            showNotification('❌ CHAMP OBLIGATOIRE\n\nVeuillez sélectionner une catégorie', 'error');
+            return;
+        }
+
+        // Validation du service pour les niveaux 1/2/3
+        if (currentUser && currentUser.niveau >= 1 && currentUser.niveau <= 3 && !currentService) {
+            showNotification('❌ SERVICE REQUIS\n\nVeuillez d\'abord sélectionner un service dans lequel archiver le document', 'error');
+            return;
+        }
+
+        // Validation de la date du document
+        if (!docDate) {
+            showNotification('❌ CHAMP OBLIGATOIRE\n\nLa date du document est obligatoire', 'error');
+            return;
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        if (docDate > today) {
+            showNotification('❌ DATE INVALIDE\n\nLa date du document ne peut pas être dans le futur', 'error');
             return;
         }
 
@@ -1806,6 +2036,8 @@ async function submitDocument(event) {
         }
 
         // Construire l'objet document (format attendu par le serveur)
+        // ✅ CORRECTION: Envoyer l'ID du service si on est dans un service, sinon l'ID du département
+        // Le champ "departementArchivage" est utilisé pour SOIT le département (niveau 0) SOIT le service (niveaux 1/2/3)
         const documentData = {
             userId: username,
             titre: docTitle,
@@ -1815,10 +2047,10 @@ async function submitDocument(event) {
             taille: file.size,
             type: file.type,
             contenu: contenu,
-            date: new Date().toISOString().split('T')[0],
+            date: docDate, // Utiliser la date saisie par l'utilisateur
             tags: '',
-            // Ajouter le département d'archivage si disponible
-            departementArchivage: currentDepartment?._id || currentUser?.idDepartement || null
+            // ✅ Si on est dans un service, envoyer l'ID du service, sinon l'ID du département
+            departementArchivage: currentService || currentDepartment?._id || currentUser?.idDepartement || null
         };
 
         console.log('📤 Envoi document:', {
@@ -2255,8 +2487,80 @@ function closeDocumentModal() {
 }
 
 async function viewDocument(docId) {
-    // Rediriger vers le viewer
-    window.location.href = `/viewer.html?id=${docId}`;
+    try {
+        const username = currentUser?.username || sessionStorage.getItem('username');
+        console.log('👁️ Visualisation document:', docId);
+
+        // Récupérer le document complet avec son contenu
+        const response = await fetch(`/api/documents/${username}/${docId}`, {
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            throw new Error('Erreur chargement document');
+        }
+
+        const doc = await response.json();
+
+        // Afficher le document dans l'iframe de prévisualisation
+        const previewDiv = document.getElementById('documentPreview');
+        if (!previewDiv) {
+            console.error('❌ Element documentPreview non trouvé');
+            return;
+        }
+
+        // Enregistrer le téléchargement
+        await fetch(`/api/documents/${username}/${docId}/download`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        // Déterminer le type de fichier
+        const fileType = doc.type || doc.nomFichier?.split('.').pop()?.toLowerCase() || '';
+        const fileName = doc.nomFichier || doc.titre;
+
+        // Si c'est un PDF, l'afficher dans un iframe
+        if (fileType.includes('pdf') || fileName.toLowerCase().endsWith('.pdf')) {
+            previewDiv.innerHTML = `
+                <iframe src="${doc.contenu}"
+                        style="width: 100%; height: 100%; border: none;"
+                        title="Prévisualisation ${escapeHtml(doc.titre)}">
+                </iframe>
+            `;
+        }
+        // Si c'est une image, l'afficher directement
+        else if (fileType.includes('image') || /\.(jpg|jpeg|png|gif|bmp|svg|webp)$/i.test(fileName)) {
+            previewDiv.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f9fafb;">
+                    <img src="${doc.contenu}"
+                         alt="${escapeHtml(doc.titre)}"
+                         style="max-width: 100%; max-height: 100%; object-fit: contain;">
+                </div>
+            `;
+        }
+        // Pour les autres types, proposer le téléchargement
+        else {
+            previewDiv.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #6b7280;">
+                    <div style="font-size: 64px; margin-bottom: 20px;">📄</div>
+                    <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">${escapeHtml(doc.titre)}</div>
+                    <div style="margin-bottom: 20px; color: #9ca3af;">
+                        La prévisualisation n'est pas disponible pour ce type de fichier
+                    </div>
+                    <button onclick="downloadDocument('${docId}')"
+                            style="padding: 12px 24px; background: #34d399; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                        ⬇️ Télécharger le fichier
+                    </button>
+                </div>
+            `;
+        }
+
+        console.log('✅ Document affiché dans la prévisualisation');
+
+    } catch (error) {
+        console.error('❌ Erreur visualisation document:', error);
+        showNotification(` Erreur: ${error.message}`);
+    }
 }
 
 async function downloadDocument(docId) {
@@ -2305,7 +2609,11 @@ async function downloadDocument(docId) {
 async function shareDocument(docId) {
     try {
         // TODO: Implémenter le modal de partage avec liste des utilisateurs
-        const userToShare = prompt('🔗 Entrez le nom d\'utilisateur avec qui partager ce document:');
+        const userToShare = await customPrompt(
+            'Entrez le nom d\'utilisateur avec qui partager ce document :',
+            'Partage de document',
+            'Nom d\'utilisateur...'
+        );
 
         if (!userToShare) return;
 
@@ -2338,7 +2646,13 @@ async function toggleLock(docId, isCurrentlyLocked) {
         const username = currentUser?.username || sessionStorage.getItem('username');
         const action = isCurrentlyLocked ? 'déverrouiller' : 'verrouiller';
 
-        if (!confirm(`Voulez-vous vraiment ${action} ce document ?`)) {
+        const confirmation = await customConfirm(
+            `Voulez-vous vraiment ${action} ce document ?`,
+            'Confirmation',
+            '🔒'
+        );
+
+        if (!confirmation) {
             return;
         }
 
@@ -2364,7 +2678,13 @@ async function toggleLock(docId, isCurrentlyLocked) {
 }
 
 async function confirmDeleteDocument(docId) {
-    if (!confirm('⚠️ Voulez-vous vraiment supprimer ce document ?\n\nIl sera déplacé dans la corbeille.')) {
+    const confirmation = await customConfirm(
+        'Voulez-vous vraiment supprimer ce document ?\n\nIl sera déplacé dans la corbeille.',
+        'Confirmation de suppression',
+        '🗑️'
+    );
+
+    if (!confirmation) {
         return;
     }
 

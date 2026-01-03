@@ -120,6 +120,66 @@
             color: #666;
             margin-top: 20px;
         }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e1e8ed;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .tab:hover {
+            color: #667eea;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .form-container {
+            display: none;
+        }
+
+        .form-container.active {
+            display: block;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -130,30 +190,228 @@
             <p>Gestion Électronique Documents</p>
         </div>
 
+        <!-- Onglets -->
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('login')">Connexion</div>
+            <div class="tab" onclick="switchTab('register')">Créer un compte</div>
+        </div>
+
         <div id="errorMessage" class="error-message"></div>
+        <div id="successMessage" class="success-message"></div>
 
-        <form id="loginForm" onsubmit="handleLogin(event)">
-            <div class="form-group">
-                <label class="form-label">Nom d'utilisateur</label>
-                <input type="text" id="username" class="form-input" placeholder="Entrez votre nom d'utilisateur" required autofocus>
-            </div>
+        <!-- Formulaire de connexion -->
+        <div id="loginContainer" class="form-container active">
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label class="form-label">Nom d'utilisateur</label>
+                    <input type="text" id="username" class="form-input" placeholder="Entrez votre nom d'utilisateur" required>
+                </div>
 
-            <div class="form-group">
-                <label class="form-label">Mot de passe</label>
-                <input type="password" id="password" class="form-input" placeholder="Entrez votre mot de passe" required>
-            </div>
+                <div class="form-group">
+                    <label class="form-label">Mot de passe</label>
+                    <input type="password" id="password" class="form-input" placeholder="Entrez votre mot de passe" required>
+                </div>
 
-            <button type="submit" class="btn-login" id="btnLogin">
-                Se connecter
-            </button>
-        </form>
+                <button type="submit" class="btn-login" id="btnLogin">
+                    Se connecter
+                </button>
+            </form>
+        </div>
+
+        <!-- Formulaire d'inscription -->
+        <div id="registerContainer" class="form-container">
+            <form id="registerForm" onsubmit="handleRegister(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Nom</label>
+                        <input type="text" id="reg_nom" class="form-input" placeholder="Nom" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Prénom</label>
+                        <input type="text" id="reg_prenom" class="form-input" placeholder="Prénom" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="reg_email" class="form-input" placeholder="exemple@cerer.sn" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Nom d'utilisateur</label>
+                    <input type="text" id="reg_username" class="form-input" placeholder="Nom d'utilisateur" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Mot de passe</label>
+                    <input type="password" id="reg_password" class="form-input" placeholder="Mot de passe" required minlength="6">
+                    <div class="help-text">Au moins 6 caractères</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Niveau d'accès</label>
+                    <select id="reg_niveau" class="form-input" required>
+                        <option value="">Sélectionnez un niveau</option>
+                        <option value="0">Niveau 0 - Super Administrateur</option>
+                        <option value="1">Niveau 1 - Primaire (Accès complet départements)</option>
+                        <option value="2">Niveau 2 - Secondaire (Accès département)</option>
+                        <option value="3">Niveau 3 - Tertiaire (Accès limité)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="departmentGroup">
+                    <label class="form-label">Département (optionnel)</label>
+                    <select id="reg_departement" class="form-input">
+                        <option value="">Aucun département</option>
+                    </select>
+                    <div class="help-text">Requis pour les niveaux 1, 2 et 3</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Code secret</label>
+                    <input type="text" id="reg_code" class="form-input" placeholder="Code d'accès" required>
+                    <div class="help-text">Demandez le code à votre administrateur</div>
+                </div>
+
+                <button type="submit" class="btn-login" id="btnRegister">
+                    Créer le compte
+                </button>
+            </form>
+        </div>
 
         <div id="loadingMessage" class="loading" style="display: none;">
-            Connexion en cours...
+            Traitement en cours...
         </div>
     </div>
 
     <script>
+        // Basculer entre les onglets
+        function switchTab(tab) {
+            const loginTab = document.querySelector('.tab:nth-child(1)');
+            const registerTab = document.querySelector('.tab:nth-child(2)');
+            const loginContainer = document.getElementById('loginContainer');
+            const registerContainer = document.getElementById('registerContainer');
+            const errorDiv = document.getElementById('errorMessage');
+            const successDiv = document.getElementById('successMessage');
+
+            // Masquer les messages
+            errorDiv.classList.remove('show');
+            successDiv.classList.remove('show');
+
+            if (tab === 'login') {
+                loginTab.classList.add('active');
+                registerTab.classList.remove('active');
+                loginContainer.classList.add('active');
+                registerContainer.classList.remove('active');
+            } else {
+                loginTab.classList.remove('active');
+                registerTab.classList.add('active');
+                loginContainer.classList.remove('active');
+                registerContainer.classList.add('active');
+                // Charger les départements
+                loadDepartments();
+            }
+        }
+
+        // Charger les départements
+        async function loadDepartments() {
+            try {
+                const response = await fetch('/api/departments-list');
+                if (response.ok) {
+                    const departments = await response.json();
+                    const select = document.getElementById('reg_departement');
+                    select.innerHTML = '<option value="">Aucun département</option>';
+                    departments.forEach(dept => {
+                        const option = document.createElement('option');
+                        option.value = dept._id;
+                        option.textContent = dept.nom;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Erreur chargement départements:', error);
+            }
+        }
+
+        // Gérer l'inscription
+        async function handleRegister(event) {
+            event.preventDefault();
+
+            const nom = document.getElementById('reg_nom').value.trim();
+            const prenom = document.getElementById('reg_prenom').value.trim();
+            const email = document.getElementById('reg_email').value.trim();
+            const username = document.getElementById('reg_username').value.trim();
+            const password = document.getElementById('reg_password').value;
+            const niveau = parseInt(document.getElementById('reg_niveau').value);
+            const departement = document.getElementById('reg_departement').value;
+            const code = document.getElementById('reg_code').value.trim();
+
+            const errorDiv = document.getElementById('errorMessage');
+            const successDiv = document.getElementById('successMessage');
+            const btnRegister = document.getElementById('btnRegister');
+            const loadingMsg = document.getElementById('loadingMessage');
+
+            // Masquer les messages précédents
+            errorDiv.classList.remove('show');
+            successDiv.classList.remove('show');
+
+            // Validation
+            if (niveau >= 1 && !departement) {
+                errorDiv.textContent = 'Un département est requis pour les niveaux 1, 2 et 3';
+                errorDiv.classList.add('show');
+                return;
+            }
+
+            // Désactiver le bouton
+            btnRegister.disabled = true;
+            loadingMsg.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        nom,
+                        prenom,
+                        email,
+                        username,
+                        password,
+                        niveau,
+                        idDepartement: departement || null,
+                        secretCode: code
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Erreur lors de la création du compte');
+                }
+
+                // Succès
+                successDiv.textContent = data.message || 'Compte créé avec succès ! Vous pouvez maintenant vous connecter.';
+                successDiv.classList.add('show');
+
+                // Réinitialiser le formulaire
+                document.getElementById('registerForm').reset();
+
+                // Basculer vers le formulaire de connexion après 2 secondes
+                setTimeout(() => {
+                    switchTab('login');
+                }, 2000);
+
+            } catch (error) {
+                console.error('Erreur inscription:', error);
+                errorDiv.textContent = error.message || 'Erreur lors de la création du compte';
+                errorDiv.classList.add('show');
+            } finally {
+                btnRegister.disabled = false;
+                loadingMsg.style.display = 'none';
+            }
+        }
+
         async function handleLogin(event) {
             event.preventDefault();
 
@@ -227,6 +485,8 @@
 
         // Vérifier au chargement
         checkIfLoggedIn();
+        // Charger les départements dès le début
+        loadDepartments();
     </script>
 </body>
 </html>

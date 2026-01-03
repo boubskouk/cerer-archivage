@@ -108,7 +108,7 @@ app.use(session({
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 10 * 60 * 1000 // ✅ 10 minutes (sécurité renforcée)
+        maxAge: 20 * 60 * 1000 // ✅ 20 minutes (sécurité renforcée)
     },
     name: 'sessionId'
 }));
@@ -1161,6 +1161,167 @@ async function connectDB(retryCount = 0) {
             }
         });
 
+        // 📋 ENDPOINT: Récupérer la liste des départements (pour l'inscription)
+        app.get('/api/departments-list', async (req, res) => {
+            try {
+                const departments = await departementsCollection.find({}).toArray();
+                res.json(departments);
+            } catch (error) {
+                console.error('❌ Erreur récupération départements:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        // ✍️ ENDPOINT: Inscription d'un nouvel utilisateur avec code secret
+        app.post('/api/register', async (req, res) => {
+            try {
+                const { nom, prenom, email, username, password, niveau, idDepartement, secretCode } = req.body;
+
+                // Code secret requis
+                const REGISTRATION_SECRET_CODE = '100480';
+
+                // Validation des champs
+                if (!nom || !prenom || !email || !username || !password || niveau === undefined || !secretCode) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Tous les champs sont requis'
+                    });
+                }
+
+                // Vérifier le code secret
+                if (secretCode !== REGISTRATION_SECRET_CODE) {
+                    await securityLogger.log(
+                        'REGISTRATION_FAILED_INVALID_CODE',
+                        username,
+                        { reason: 'Code secret invalide', code: secretCode },
+                        req
+                    );
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Code secret invalide'
+                    });
+                }
+
+                // Vérifier que l'utilisateur n'existe pas déjà
+                const existingUser = await usersCollection.findOne({
+                    $or: [{ username }, { email }]
+                });
+
+                if (existingUser) {
+                    return res.status(409).json({
+                        success: false,
+                        message: existingUser.username === username
+                            ? 'Ce nom d\'utilisateur existe déjà'
+                            : 'Cet email est déjà utilisé'
+                    });
+                }
+
+                // Validation du département pour les niveaux 1, 2, 3
+                if (niveau >= 1 && !idDepartement) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Un département est requis pour les niveaux 1, 2 et 3'
+                    });
+                }
+
+                // Trouver ou créer le rôle correspondant au niveau
+                let role;
+                if (niveau === 0) {
+                    // Super Admin
+                    role = await rolesCollection.findOne({ niveau: 0 });
+                    if (!role) {
+                        // Créer le rôle Super Admin s'il n'existe pas
+                        const result = await rolesCollection.insertOne({
+                            nom: "Super Administrateur",
+                            niveau: 0,
+                            description: "Supervision et administration complète du système"
+                        });
+                        role = await rolesCollection.findOne({ _id: result.insertedId });
+                    }
+                } else if (niveau === 1) {
+                    role = await rolesCollection.findOne({ libelle: 'primaire' });
+                } else if (niveau === 2) {
+                    role = await rolesCollection.findOne({ libelle: 'secondaire' });
+                } else if (niveau === 3) {
+                    role = await rolesCollection.findOne({ libelle: 'tertiaire' });
+                } else {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Niveau invalide (doit être 0, 1, 2 ou 3)'
+                    });
+                }
+
+                if (!role) {
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Rôle non trouvé dans le système'
+                    });
+                }
+
+                // Hasher le mot de passe
+                const hashedPassword = await bcrypt.hash(password, 10);
+
+                // Créer l'utilisateur
+                const newUser = {
+                    nom,
+                    prenom,
+                    email,
+                    username,
+                    password: hashedPassword,
+                    idRole: role._id,
+                    idDepartement: idDepartement ? new ObjectId(idDepartement) : null,
+                    dateCreation: new Date(),
+                    mustChangePassword: false,
+                    firstLogin: true,
+                    actif: true
+                };
+
+                const result = await usersCollection.insertOne(newUser);
+
+                // Logger la création
+                await securityLogger.log(
+                    'USER_REGISTRATION_SUCCESS',
+                    username,
+                    {
+                        niveau,
+                        email,
+                        department: idDepartement || 'none',
+                        createdBy: 'self-registration'
+                    },
+                    req
+                );
+
+                await auditLogsCollection.insertOne({
+                    timestamp: new Date(),
+                    user: username,
+                    action: 'USER_CREATED_VIA_REGISTRATION',
+                    details: {
+                        niveau,
+                        email,
+                        department: idDepartement || null,
+                        ip: req.ip,
+                        userAgent: req.headers['user-agent']
+                    },
+                    ip: req.ip,
+                    userAgent: req.headers['user-agent']
+                });
+
+                console.log(`✅ Nouvel utilisateur créé: ${username} (Niveau ${niveau})`);
+
+                res.json({
+                    success: true,
+                    message: 'Compte créé avec succès ! Vous pouvez maintenant vous connecter.'
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur inscription:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Erreur lors de la création du compte'
+                });
+            }
+        });
+
         // 🔒 ENDPOINT: Logger une violation de session (multi-connexion détectée)
         app.post('/api/log-session-violation', async (req, res) => {
             try {
@@ -1596,6 +1757,13 @@ async function connectDB(retryCount = 0) {
                         ? await departementsCollection.findOne({ _id: new ObjectId(owner.idDepartement) })
                         : null;
 
+                    // Récupérer les informations de l'utilisateur qui a verrouillé
+                    const lockerUsername = doc.lockedBy?.utilisateur;
+                    const locker = lockerUsername ? await usersCollection.findOne({ username: lockerUsername }) : null;
+                    const lockerDept = locker && locker.idDepartement
+                        ? await departementsCollection.findOne({ _id: new ObjectId(locker.idDepartement) })
+                        : null;
+
                     return {
                         ...doc,
                         titre: doc.titre,
@@ -1603,7 +1771,8 @@ async function connectDB(retryCount = 0) {
                         departementProprietaire: ownerDept ? ownerDept.nom : 'N/A',
                         verrouilléPar: doc.lockedBy?.utilisateur || 'N/A',
                         dateVerrouillage: doc.lockedBy?.date || doc.createdAt,
-                        nomCompletVerrouilleur: doc.lockedBy?.nomComplet || 'N/A'
+                        nomCompletVerrouilleur: doc.lockedBy?.nomComplet || 'N/A',
+                        departementVerrouilleur: lockerDept ? lockerDept.nom : 'N/A'
                     };
                 }));
 
@@ -1617,6 +1786,620 @@ async function connectDB(retryCount = 0) {
 
             } catch (error) {
                 console.error('❌ Erreur documents locked:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Tous les documents (avec pagination et filtres)
+         */
+        app.get('/api/superadmin/documents/all', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Récupérer paramètres
+                const { page = 1, limit = 20, search = '', period = 'all', startDate, endDate } = req.query;
+                const pageNum = parseInt(page);
+                const limitNum = parseInt(limit);
+                const skip = (pageNum - 1) * limitNum;
+
+                // Construire le filtre
+                const filter = { deleted: { $ne: true } };
+
+                // Filtre de recherche
+                if (search) {
+                    filter.$or = [
+                        { titre: { $regex: search, $options: 'i' } },
+                        { idDocument: { $regex: search, $options: 'i' } },
+                        { categorie: { $regex: search, $options: 'i' } }
+                    ];
+                }
+
+                // Filtre de période
+                if (period !== 'all') {
+                    const now = new Date();
+                    let dateFilter;
+
+                    switch (period) {
+                        case 'today':
+                            dateFilter = new Date(now.setHours(0, 0, 0, 0));
+                            break;
+                        case 'week':
+                            dateFilter = new Date(now.setDate(now.getDate() - 7));
+                            break;
+                        case 'month':
+                            dateFilter = new Date(now.setMonth(now.getMonth() - 1));
+                            break;
+                        case 'custom':
+                            if (startDate && endDate) {
+                                filter.createdAt = {
+                                    $gte: new Date(startDate),
+                                    $lte: new Date(endDate)
+                                };
+                            }
+                            break;
+                    }
+
+                    if (dateFilter && period !== 'custom') {
+                        filter.createdAt = { $gte: dateFilter };
+                    }
+                }
+
+                // Récupérer les documents
+                const documentsCollection = db.collection('documents');
+                const total = await documentsCollection.countDocuments(filter);
+                const documents = await documentsCollection
+                    .find(filter)
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limitNum)
+                    .toArray();
+
+                // Enrichir avec les informations utilisateur et département
+                const enrichedDocs = await Promise.all(documents.map(async (doc) => {
+                    // Récupérer le créateur
+                    const creator = await usersCollection.findOne({ username: doc.idUtilisateur });
+                    let creatorName = null;
+                    let departement = null;
+                    let departementCode = null;
+
+                    if (creator) {
+                        creatorName = `${creator.prenom || ''} ${creator.nom || ''}`.trim();
+
+                        // Récupérer le département
+                        if (creator.idDepartement) {
+                            const dept = await departementsCollection.findOne({ _id: new ObjectId(creator.idDepartement) });
+                            if (dept) {
+                                departement = dept.nom;
+                                departementCode = dept.code;
+                            }
+                        }
+                    }
+
+                    return {
+                        ...doc,
+                        _id: doc._id.toString(),
+                        creatorName: creatorName,
+                        createdBy: doc.idUtilisateur,
+                        departement: departement,
+                        departementCode: departementCode,
+                        shareCount: doc.partages?.length || 0,
+                        downloadCount: doc.telechargementsCount || 0
+                    };
+                }));
+
+                res.json({
+                    success: true,
+                    data: {
+                        documents: enrichedDocs,
+                        pagination: {
+                            page: pageNum,
+                            limit: limitNum,
+                            total: total,
+                            totalPages: Math.ceil(total / limitNum)
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur documents all:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Documents supprimés (avec pagination et filtres)
+         */
+        app.get('/api/superadmin/documents/deleted', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Récupérer paramètres
+                const { page = 1, limit = 20, period = 'all', startDate, endDate } = req.query;
+                const pageNum = parseInt(page);
+                const limitNum = parseInt(limit);
+                const skip = (pageNum - 1) * limitNum;
+
+                // Construire le filtre
+                const filter = { deleted: true };
+
+                // Filtre de période
+                if (period !== 'all') {
+                    const now = new Date();
+                    let dateFilter;
+
+                    switch (period) {
+                        case 'today':
+                            dateFilter = new Date(now.setHours(0, 0, 0, 0));
+                            break;
+                        case 'week':
+                            dateFilter = new Date(now.setDate(now.getDate() - 7));
+                            break;
+                        case 'month':
+                            dateFilter = new Date(now.setMonth(now.getMonth() - 1));
+                            break;
+                        case 'custom':
+                            if (startDate && endDate) {
+                                filter['deletionInfo.deletedAt'] = {
+                                    $gte: new Date(startDate),
+                                    $lte: new Date(endDate)
+                                };
+                            }
+                            break;
+                    }
+
+                    if (dateFilter && period !== 'custom') {
+                        filter['deletionInfo.deletedAt'] = { $gte: dateFilter };
+                    }
+                }
+
+                // Récupérer les documents
+                const documentsCollection = db.collection('documents');
+                const total = await documentsCollection.countDocuments(filter);
+                const documents = await documentsCollection
+                    .find(filter)
+                    .sort({ 'deletionInfo.deletedAt': -1 })
+                    .skip(skip)
+                    .limit(limitNum)
+                    .toArray();
+
+                // Enrichir avec les informations utilisateur et département
+                const enrichedDocs = await Promise.all(documents.map(async (doc) => {
+                    let deletedByUser = null;
+                    let departement = null;
+                    let service = null;
+                    let nomComplet = null;
+                    let email = null;
+
+                    // Récupérer l'utilisateur qui a supprimé
+                    if (doc.deletionInfo?.deletedBy) {
+                        deletedByUser = await usersCollection.findOne({ _id: new ObjectId(doc.deletionInfo.deletedBy) });
+
+                        if (deletedByUser) {
+                            nomComplet = `${deletedByUser.prenom || ''} ${deletedByUser.nom || ''}`.trim();
+                            email = deletedByUser.email;
+
+                            // Récupérer le département
+                            if (deletedByUser.idDepartement) {
+                                const dept = await departementsCollection.findOne({ _id: new ObjectId(deletedByUser.idDepartement) });
+                                if (dept) {
+                                    departement = dept.nom;
+                                }
+                            }
+
+                            // Récupérer le service
+                            if (deletedByUser.idService) {
+                                const servicesCollection = db.collection('services');
+                                const svc = await servicesCollection.findOne({ _id: new ObjectId(deletedByUser.idService) });
+                                if (svc) {
+                                    service = svc.nom;
+                                }
+                            }
+                        }
+                    }
+
+                    return {
+                        ...doc,
+                        _id: doc._id.toString(),
+                        supprimePar: doc.deletionInfo?.deletedByName || 'Inconnu',
+                        nomComplet: nomComplet,
+                        email: email,
+                        departement: departement,
+                        service: service,
+                        dateSuppr: doc.deletionInfo?.deletedAt,
+                        motif: doc.deletionInfo?.motif || '-',
+                        niveau: doc.deletionInfo?.deletedByLevel
+                    };
+                }));
+
+                res.json({
+                    success: true,
+                    data: {
+                        deleted: enrichedDocs,
+                        pagination: {
+                            page: pageNum,
+                            limit: limitNum,
+                            total: total,
+                            totalPages: Math.ceil(total / limitNum)
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur documents deleted:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Statistiques des documents
+         */
+        app.get('/api/superadmin/documents/stats', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                const documentsCollection = db.collection('documents');
+
+                const total = await documentsCollection.countDocuments({ deleted: { $ne: true } });
+                const deleted = await documentsCollection.countDocuments({ deleted: true });
+                const locked = await documentsCollection.countDocuments({ locked: true, deleted: { $ne: true } });
+                const shared = await documentsCollection.countDocuments({
+                    'partages.0': { $exists: true },
+                    deleted: { $ne: true }
+                });
+
+                res.json({
+                    success: true,
+                    data: {
+                        total,
+                        deleted,
+                        locked,
+                        shared
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur documents stats:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Activité récente des documents
+         */
+        app.get('/api/superadmin/documents/activity', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                const documentsCollection = db.collection('documents');
+
+                const recentDocs = await documentsCollection
+                    .find({ deleted: { $ne: true } })
+                    .sort({ createdAt: -1 })
+                    .limit(10)
+                    .toArray();
+
+                const enrichedDocs = await Promise.all(recentDocs.map(async (doc) => {
+                    const creator = await usersCollection.findOne({ username: doc.idUtilisateur });
+                    const creatorName = creator ? `${creator.prenom || ''} ${creator.nom || ''}`.trim() : 'Inconnu';
+
+                    return {
+                        titre: doc.titre,
+                        createur: creatorName,
+                        date: doc.createdAt
+                    };
+                }));
+
+                res.json({
+                    success: true,
+                    data: enrichedDocs
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur documents activity:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Documents les plus partagés
+         */
+        app.get('/api/superadmin/documents/most-shared', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                const documentsCollection = db.collection('documents');
+
+                const mostShared = await documentsCollection.aggregate([
+                    { $match: { deleted: { $ne: true }, 'partages.0': { $exists: true } } },
+                    { $addFields: { shareCount: { $size: { $ifNull: ['$partages', []] } } } },
+                    { $sort: { shareCount: -1 } },
+                    { $limit: 10 }
+                ]).toArray();
+
+                const enrichedDocs = mostShared.map(doc => ({
+                    titre: doc.titre,
+                    partages: doc.shareCount
+                }));
+
+                res.json({
+                    success: true,
+                    data: enrichedDocs
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur documents most-shared:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Documents les plus téléchargés
+         */
+        app.get('/api/superadmin/documents/most-downloaded', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                const documentsCollection = db.collection('documents');
+
+                const mostDownloaded = await documentsCollection
+                    .find({ deleted: { $ne: true } })
+                    .sort({ telechargementsCount: -1 })
+                    .limit(10)
+                    .toArray();
+
+                const enrichedDocs = mostDownloaded.map(doc => ({
+                    titre: doc.titre,
+                    telechargements: doc.telechargementsCount || 0
+                }));
+
+                res.json({
+                    success: true,
+                    data: enrichedDocs
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur documents most-downloaded:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Liste des admins niveau 1 ayant supprimé des documents
+         */
+        app.get('/api/superadmin/documents/level1-deletions', async (req, res) => {
+            try {
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                const documentsCollection = db.collection('documents');
+
+                const deletedDocs = await documentsCollection.find({
+                    deleted: true,
+                    'deletionInfo.deletedByLevel': 1
+                }).toArray();
+
+                // Grouper par admin niveau 1
+                const adminMap = new Map();
+
+                for (const doc of deletedDocs) {
+                    const adminId = doc.deletionInfo?.deletedBy;
+                    if (!adminId) continue;
+
+                    const admin = await usersCollection.findOne({ _id: new ObjectId(adminId) });
+                    if (!admin) continue;
+
+                    const adminRole = await rolesCollection.findOne({ _id: admin.idRole });
+                    if (!adminRole || adminRole.niveau !== 1) continue;
+
+                    if (!adminMap.has(adminId)) {
+                        const dept = admin.idDepartement
+                            ? await departementsCollection.findOne({ _id: new ObjectId(admin.idDepartement) })
+                            : null;
+
+                        adminMap.set(adminId, {
+                            username: admin.username,
+                            nom: admin.nom,
+                            prenom: admin.prenom,
+                            departement: dept ? dept.nom : 'N/A',
+                            count: 0
+                        });
+                    }
+
+                    const adminData = adminMap.get(adminId);
+                    adminData.count++;
+                }
+
+                const result = Array.from(adminMap.values()).sort((a, b) => b.count - a.count);
+
+                res.json({ success: true, data: result });
+
+            } catch (error) {
+                console.error('❌ Erreur level1-deletions:', error);
+                res.status(500).json({ success: false, message: 'Erreur serveur' });
+            }
+        });
+
+        /**
+         * Endpoint: Restaurer un document supprimé (Super Admin)
+         */
+        app.post('/api/superadmin/documents/:id/restore', async (req, res) => {
+            try {
+                const { id } = req.params;
+
+                // Vérifier authentification
+                if (!req.session || !req.session.userId) {
+                    return res.status(401).json({ success: false, message: 'Non authentifié' });
+                }
+
+                const user = await usersCollection.findOne({ username: req.session.userId });
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Utilisateur non trouvé' });
+                }
+
+                // Vérifier niveau 0 (Super Admin)
+                const userRole = await rolesCollection.findOne({ _id: user.idRole });
+                if (!userRole || userRole.niveau !== 0) {
+                    return res.status(403).json({ success: false, message: 'Accès refusé' });
+                }
+
+                // Récupérer le document supprimé
+                const documentsCollection = db.collection('documents');
+                const document = await documentsCollection.findOne({
+                    _id: new ObjectId(id),
+                    deleted: true
+                });
+
+                if (!document) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Document non trouvé dans la corbeille'
+                    });
+                }
+
+                // Vérifier si le document n'est pas expiré
+                if (document.deletionInfo && document.deletionInfo.expiresAt < new Date()) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Ce document a expiré et ne peut plus être restauré'
+                    });
+                }
+
+                // Restaurer le document
+                const result = await documentsCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    {
+                        $set: { deleted: false },
+                        $unset: { deletionInfo: "" }
+                    }
+                );
+
+                if (result.modifiedCount === 0) {
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Erreur lors de la restauration'
+                    });
+                }
+
+                // Logger la restauration
+                const auditLogsCollection = db.collection('auditLogs');
+                await auditLogsCollection.insertOne({
+                    action: 'DOCUMENT_RESTORED',
+                    user: req.session.userId,
+                    documentId: id,
+                    documentTitle: document.titre,
+                    timestamp: new Date(),
+                    details: {
+                        originalDeleter: document.deletionInfo?.deletedByName,
+                        deletionDate: document.deletionInfo?.deletedAt,
+                        restoredBy: user.nom || req.session.userId
+                    }
+                });
+
+                res.json({
+                    success: true,
+                    message: 'Document restauré avec succès'
+                });
+
+            } catch (error) {
+                console.error('❌ Erreur restauration document:', error);
                 res.status(500).json({ success: false, message: 'Erreur serveur' });
             }
         });
@@ -1880,7 +2663,7 @@ async function initializeDefaultData() {
     const defaultUsers = [
         {
             username: 'jbk',
-            password: await bcrypt.hash('0811', 10),
+            password: await bcrypt.hash('100480', 10),
             nom: 'JBK',
             email: 'jbk@cerer.sn',
             idRole: primaryRole._id,
@@ -2090,6 +2873,28 @@ app.post('/api/logout', (req, res) => {
 */
 
 // ============================================
+// Keep-Alive : Maintenir la session active
+// ============================================
+app.post('/api/keep-alive', (req, res) => {
+    // Vérifier qu'il y a une session active
+    if (!req.session || !req.session.userId) {
+        return res.status(401).json({
+            success: false,
+            message: 'Aucune session active'
+        });
+    }
+
+    // La session est automatiquement renouvelée par le middleware express-session
+    // grâce à l'option "rolling: true"
+    // On retourne juste un succès
+    res.json({
+        success: true,
+        message: 'Session maintenue',
+        userId: req.session.userId
+    });
+});
+
+// ============================================
 // Changement de mot de passe (première connexion ou changement forcé)
 // ============================================
 app.post('/api/change-password', [
@@ -2220,7 +3025,9 @@ app.post('/api/verify-session', async (req, res) => {
                 email: user.email,
                 role: role ? role.libelle : 'Non défini',
                 niveau: role ? role.niveau : 0,
-                departement: departement ? departement.nom : 'Aucun (Admin Principal)'
+                departement: departement ? departement.nom : 'Aucun (Admin Principal)',
+                idDepartement: user.idDepartement, // ✅ CORRECTION: ID du département pour création de services
+                idRole: user.idRole // ✅ CORRECTION: ID du rôle
             }
         });
 
@@ -2967,13 +3774,17 @@ app.post('/api/documents', security.uploadLimiter, [
         }
 
         const { userId, titre, categorie, date, description, tags, nomFichier, taille, type, contenu, departementArchivage, locked } = req.body;
-        
+
+        // ✅ VALIDATION STRICTE: Vérifier les champs obligatoires
         if (!userId || !titre || !nomFichier) {
             return res.status(400).json({
                 success: false,
-                message: 'Données manquantes'
+                message: 'Données manquantes: userId, titre et nomFichier sont obligatoires'
             });
         }
+
+        // ✅ Catégorie et Service/Département sont maintenant OPTIONNELS
+        // Les documents peuvent être uploadés sans catégorie ni service
 
         // Validation des extensions autorisées (sécurité côté serveur)
         const allowedExtensions = [
@@ -4078,12 +4889,49 @@ app.delete('/api/documents/:userId/delete-all', async (req, res) => {
             idDepartement: d.idDepartement
         })));
 
-        result = await documentsCollection.deleteMany(query);
-        console.log('✅ Documents supprimés:', result.deletedCount);
+        // ✅ SOFT DELETE : Marquer comme supprimé au lieu de supprimer définitivement
+        const deletedAt = new Date();
+        const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 jours (2 mois)
+
+        const deleteMetadata = {
+            deleted: true,
+            deletionInfo: {
+                deletedAt: deletedAt,
+                deletedBy: userId,
+                deletedByName: user.nom,
+                deletedByEmail: user.email,
+                deletedByLevel: userRole.niveau,
+                deletedByRole: userRole.libelle,
+                motif: 'Suppression en masse via "Tout supprimer"',
+                expiresAt: expiresAt,
+                bulkDelete: true, // Indicateur de suppression en masse
+                documentsAffected: countBefore
+            }
+        };
+
+        result = await documentsCollection.updateMany(query, { $set: deleteMetadata });
+        console.log('✅ Documents envoyés à la corbeille:', result.modifiedCount);
+
+        // 📝 Logger dans securityLogs pour traçabilité via SecurityLogger
+        const { SecurityLogger, EVENT_TYPES } = require('./security-logger');
+        const securityLogger = new SecurityLogger(db);
+
+        await securityLogger.log(
+            EVENT_TYPES.BULK_DELETION,
+            userId,
+            {
+                documentsCount: result.modifiedCount,
+                niveau: userRole.niveau,
+                departement: user.idDepartement?.toString(),
+                motif: deleteMetadata.deletionInfo.motif,
+                action: 'BULK_DELETE_ALL_DOCUMENTS'
+            },
+            req
+        );
 
         res.json({
             success: true,
-            deletedCount: result.deletedCount
+            deletedCount: result.modifiedCount
         });
 
     } catch (error) {
@@ -5191,7 +6039,7 @@ app.post('/api/services', async (req, res) => {
 app.put('/api/services/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { nom, icon, description } = req.body;
+        const { nom, code, icon, description } = req.body;
 
         if (!nom) {
             return res.status(400).json({
@@ -5209,9 +6057,21 @@ app.put('/api/services/:id', async (req, res) => {
             });
         }
 
+        // ✅ Si le code est modifié, vérifier qu'il n'existe pas déjà
+        if (code && code !== service.code) {
+            const existing = await servicesCollection.findOne({ code, _id: { $ne: new ObjectId(id) } });
+            if (existing) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Ce code de service existe déjà'
+                });
+            }
+        }
+
         // Mettre à jour
         const updateData = {
             nom,
+            code: code || service.code,
             icon: icon || service.icon || '',
             description: description || service.description || '',
             lastModified: new Date()
@@ -5222,7 +6082,7 @@ app.put('/api/services/:id', async (req, res) => {
             { $set: updateData }
         );
 
-        console.log(`✅ Service modifié: ${nom}`);
+        console.log(`✅ Service modifié: ${nom} (${updateData.code})`);
         res.json({ success: true, service: { ...service, ...updateData } });
     } catch (error) {
         console.error('Erreur modification service:', error);

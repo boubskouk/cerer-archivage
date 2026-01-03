@@ -1,17 +1,19 @@
 // ============================================
 // DÉCONNEXION AUTOMATIQUE - TOUS UTILISATEURS
-// Déconnexion après 30 minutes d'inactivité
+// Déconnexion après 20 minutes d'inactivité
 // ============================================
 
 (function() {
     'use strict';
 
-    const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes en millisecondes
+    const INACTIVITY_TIMEOUT = 20 * 60 * 1000; // 20 minutes en millisecondes
     const WARNING_TIME = 60 * 1000; // Avertir 1 minute avant la déconnexion
+    const KEEP_ALIVE_INTERVAL = 5 * 60 * 1000; // Ping serveur toutes les 5 minutes
 
     let inactivityTimer = null;
     let warningTimer = null;
     let warningShown = false;
+    let keepAliveInterval = null;
 
     // Événements qui comptent comme activité
     const activityEvents = [
@@ -22,6 +24,19 @@
         'touchstart',
         'click'
     ];
+
+    // 💓 Ping le serveur pour maintenir la session active
+    async function keepSessionAlive() {
+        try {
+            await fetch('/api/keep-alive', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            console.log('💓 Session maintenue active');
+        } catch (error) {
+            console.warn('⚠️ Erreur keep-alive:', error);
+        }
+    }
 
     // Réinitialiser le timer d'inactivité
     function resetInactivityTimer() {
@@ -38,17 +53,17 @@
             hideWarning();
         }
 
-        // Démarrer le timer d'avertissement (29 minutes)
+        // Démarrer le timer d'avertissement (19 minutes)
         warningTimer = setTimeout(() => {
             showWarning();
         }, INACTIVITY_TIMEOUT - WARNING_TIME);
 
-        // Démarrer le timer de déconnexion (30 minutes)
+        // Démarrer le timer de déconnexion (20 minutes)
         inactivityTimer = setTimeout(() => {
             logout();
         }, INACTIVITY_TIMEOUT);
 
-        console.log('⏱️ Timer d\'inactivité réinitialisé - Déconnexion dans 10 minutes');
+        console.log('⏱️ Timer d\'inactivité réinitialisé - Déconnexion dans 20 minutes');
     }
 
     // Afficher l'avertissement
@@ -165,7 +180,7 @@
 
     // Déconnecter l'utilisateur
     async function logout() {
-        console.log('🔴 Déconnexion automatique pour inactivité (10 minutes)...');
+        console.log('🔴 Déconnexion automatique pour inactivité (20 minutes)...');
 
         try {
             // Appeler l'endpoint de déconnexion
@@ -185,13 +200,12 @@
         }
 
         // Rediriger vers la page de connexion dans tous les cas
-        alert('🔒 Vous avez été déconnecté automatiquement après 10 minutes d\'inactivité.\n\nPour votre sécurité, veuillez vous reconnecter.');
         window.location.href = '/';
     }
 
     // Initialiser le système
     function init() {
-        console.log('🔐 Système de déconnexion automatique activé (10 minutes d\'inactivité)');
+        console.log('🔐 Système de déconnexion automatique activé (20 minutes d\'inactivité)');
 
         // Ajouter les écouteurs d'événements
         activityEvents.forEach(event => {
@@ -200,7 +214,18 @@
 
         // Démarrer le timer initial
         resetInactivityTimer();
+
+        // 💓 Démarrer le keep-alive pour maintenir la session serveur
+        keepAliveInterval = setInterval(keepSessionAlive, KEEP_ALIVE_INTERVAL);
+        console.log('💓 Keep-alive activé (ping toutes les 5 minutes)');
     }
+
+    // Nettoyer lors du déchargement
+    window.addEventListener('beforeunload', () => {
+        if (keepAliveInterval) {
+            clearInterval(keepAliveInterval);
+        }
+    });
 
     // Exposer les fonctions publiques
     window.autoLogout = {

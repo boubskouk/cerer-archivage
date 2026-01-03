@@ -19,6 +19,125 @@ console.log('══════════════════════�
 let usersChart = null;
 let documentsChart = null;
 
+// ============================================
+// MODALES PERSONNALISÉES
+// ============================================
+
+/**
+ * Afficher une alerte personnalisée
+ */
+function customAlert(message, title = 'Information', icon = 'ℹ️') {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'custom-modal-overlay';
+        modal.innerHTML = `
+            <div class="custom-modal">
+                <div class="custom-modal-header">
+                    <span class="custom-modal-icon">${icon}</span>
+                    <h3>${title}</h3>
+                </div>
+                <div class="custom-modal-body">
+                    <p>${message}</p>
+                </div>
+                <div class="custom-modal-footer">
+                    <button class="custom-btn custom-btn-primary" onclick="this.closest('.custom-modal-overlay').remove()">OK</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector('button').addEventListener('click', () => {
+            modal.remove();
+            resolve();
+        });
+
+        // Fermer avec Escape
+        const closeOnEscape = (e) => {
+            if (e.key === 'Escape') {
+                modal.remove();
+                document.removeEventListener('keydown', closeOnEscape);
+                resolve();
+            }
+        };
+        document.addEventListener('keydown', closeOnEscape);
+    });
+}
+
+/**
+ * Afficher une confirmation personnalisée
+ */
+function customConfirm(message, title = 'Confirmation', icon = '⚠️') {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'custom-modal-overlay';
+        modal.innerHTML = `
+            <div class="custom-modal">
+                <div class="custom-modal-header">
+                    <span class="custom-modal-icon">${icon}</span>
+                    <h3>${title}</h3>
+                </div>
+                <div class="custom-modal-body">
+                    <p>${message}</p>
+                </div>
+                <div class="custom-modal-footer">
+                    <button class="custom-btn custom-btn-secondary" data-action="cancel">Annuler</button>
+                    <button class="custom-btn custom-btn-danger" data-action="confirm">Confirmer</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const action = btn.dataset.action === 'confirm';
+                modal.remove();
+                resolve(action);
+            });
+        });
+
+        // Fermer avec Escape = Annuler
+        const closeOnEscape = (e) => {
+            if (e.key === 'Escape') {
+                modal.remove();
+                document.removeEventListener('keydown', closeOnEscape);
+                resolve(false);
+            }
+        };
+        document.addEventListener('keydown', closeOnEscape);
+    });
+}
+
+/**
+ * Afficher une notification toast
+ */
+function showNotification(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `custom-toast custom-toast-${type}`;
+
+    const icons = {
+        success: '✅',
+        error: '❌',
+        warning: '⚠️',
+        info: 'ℹ️'
+    };
+
+    toast.innerHTML = `
+        <span class="custom-toast-icon">${icons[type] || icons.info}</span>
+        <span class="custom-toast-message">${message}</span>
+    `;
+
+    document.body.appendChild(toast);
+
+    // Animation d'entrée
+    setTimeout(() => toast.classList.add('show'), 10);
+
+    // Suppression automatique après 4 secondes
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
 // État global
 const state = {
     currentSection: 'dashboard',
@@ -2901,7 +3020,8 @@ function renderAdminLockedDocuments() {
                         <th>ID Document</th>
                         <th>Titre</th>
                         <th>Catégorie</th>
-                        <th>Département</th>
+                        <th>Département (Verrouilleur)</th>
+                        <th>Verrouillé par</th>
                         <th>Date Verrouillage</th>
                         <th>Durée</th>
                     </tr>
@@ -2923,7 +3043,14 @@ function renderAdminLockedDocuments() {
                                     ${doc.categorie}
                                 </span>
                             </td>
-                            <td>${doc.departement || '-'}</td>
+                            <td>
+                                ${doc.departementVerrouilleur ? `
+                                    <span style="background: #dbeafe; color: #1e40af; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                        ${doc.departementVerrouilleur}
+                                    </span>
+                                ` : '-'}
+                            </td>
+                            <td>${doc.nomCompletVerrouilleur || doc.verrouilléPar}</td>
                             <td>${formatServerDate(doc.dateVerrouillage)}</td>
                             <td>
                                 <span style="background: ${diffDays >= 180 ? '#fee2e2' : '#fef3c7'}; color: ${diffDays >= 180 ? '#dc2626' : '#d97706'}; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">
@@ -3958,10 +4085,14 @@ async function deleteAuditLog(event, logId) {
     // Empêcher la propagation
     if (event) event.stopPropagation();
 
-    // Confirmation
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce log ?')) {
-        return;
-    }
+    // Demander confirmation
+    const confirmed = await customConfirm(
+        'Êtes-vous sûr de vouloir supprimer ce log de sécurité ?',
+        'Suppression de log',
+        '🗑️'
+    );
+
+    if (!confirmed) return;
 
     try {
         const response = await fetch(`/api/security-logs/${logId}`, {
@@ -3979,13 +4110,13 @@ async function deleteAuditLog(event, logId) {
             applyAuditFilters();
 
             // Message de succès
-            console.log('✅ Log supprimé avec succès');
+            showNotification('Log supprimé avec succès', 'success');
         } else {
-            alert('Erreur lors de la suppression du log: ' + result.message);
+            showNotification('Erreur: ' + result.message, 'error');
         }
     } catch (error) {
         console.error('❌ Erreur suppression log:', error);
-        alert('Erreur lors de la suppression du log');
+        showNotification('Erreur lors de la suppression du log', 'error');
     }
 }
 
@@ -3993,15 +4124,23 @@ async function deleteAuditLog(event, logId) {
  * Supprimer tous les logs
  */
 async function deleteAllAuditLogs() {
-    // Confirmation avec avertissement
-    if (!confirm('⚠️ ATTENTION: Vous allez supprimer TOUS les logs de sécurité.\n\nCette action est irréversible!\n\nÊtes-vous absolument sûr de vouloir continuer ?')) {
-        return;
-    }
+    // Première confirmation
+    const confirmed1 = await customConfirm(
+        '⚠️ ATTENTION: Vous allez supprimer TOUS les logs de sécurité.\n\nCette action est irréversible!\n\nÊtes-vous absolument sûr de vouloir continuer ?',
+        'ATTENTION - Suppression totale',
+        '⚠️'
+    );
+
+    if (!confirmed1) return;
 
     // Double confirmation pour être sûr
-    if (!confirm('Dernière confirmation: Voulez-vous vraiment supprimer TOUS les logs ?')) {
-        return;
-    }
+    const confirmed2 = await customConfirm(
+        'Dernière confirmation: Voulez-vous vraiment supprimer TOUS les logs ?',
+        'Confirmation finale',
+        '🗑️'
+    );
+
+    if (!confirmed2) return;
 
     try {
         const response = await fetch('/api/security-logs/all', {
@@ -4023,13 +4162,13 @@ async function deleteAllAuditLogs() {
             document.getElementById('audit-stat-warning').textContent = '0';
             document.getElementById('audit-stat-critical').textContent = '0';
 
-            alert(`✅ ${result.deletedCount} log(s) supprimé(s) avec succès`);
+            showNotification(`${result.deletedCount} log(s) supprimé(s) avec succès`, 'success');
         } else {
-            alert('Erreur lors de la suppression des logs: ' + result.message);
+            showNotification('Erreur: ' + result.message, 'error');
         }
     } catch (error) {
         console.error('❌ Erreur suppression tous les logs:', error);
-        alert('Erreur lors de la suppression des logs');
+        showNotification('Erreur lors de la suppression des logs', 'error');
     }
 }
 
@@ -4141,7 +4280,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         credentials: 'include'
                     });
 
-                    alert('🚪 Vous avez été déconnecté pour inactivité.\n\nVeuillez vous reconnecter.');
+                    // Afficher une notification avant de rediriger
+                    await customAlert(
+                        'Vous avez été déconnecté pour inactivité.\n\nPour votre sécurité, veuillez vous reconnecter.',
+                        'Déconnexion automatique',
+                        '🚪'
+                    );
                     window.location.href = '/super-admin-login.html';
                 } catch (error) {
                     console.error('Erreur déconnexion:', error);

@@ -181,7 +181,7 @@
         }
 
         // Rediriger vers la page de connexion dans tous les cas
-        alert('🔒 Vous avez été déconnecté automatiquement après 5 minutes d\'inactivité.\n\nPour des raisons de sécurité, le compte Super Admin se déconnecte automatiquement.');
+        // Note: customAlert n'est pas disponible ici, donc on utilise un simple redirect
         window.location.href = '/super-admin-login.html';
     }
 
