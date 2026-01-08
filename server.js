@@ -197,6 +197,15 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
+// Route keep-alive pour maintenir la session active
+app.post('/api/keep-alive', (req, res) => {
+    // Simple ping pour réinitialiser le timeout de session
+    if (req.session) {
+        req.session.touch(); // Réinitialise l'expiration de la session
+    }
+    res.json({ success: true });
+});
+
 // Route pour vérifier le statut de session (utilisée par le polling client)
 app.get('/api/check-session-status', async (req, res) => {
     try {
@@ -264,8 +273,10 @@ app.get('/api/check-session-status', async (req, res) => {
 
 async function startServer() {
     try {
+        console.log('📡 Démarrage du serveur...');
         // Connexion MongoDB
         const { db, collections, securityLogger } = await connectDB();
+        console.log('✅ Retour de connectDB reçu');
 
         // Initialiser le service de nettoyage de la corbeille
         trashCleanup.init({
@@ -334,4 +345,8 @@ async function startServer() {
 }
 
 // Démarrer l'application
-startServer();
+console.log('🚀 Lancement de l\'application...');
+startServer().catch(err => {
+    console.error('💀 Erreur critique au lancement:', err);
+    process.exit(1);
+});
