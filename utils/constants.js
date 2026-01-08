@@ -7,8 +7,8 @@ module.exports = {
     PORT: process.env.PORT || 4000,
 
     // Configuration MongoDB
-    MONGO_URI: process.env.MONGODB_URI || "mongodb://localhost:27017/cerer_archive?retryWrites=true&w=majority",
-    DB_NAME: process.env.MONGODB_DB_NAME || 'cerer_archive',
+    MONGO_URI: process.env.MONGODB_URI || "mongodb://localhost:27017/cerer_archivage?retryWrites=true&w=majority",
+    DB_NAME: process.env.MONGODB_DB_NAME || 'cerer_archivage',
 
     // Niveaux de permissions
     PERMISSIONS: {
