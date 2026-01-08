@@ -40,6 +40,8 @@ async function getAccessibleDocuments_Controller(req, res) {
 
     } catch (error) {
         console.error('❌ Erreur getAccessibleDocuments:', error);
+        console.error('❌ Stack trace:', error.stack);
+        console.error('❌ User:', userId);
         res.status(500).json({
             success: false,
             message: 'Erreur serveur'

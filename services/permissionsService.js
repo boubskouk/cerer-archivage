@@ -5,6 +5,23 @@
 
 const { getCollections } = require('../config/database');
 const constants = require('../utils/constants');
+const { ObjectId } = require('mongodb');
+
+/**
+ * Convertir une valeur en ObjectId si nécessaire
+ */
+function toObjectId(value) {
+    if (!value) return value;
+    if (typeof value === 'string') {
+        try {
+            return new ObjectId(value);
+        } catch (e) {
+            console.error(`⚠️ Impossible de convertir en ObjectId: ${value}`);
+            return value;
+        }
+    }
+    return value;
+}
 
 /**
  * Récupérer les documents accessibles par un utilisateur selon son niveau
@@ -12,16 +29,21 @@ const constants = require('../utils/constants');
  * @returns {Promise<Array>} - Liste des documents accessibles
  */
 async function getAccessibleDocuments(userId) {
-    const collections = getCollections();
+    try {
+        const collections = getCollections();
 
-    const user = await collections.users.findOne({ username: userId });
-    if (!user) {
-        console.log(`❌ Utilisateur non trouvé: ${userId}`);
-        return [];
-    }
+        const user = await collections.users.findOne({ username: userId });
+        if (!user) {
+            console.log(`❌ Utilisateur non trouvé: ${userId}`);
+            return [];
+        }
 
-    const userRole = await collections.roles.findOne({ _id: user.idRole });
-    if (!userRole) return [];
+        // Convertir idRole en ObjectId si nécessaire
+        const userRole = await collections.roles.findOne({ _id: toObjectId(user.idRole) });
+        if (!userRole) {
+            console.log(`❌ Rôle non trouvé pour l'utilisateur: ${userId} (idRole: ${user.idRole})`);
+            return [];
+        }
 
     console.log(`📋 Récupération documents pour: ${userId} (niveau ${userRole.niveau}, dept: ${user.idDepartement})`);
 
@@ -45,8 +67,9 @@ async function getAccessibleDocuments(userId) {
         }
 
         // Récupérer tous les services du département
+        const deptId = toObjectId(user.idDepartement);
         const services = await collections.services.find({
-            idDepartement: user.idDepartement
+            idDepartement: deptId
         }).toArray();
 
         const serviceIds = services.map(s => s._id);
@@ -56,7 +79,7 @@ async function getAccessibleDocuments(userId) {
         const deptDocs = await collections.documents.find({
             deleted: { $ne: true },
             $or: [
-                { idDepartement: user.idDepartement },
+                { idDepartement: deptId },
                 { idService: { $in: serviceIds } }
             ]
         }).toArray();
@@ -74,15 +97,16 @@ async function getAccessibleDocuments(userId) {
         }
 
         // Tous les documents du même département
+        const deptId = toObjectId(user.idDepartement);
         const deptDocs = await collections.documents.find({
-            idDepartement: user.idDepartement,
+            idDepartement: deptId,
             deleted: { $ne: true }
         }).toArray();
 
         // + Documents partagés avec lui depuis d'autres départements
         const sharedDocs = await collections.documents.find({
             sharedWith: userId,
-            idDepartement: { $ne: user.idDepartement },
+            idDepartement: { $ne: deptId },
             deleted: { $ne: true }
         }).toArray();
 
@@ -99,8 +123,9 @@ async function getAccessibleDocuments(userId) {
         }
 
         // Récupérer tous les utilisateurs niveau 3 du même département
+        const deptId = toObjectId(user.idDepartement);
         const niveau3Users = await collections.users.find({
-            idDepartement: user.idDepartement,
+            idDepartement: deptId,
             idRole: userRole._id
         }).toArray();
 
@@ -109,7 +134,7 @@ async function getAccessibleDocuments(userId) {
 
         // Documents des utilisateurs niveau 3 du département
         const niveau3Docs = await collections.documents.find({
-            idDepartement: user.idDepartement,
+            idDepartement: deptId,
             idUtilisateur: { $in: niveau3Usernames },
             deleted: { $ne: true }
         }).toArray();
@@ -127,6 +152,12 @@ async function getAccessibleDocuments(userId) {
 
     console.log(`⚠️ Niveau inconnu (${userRole.niveau}): Aucun document accessible`);
     return [];
+
+    } catch (error) {
+        console.error(`❌ Erreur getAccessibleDocuments pour ${userId}:`, error);
+        console.error('Stack trace:', error.stack);
+        throw error; // Re-throw pour que le controller puisse le catcher
+    }
 }
 
 /**
