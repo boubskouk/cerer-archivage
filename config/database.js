@@ -31,7 +31,9 @@ async function connectDB(retryCount = 0) {
         const connectionOptions = {
             serverSelectionTimeoutMS: 10000,
             connectTimeoutMS: 10000,
-            socketTimeoutMS: 45000
+            socketTimeoutMS: 180000, // 3 minutes (augmenté de 45s à 180s)
+            maxPoolSize: 10,
+            minPoolSize: 2
         };
 
         // Connexion
@@ -83,20 +85,27 @@ async function connectDB(retryCount = 0) {
  */
 async function createIndexes() {
     try {
-        // Index documents
+        // Index documents - OPTIMISÉS pour les requêtes fréquentes
         await collections.documents.createIndex({ idUtilisateur: 1, dateAjout: -1 });
-        await collections.documents.createIndex({ idDepartement: 1 });
+        await collections.documents.createIndex({ idDepartement: 1, deleted: 1 }); // Optimisé pour niveau 1,2,3
+        await collections.documents.createIndex({ idService: 1, deleted: 1 }); // Optimisé pour niveau 1
+        await collections.documents.createIndex({ deleted: 1 }); // Pour Super Admin
+        await collections.documents.createIndex({ sharedWith: 1, deleted: 1 }); // Pour documents partagés
 
         // Index users
         await collections.users.createIndex({ username: 1 }, { unique: true });
         await collections.users.createIndex({ email: 1 }, { unique: true });
+        await collections.users.createIndex({ idDepartement: 1, idRole: 1 }); // Pour recherches niveau 3
+
+        // Index services
+        await collections.services.createIndex({ idDepartement: 1 });
 
         // Index audit logs
         await collections.auditLogs.createIndex({ timestamp: -1 });
         await collections.auditLogs.createIndex({ user: 1 });
         await collections.auditLogs.createIndex({ action: 1 });
 
-        console.log('✅ Index MongoDB créés');
+        console.log('✅ Index MongoDB créés/mis à jour');
     } catch (error) {
         console.error('⚠️ Erreur création index:', error.message);
     }

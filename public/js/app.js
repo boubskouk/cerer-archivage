@@ -4209,12 +4209,12 @@ async function initApp() {
     // Si session existe, afficher le loader PUIS vérifier
     render();
 
-    // ✅ SÉCURITÉ: Timeout de 10 secondes pour éviter le figement
+    // ✅ SÉCURITÉ: Timeout de 30 secondes pour éviter le figement (augmenté de 10s)
     try {
         const sessionRestored = await Promise.race([
             restoreSession(),
             new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout de restauration de session')), 10000)
+                setTimeout(() => reject(new Error('Timeout de restauration de session')), 30000)
             )
         ]);
 
