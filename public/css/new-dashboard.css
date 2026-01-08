@@ -1278,3 +1278,233 @@ body {
         align-items: flex-start;
     }
 }
+
+
+/* ============================================
+   DRAG & DROP UPLOAD ZONE - VERSION BETA
+   ============================================ */
+
+.drop-zone {
+    border: 3px dashed #cbd5e1;
+    border-radius: 16px;
+    padding: 48px 24px;
+    text-align: center;
+    background: #f8fafc;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.drop-zone:hover {
+    border-color: #667eea;
+    background: #f0f4ff;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.15);
+}
+
+.drop-zone.dragover {
+    border-color: #667eea;
+    background: linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 100%);
+    border-style: solid;
+    box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.drop-zone-icon {
+    color: #94a3b8;
+    margin-bottom: 16px;
+    animation: float 3s ease-in-out infinite;
+}
+
+.drop-zone.dragover .drop-zone-icon {
+    color: #667eea;
+    animation: bounce 0.6s ease;
+}
+
+.drop-zone-text {
+    margin-bottom: 12px;
+}
+
+.drop-zone-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 8px;
+}
+
+.drop-zone-subtitle {
+    font-size: 14px;
+    color: #64748b;
+}
+
+.drop-zone-formats {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 8px;
+}
+
+/* File Preview */
+.file-preview {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    margin-top: 16px;
+    animation: slideDown 0.3s ease;
+}
+
+.file-preview-icon {
+    font-size: 40px;
+    flex-shrink: 0;
+}
+
+.file-preview-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.file-preview-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e293b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-preview-size {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 4px;
+}
+
+.file-preview-remove {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: #fee2e2;
+    color: #ef4444;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.file-preview-remove:hover {
+    background: #fecaca;
+    transform: scale(1.1);
+}
+
+/* Upload Progress */
+.upload-progress {
+    margin-top: 16px;
+    animation: slideDown 0.3s ease;
+}
+
+.upload-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.upload-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    border-radius: 999px;
+    transition: width 0.3s ease;
+    animation: shimmer 2s infinite;
+}
+
+.upload-progress-text {
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #667eea;
+}
+
+/* File Error */
+.file-error {
+    margin-top: 16px;
+    padding: 12px 16px;
+    background: #fee2e2;
+    border: 2px solid #fecaca;
+    border-radius: 8px;
+    color: #991b1b;
+    font-size: 14px;
+    animation: shake 0.5s ease;
+}
+
+/* Animations */
+@keyframes float {
+    0%, 100% {
+        transform: translateY(0px);
+    }
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+@keyframes bounce {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: -1000px 0;
+    }
+    100% {
+        background-position: 1000px 0;
+    }
+}
+
+@keyframes shake {
+    0%, 100% {
+        transform: translateX(0);
+    }
+    25% {
+        transform: translateX(-10px);
+    }
+    75% {
+        transform: translateX(10px);
+    }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .drop-zone {
+        padding: 32px 16px;
+    }
+    
+    .drop-zone-title {
+        font-size: 16px;
+    }
+    
+    .drop-zone-subtitle {
+        font-size: 12px;
+    }
+}

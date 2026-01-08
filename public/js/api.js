@@ -48,7 +48,7 @@ async function apiCall(endpoint, method = 'GET', data = null) {
 
         return result;
     } catch (error) {
-        console.error('Erreur API:', error);
+        Logger.error('Erreur API:', error);
         // Ne pas afficher de notification pour les documents verrouillés
         if (!error.response || !error.response.locked) {
             showNotification(error.message, 'error');

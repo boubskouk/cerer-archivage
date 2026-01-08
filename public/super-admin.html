@@ -1486,6 +1486,9 @@
                 <button class="nav-tab" data-section="departments" onclick="navigateToSection('departments')" style="padding: 4px 10px; font-size: 11px;">
                     🏢 Depts
                 </button>
+                <button class="nav-tab" data-section="messages" onclick="navigateToSection('messages')" style="padding: 4px 10px; font-size: 11px;">
+                    💬 Messages <span id="unreadMessagesCount" style="background: #ef4444; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; margin-left: 4px; display: none;"></span>
+                </button>
                 <button class="nav-tab" data-section="audit" onclick="navigateToSection('audit')" style="padding: 4px 10px; font-size: 11px;">
                     🔒 Audit
                 </button>
@@ -1675,6 +1678,45 @@
                 <!-- Le contenu sera généré par JavaScript -->
             </div>
 
+            <!-- Section Messages (nouvelle) -->
+            <div id="section-messages" style="display: none;">
+                <div style="margin-bottom: 24px;">
+                    <h2 style="font-size: 24px; margin-bottom: 8px;">💬 Messages des Utilisateurs Niveau 1</h2>
+                    <p style="color: #000000; font-size: 14px; font-weight: 500;">Communication avec les administrateurs de départements</p>
+                </div>
+
+                <!-- Liste des messages -->
+                <div id="messagesList" style="background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; padding: 40px; color: #94a3b8;">
+                        Chargement des messages...
+                    </div>
+                </div>
+
+                <!-- Modal de réponse -->
+                <div id="replyModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
+                    <div style="background: white; border-radius: 16px; width: 90%; max-width: 600px; padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                            <h3 style="font-size: 20px; margin: 0;">💬 Répondre au message</h3>
+                            <button onclick="closeReplyModal()" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #94a3b8;">&times;</button>
+                        </div>
+
+                        <div id="replyModalContent" style="margin-bottom: 24px;">
+                            <!-- Contenu du message original -->
+                        </div>
+
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #1e293b;">Votre réponse :</label>
+                            <textarea id="replyText" style="width: 100%; min-height: 120px; padding: 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-family: inherit; font-size: 14px; resize: vertical;" placeholder="Écrivez votre réponse..."></textarea>
+                        </div>
+
+                        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                            <button onclick="closeReplyModal()" style="padding: 12px 24px; background: #e2e8f0; color: #64748b; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">Annuler</button>
+                            <button onclick="sendReply()" style="padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">📤 Envoyer</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Section Audit / Logs de Sécurité -->
             <div id="section-audit" style="display: none;">
                 <div style="margin-bottom: 24px;">
@@ -1781,7 +1823,12 @@
     <script src="js/utils.js"></script>
     <script src="js/super-admin-dashboard.js?v=20241225010"></script>
 
+    <!-- 💬 Système de messagerie -->
+    <script src="js/super-admin-messaging.js?v=20260103"></script>
+
     <!-- 🔐 Déconnexion automatique après 5 minutes d'inactivité (Super Admin uniquement) -->
+    <!-- Système de logging centralisé -->
+    <script src="js/logger.js?v=20250104"></script>
     <script src="js/superadmin-auto-logout.js?v=20251228"></script>
 </body>
 </html>

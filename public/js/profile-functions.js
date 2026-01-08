@@ -42,7 +42,7 @@ async function loadUserPhoto() {
             }
         }
     } catch (error) {
-        console.log('Aucune photo de profil');
+        Logger.debug('Aucune photo de profil');
     }
 }
 
@@ -113,32 +113,48 @@ async function saveProfile() {
             body: JSON.stringify({ nom, username, email })
         });
 
-        const result = await response.json();
-
         if (!response.ok) {
-            if (response.status === 409) {
-                // Username déjà utilisé
-                showNotification(result.message + '\n\n' + result.messageDetails, 'error', 0);
-            } else if (response.status === 403 && result.contactAdmin) {
-                // Limite de modifications atteinte - Message wolof avec emoji souriant
-                showNotification(result.message + '\n\n' + result.messageDetails, 'smile', 0);
-            } else {
-                showNotification(result.message, 'error', 0);
+            // Essayer de parser le JSON pour avoir le message d'erreur
+            let errorMessage = 'Erreur lors de la mise à jour du profil';
+            try {
+                const result = await response.json();
+                if (response.status === 409) {
+                    // Username déjà utilisé
+                    showNotification(result.message + '\n\n' + result.messageDetails, 'error', 0);
+                } else if (response.status === 403 && result.contactAdmin) {
+                    // Limite de modifications atteinte - Message wolof avec emoji souriant
+                    showNotification(result.message + '\n\n' + result.messageDetails, 'smile', 0);
+                } else {
+                    showNotification(result.message || errorMessage, 'error', 0);
+                }
+            } catch (e) {
+                showNotification(errorMessage + ' (Erreur serveur)', 'error', 0);
             }
             return;
         }
 
+        const result = await response.json();
+
         // 2. Upload de la photo si elle a été modifiée
         if (photoPreview) {
-            const photoResponse = await fetch(`${apiUrl}/profile/upload-photo`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ photoData: photoPreview })
-            });
+            try {
+                const photoResponse = await fetch(`${apiUrl}/profile/upload-photo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ photoData: photoPreview })
+                });
 
-            if (!photoResponse.ok) {
-                console.error('Erreur upload photo');
+                if (!photoResponse.ok) {
+                    const photoError = await photoResponse.json();
+                    Logger.error('Erreur upload photo:', photoError);
+                    showNotification('Photo non sauvegardée: ' + (photoError.message || 'Erreur serveur'), 'warning', 5000);
+                } else {
+                    Logger.debug('Photo uploadée avec succès');
+                }
+            } catch (photoErr) {
+                Logger.error('Erreur upload photo:', photoErr);
+                showNotification('Photo non sauvegardée (erreur réseau)', 'warning', 5000);
             }
         }
 
@@ -189,7 +205,7 @@ async function saveProfile() {
         }
 
     } catch (error) {
-        console.error('Erreur sauvegarde profil:', error);
+        Logger.error('Erreur sauvegarde profil:', error);
         showNotification('Erreur lors de la sauvegarde du profil\n\nVeuillez réessayer', 'error', 0);
     }
 }
@@ -244,7 +260,7 @@ let betaProfilePhotoPreview = null;
 function toggleProfile() {
     const modal = document.getElementById('profileModal');
     if (!modal) {
-        console.error('Modal de profil non trouvée');
+        Logger.error('Modal de profil non trouvée');
         return;
     }
 
@@ -325,6 +341,6 @@ async function loadUserPhotoBeta() {
             }
         }
     } catch (error) {
-        console.log('Aucune photo de profil');
+        Logger.debug('Aucune photo de profil');
     }
 }

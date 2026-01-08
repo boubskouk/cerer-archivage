@@ -215,7 +215,7 @@ function showNotification(message, type = 'info', duration = 5000) {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('🚀 Initialisation du nouveau dashboard');
+    Logger.debug('🚀 Initialisation du nouveau dashboard');
 
     // Vérifier la session
     await checkSession();
@@ -275,7 +275,7 @@ async function checkSession() {
 
         return true;
     } catch (error) {
-        console.error('❌ Erreur vérification session:', error);
+        Logger.error('❌ Erreur vérification session:', error);
         // 🚫 Rediriger vers la porte principale avec message
         showAccessDeniedMessage();
         return false;
@@ -296,7 +296,7 @@ function showAccessDeniedMessage() {
 
     showNotification(message);
 
-    console.log('🚫 Tentative d\'accès direct à la version BETA bloquée');
+    Logger.debug('🚫 Tentative d\'accès direct à la version BETA bloquée');
 
     // Redirection vers la porte principale
     setTimeout(() => {
@@ -326,11 +326,11 @@ async function loadUserData() {
                     // Stocker pour la prochaine fois
                     sessionStorage.setItem('username', username);
                 } else {
-                    console.error('❌ Pas de session active');
+                    Logger.error('❌ Pas de session active');
                     return;
                 }
             } else {
-                console.error('❌ Erreur récupération session');
+                Logger.error('❌ Erreur récupération session');
                 return;
             }
         }
@@ -368,7 +368,7 @@ async function loadUserData() {
 
             showNotification(message);
 
-            console.log(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
+            Logger.debug(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
 
             // Redirection vers interface Super Admin
             setTimeout(() => {
@@ -381,9 +381,9 @@ async function loadUserData() {
         // Mettre à jour l'interface
         updateUserInterface();
 
-        console.log('✅ Utilisateur chargé:', currentUser);
+        Logger.debug('✅ Utilisateur chargé:', currentUser);
     } catch (error) {
-        console.error('❌ Erreur chargement utilisateur:', error);
+        Logger.error('❌ Erreur chargement utilisateur:', error);
     }
 }
 
@@ -441,7 +441,7 @@ async function loadAvatarPhoto(username) {
             }
         }
     } catch (error) {
-        console.log('Aucune photo de profil disponible');
+        Logger.debug('Aucune photo de profil disponible');
     }
 }
 
@@ -464,7 +464,7 @@ async function logout() {
         sessionStorage.clear();
         window.location.href = '/login.html';
     } catch (error) {
-        console.error('❌ Erreur déconnexion:', error);
+        Logger.error('❌ Erreur déconnexion:', error);
     }
 }
 
@@ -474,7 +474,7 @@ async function logout() {
 
 async function loadDepartments() {
     try {
-        console.log('📂 Chargement des départements...');
+        Logger.debug('📂 Chargement des départements...');
 
         const response = await fetch('/api/departements', {
             credentials: 'include'
@@ -487,7 +487,7 @@ async function loadDepartments() {
         const data = await response.json();
         allDepartments = data.departements || [];
 
-        console.log(`✅ ${allDepartments.length} département(s) chargé(s)`);
+        Logger.debug(`✅ ${allDepartments.length} département(s) chargé(s)`);
 
         // Afficher les départements
         displayDepartments();
@@ -496,7 +496,7 @@ async function loadDepartments() {
         updateStats();
 
     } catch (error) {
-        console.error('❌ Erreur chargement départements:', error);
+        Logger.error('❌ Erreur chargement départements:', error);
         document.getElementById('departmentsGrid').innerHTML =
             '<div class="no-results"><div class="no-results-icon">❌</div><h3>Erreur de chargement</h3></div>';
     }
@@ -583,7 +583,7 @@ function updateStats() {
 
 async function showDepartment(deptId) {
     try {
-        console.log(`📂 Affichage département: ${deptId}`);
+        Logger.debug(`📂 Affichage département: ${deptId}`);
 
         // Trouver le département
         currentDepartment = allDepartments.find(d => d._id.toString() === deptId.toString());
@@ -607,15 +607,15 @@ async function showDepartment(deptId) {
 
         window.scrollTo(0, 0);
     } catch (error) {
-        console.error('❌ Erreur affichage département:', error);
+        Logger.error('❌ Erreur affichage département:', error);
     }
 }
 
 async function loadServices(deptId) {
     try {
-        console.log(`📂 Chargement services du département ${deptId}...`);
+        Logger.debug(`📂 Chargement services du département ${deptId}...`);
 
-        const response = await fetch(`/api/departments/${deptId}/services`, {
+        const response = await fetch(`/api/services/departments/${deptId}`, {
             credentials: 'include'
         });
 
@@ -626,7 +626,7 @@ async function loadServices(deptId) {
         const data = await response.json();
         const services = data.services || [];
 
-        console.log(`✅ ${services.length} service(s) chargé(s)`);
+        Logger.debug(`✅ ${services.length} service(s) chargé(s)`);
 
         // Mettre à jour les statistiques du département
         document.getElementById('deptStatServices').textContent = services.length;
@@ -642,7 +642,7 @@ async function loadServices(deptId) {
         displayServices(services);
 
     } catch (error) {
-        console.error('❌ Erreur chargement services:', error);
+        Logger.error('❌ Erreur chargement services:', error);
         document.getElementById('servicesAccordion').innerHTML =
             '<div class="loading">❌ Erreur de chargement des services</div>';
     }
@@ -715,7 +715,7 @@ async function toggleAccordion(header, serviceId) {
 
 async function loadCategories(serviceId) {
     try {
-        console.log(`🏷️ Chargement catégories...`);
+        Logger.debug(`🏷️ Chargement catégories...`);
 
         currentService = serviceId;
 
@@ -733,7 +733,7 @@ async function loadCategories(serviceId) {
 
         const categories = await categoriesResponse.json();
 
-        console.log(`✅ ${categories.length} catégorie(s) chargée(s)`);
+        Logger.debug(`✅ ${categories.length} catégorie(s) chargée(s)`);
 
         // Charger tous les documents de l'utilisateur pour compter par catégorie
         const documentsResponse = await fetch(`/api/documents/${username}?full=false`, {
@@ -741,7 +741,8 @@ async function loadCategories(serviceId) {
         });
 
         if (documentsResponse.ok) {
-            const allDocuments = await documentsResponse.json();
+            const documentsData = await documentsResponse.json();
+            const allDocuments = documentsData.documents || [];
 
             // ✅ CORRECTION: Compter le nombre de documents par catégorie ET par service
             categories.forEach(cat => {
@@ -751,9 +752,9 @@ async function loadCategories(serviceId) {
                 ).length;
             });
 
-            console.log(`📊 Comptage documents par catégorie effectué pour le service "${currentServiceName}"`);
+            Logger.debug(`📊 Comptage documents par catégorie effectué pour le service "${currentServiceName}"`);
         } else {
-            console.warn('⚠️ Impossible de charger les documents pour le comptage');
+            Logger.warn('⚠️ Impossible de charger les documents pour le comptage');
         }
 
         // Afficher TOUTES les catégories (pour compatibilité)
@@ -764,7 +765,7 @@ async function loadCategories(serviceId) {
             `${categories.length} catégories`;
 
     } catch (error) {
-        console.error('❌ Erreur chargement catégories:', error);
+        Logger.error('❌ Erreur chargement catégories:', error);
         document.getElementById(`accordion-${serviceId}`).innerHTML =
             '<div class="loading">❌ Erreur de chargement des catégories</div>';
     }
@@ -817,7 +818,7 @@ function displayCategories(serviceId, categories) {
 
 async function showDocuments(categoryId, categoryName) {
     try {
-        console.log(`📄 Affichage documents de la catégorie ${categoryName}...`);
+        Logger.debug(`📄 Affichage documents de la catégorie ${categoryName}...`);
 
         // ✅ CORRECTION: Utiliser le NOM de la catégorie pour le filtrage, pas l'ID
         // car doc.categorie contient le nom, pas l'ID
@@ -844,13 +845,13 @@ async function showDocuments(categoryId, categoryName) {
         }, 100);
 
     } catch (error) {
-        console.error('❌ Erreur affichage documents:', error);
+        Logger.error('❌ Erreur affichage documents:', error);
     }
 }
 
 async function loadDocuments() {
     try {
-        console.log(`📄 Chargement documents de la catégorie: "${currentCategory}"...`);
+        Logger.debug(`📄 Chargement documents de la catégorie: "${currentCategory}"...`);
 
         // UTILISER L'ANCIEN SYSTÈME pour compatibilité
         const username = currentUser?.username || sessionStorage.getItem('username');
@@ -863,16 +864,17 @@ async function loadDocuments() {
             throw new Error('Erreur chargement documents');
         }
 
-        let allDocuments = await response.json();
+        const responseData = await response.json();
+        let allDocuments = responseData.documents || [];
 
-        console.log(`📊 DEBUG: ${allDocuments.length} document(s) total chargé(s)`);
+        Logger.debug(`📊 DEBUG: ${allDocuments.length} document(s) total chargé(s)`);
 
         // Afficher les catégories uniques pour debug
         if (allDocuments.length > 0) {
             const uniqueCategories = [...new Set(allDocuments.map(d => d.categorie))];
-            console.log(`📊 DEBUG: Catégories disponibles:`, uniqueCategories);
-            console.log(`📊 DEBUG: Catégorie recherchée: "${currentCategory}"`);
-            console.log(`📊 DEBUG: Premier document:`, allDocuments[0]);
+            Logger.debug(`📊 DEBUG: Catégories disponibles:`, uniqueCategories);
+            Logger.debug(`📊 DEBUG: Catégorie recherchée: "${currentCategory}"`);
+            Logger.debug(`📊 DEBUG: Premier document:`, allDocuments[0]);
         }
 
         // ✅ CORRECTION: Filtrer par catégorie ET par service
@@ -888,16 +890,16 @@ async function loadDocuments() {
 
             if (!match && allDocuments.length < 20) { // Log seulement si peu de docs
                 if (!matchCategory) {
-                    console.log(`📊 DEBUG: Document "${doc.titre}" - catégorie="${doc.categorie}" ne match pas "${currentCategory}"`);
+                    Logger.debug(`📊 DEBUG: Document "${doc.titre}" - catégorie="${doc.categorie}" ne match pas "${currentCategory}"`);
                 }
                 if (!matchService) {
-                    console.log(`📊 DEBUG: Document "${doc.titre}" - service="${doc.serviceArchivage}" ne match pas "${currentServiceName}"`);
+                    Logger.debug(`📊 DEBUG: Document "${doc.titre}" - service="${doc.serviceArchivage}" ne match pas "${currentServiceName}"`);
                 }
             }
             return match;
         });
 
-        console.log(`📊 DEBUG: ${documents.length} document(s) après filtrage par catégorie${currentServiceName ? ' et service' : ''}`);
+        Logger.debug(`📊 DEBUG: ${documents.length} document(s) après filtrage par catégorie${currentServiceName ? ' et service' : ''}`);
 
         // Tri
         documents = sortDocumentsArray(documents, currentSortBy, currentSortOrder);
@@ -909,7 +911,7 @@ async function loadDocuments() {
         const end = start + itemsPerPage;
         const paginatedDocs = documents.slice(start, end);
 
-        console.log(`✅ ${paginatedDocs.length} document(s) chargé(s) sur ${totalDocuments}`);
+        Logger.debug(`✅ ${paginatedDocs.length} document(s) chargé(s) sur ${totalDocuments}`);
 
         // Afficher les documents
         displayDocuments(paginatedDocs);
@@ -929,7 +931,7 @@ async function loadDocuments() {
         });
 
     } catch (error) {
-        console.error('❌ Erreur chargement documents:', error);
+        Logger.error('❌ Erreur chargement documents:', error);
         document.getElementById('documentsGrid').innerHTML =
             '<div class="no-results"><div class="no-results-icon">❌</div><h3>Erreur de chargement</h3></div>';
     }
@@ -1146,7 +1148,7 @@ function filterDocuments() {
     });
 
     // Optionnel : afficher un message si aucun résultat
-    console.log(`🔍 Filtre: ${visibleCount} document(s) trouvé(s) sur ${docCards.length}`);
+    Logger.debug(`🔍 Filtre: ${visibleCount} document(s) trouvé(s) sur ${docCards.length}`);
 }
 
 // ============================================
@@ -1162,7 +1164,7 @@ async function performGlobalSearch() {
     }
 
     try {
-        console.log(`🔍 Recherche globale: "${query}"`);
+        Logger.debug(`🔍 Recherche globale: "${query}"`);
 
         // Afficher un loader
         const resultsDiv = document.getElementById('searchResults');
@@ -1188,9 +1190,9 @@ async function performGlobalSearch() {
         // Afficher les résultats
         displaySearchResults(data, query, { filterServices, filterCategories, filterDocuments });
 
-        console.log('✅ Recherche terminée:', data);
+        Logger.debug('✅ Recherche terminée:', data);
     } catch (error) {
-        console.error('❌ Erreur recherche:', error);
+        Logger.error('❌ Erreur recherche:', error);
         document.getElementById('searchResults').innerHTML = `
             <div class="no-results">
                 <div class="no-results-icon">❌</div>
@@ -1363,7 +1365,7 @@ async function submitDepartment(event) {
             return;
         }
 
-        console.log('🏢 Création département:', { deptName, deptIcon, deptDescription });
+        Logger.debug('🏢 Création département:', { deptName, deptIcon, deptDescription });
 
         // Créer le département
         const response = await fetch('/api/departements', {
@@ -1384,7 +1386,7 @@ async function submitDepartment(event) {
 
         const result = await response.json();
 
-        console.log('✅ Département créé:', result);
+        Logger.debug('✅ Département créé:', result);
 
         // Fermer le modal
         closeAddDepartmentModal();
@@ -1395,7 +1397,7 @@ async function submitDepartment(event) {
         showNotification(` Département "${deptName}" créé avec succès !`);
 
     } catch (error) {
-        console.error('❌ Erreur création département:', error);
+        Logger.error('❌ Erreur création département:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -1466,7 +1468,7 @@ async function submitService(event) {
         }
 
         const isEditing = !!serviceId;
-        console.log(isEditing ? '✏️ Modification service:' : '📂 Création service:', { serviceName, serviceIcon, serviceDescription });
+        Logger.debug(isEditing ? '✏️ Modification service:' : '📂 Création service:', { serviceName, serviceIcon, serviceDescription });
 
         // Créer ou modifier le service
         const url = isEditing
@@ -1491,7 +1493,7 @@ async function submitService(event) {
 
         const result = await response.json();
 
-        console.log(isEditing ? '✅ Service modifié:' : '✅ Service créé:', result);
+        Logger.debug(isEditing ? '✅ Service modifié:' : '✅ Service créé:', result);
 
         // Fermer le modal
         closeAddServiceModal();
@@ -1504,7 +1506,7 @@ async function submitService(event) {
             : `✅ Service "${serviceName}" créé avec succès !`);
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
+        Logger.error('❌ Erreur:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -1528,7 +1530,7 @@ async function deleteService(serviceId, serviceName) {
     }
 
     try {
-        console.log('🗑️ Suppression service:', serviceId);
+        Logger.debug('🗑️ Suppression service:', serviceId);
 
         const response = await fetch(`/api/services/${serviceId}`, {
             method: 'DELETE',
@@ -1540,7 +1542,7 @@ async function deleteService(serviceId, serviceName) {
             throw new Error(error.message || 'Erreur lors de la suppression');
         }
 
-        console.log('✅ Service supprimé');
+        Logger.debug('✅ Service supprimé');
 
         // Recharger les services
         await loadServices(currentDepartment._id);
@@ -1548,7 +1550,7 @@ async function deleteService(serviceId, serviceName) {
         showNotification(` Service "${serviceName}" supprimé avec succès !`);
 
     } catch (error) {
-        console.error('❌ Erreur suppression service:', error);
+        Logger.error('❌ Erreur suppression service:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -1606,7 +1608,7 @@ async function submitCategory(event) {
             return;
         }
 
-        console.log('🏷️ Création catégorie:', { categoryName, categoryId, categoryIcon });
+        Logger.debug('🏷️ Création catégorie:', { categoryName, categoryId, categoryIcon });
 
         // UTILISER L'ANCIEN SYSTÈME pour compatibilité
         const response = await fetch('/api/categories', {
@@ -1629,7 +1631,7 @@ async function submitCategory(event) {
 
         const result = await response.json();
 
-        console.log('✅ Catégorie créée:', result);
+        Logger.debug('✅ Catégorie créée:', result);
 
         // Sauvegarder l'ID du service avant de fermer le modal
         const serviceId = currentServiceForCategory;
@@ -1643,7 +1645,7 @@ async function submitCategory(event) {
         showNotification(` Catégorie "${categoryName}" créée avec succès !`);
 
     } catch (error) {
-        console.error('❌ Erreur création catégorie:', error);
+        Logger.error('❌ Erreur création catégorie:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -1773,14 +1775,14 @@ async function loadCategoriesForUpload() {
             // Forcer la selection avec select.value
             select.value = categoryToSelect;
 
-            console.log('Categories chargees:', categories.length, '- Categorie selectionnee:', select.value);
+            Logger.debug('Categories chargees:', categories.length, '- Categorie selectionnee:', select.value);
 
             // Afficher le chemin d'archivage
             updateArchivePath();
         }
 
     } catch (error) {
-        console.error('❌ Erreur chargement catégories:', error);
+        Logger.error('❌ Erreur chargement catégories:', error);
         const select = document.getElementById('docCategory');
         select.innerHTML = '<option value="">-- Erreur de chargement --</option>';
     }
@@ -2014,7 +2016,7 @@ async function submitDocument(event) {
             return;
         }
 
-        console.log('📤 Upload document:', { docTitle, docCategory, file: file.name });
+        Logger.debug('📤 Upload document:', { docTitle, docCategory, file: file.name });
 
         // Afficher un indicateur de chargement
         showNotification('📤 Traitement du fichier en cours...');
@@ -2053,7 +2055,7 @@ async function submitDocument(event) {
             departementArchivage: currentService || currentDepartment?._id || currentUser?.idDepartement || null
         };
 
-        console.log('📤 Envoi document:', {
+        Logger.debug('📤 Envoi document:', {
             titre: documentData.titre,
             categorie: documentData.categorie,
             nomFichier: documentData.nomFichier,
@@ -2078,7 +2080,7 @@ async function submitDocument(event) {
 
         const result = await response.json();
 
-        console.log('✅ Document uploadé:', result);
+        Logger.debug('✅ Document uploadé:', result);
 
         // Fermer le modal
         closeAddDocumentModal();
@@ -2091,7 +2093,7 @@ async function submitDocument(event) {
         showNotification(` Document "${docTitle}" uploadé avec succès !`);
 
     } catch (error) {
-        console.error('❌ Erreur upload document:', error);
+        Logger.error('❌ Erreur upload document:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -2118,7 +2120,7 @@ async function showMyDocuments() {
             return;
         }
 
-        console.log('📄 Chargement de mes documents...');
+        Logger.debug('📄 Chargement de mes documents...');
 
         // Afficher les résultats
         const resultsDiv = document.getElementById('searchResults');
@@ -2141,7 +2143,7 @@ async function showMyDocuments() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
+        Logger.error('❌ Erreur:', error);
         document.getElementById('searchResults').innerHTML = `
             <div class="no-results">
                 <div class="no-results-icon">❌</div>
@@ -2154,7 +2156,7 @@ async function showMyDocuments() {
 
 async function showRecentDocuments() {
     try {
-        console.log('🕒 Chargement des documents récents...');
+        Logger.debug('🕒 Chargement des documents récents...');
 
         const resultsDiv = document.getElementById('searchResults');
         resultsDiv.classList.remove('hidden');
@@ -2176,7 +2178,7 @@ async function showRecentDocuments() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
+        Logger.error('❌ Erreur:', error);
         document.getElementById('searchResults').innerHTML = `
             <div class="no-results">
                 <div class="no-results-icon">❌</div>
@@ -2194,7 +2196,7 @@ async function showFavorites() {
             return;
         }
 
-        console.log('⭐ Chargement des favoris...');
+        Logger.debug('⭐ Chargement des favoris...');
 
         const resultsDiv = document.getElementById('searchResults');
         resultsDiv.classList.remove('hidden');
@@ -2216,7 +2218,7 @@ async function showFavorites() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
+        Logger.error('❌ Erreur:', error);
         document.getElementById('searchResults').innerHTML = `
             <div class="no-results">
                 <div class="no-results-icon">❌</div>
@@ -2229,7 +2231,7 @@ async function showFavorites() {
 
 async function showNewDocuments() {
     try {
-        console.log('🔔 Chargement des nouveaux documents...');
+        Logger.debug('🔔 Chargement des nouveaux documents...');
 
         const resultsDiv = document.getElementById('searchResults');
         resultsDiv.classList.remove('hidden');
@@ -2252,7 +2254,7 @@ async function showNewDocuments() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
+        Logger.error('❌ Erreur:', error);
         document.getElementById('searchResults').innerHTML = `
             <div class="no-results">
                 <div class="no-results-icon">❌</div>
@@ -2320,7 +2322,7 @@ function showHome() {
 
 async function openDocument(docId) {
     try {
-        console.log('📄 Ouverture document:', docId);
+        Logger.debug('📄 Ouverture document:', docId);
 
         // Charger les détails du document
         const username = currentUser?.username || sessionStorage.getItem('username');
@@ -2338,14 +2340,14 @@ async function openDocument(docId) {
             throw new Error('Erreur chargement document');
         }
 
-        // Le serveur renvoie directement le document (pas { document: ... })
-        const doc = await response.json();
+        const responseData = await response.json();
+        const doc = responseData.document;
 
         // Afficher le modal de document
         showDocumentModal(doc);
 
     } catch (error) {
-        console.error('❌ Erreur ouverture document:', error);
+        Logger.error('❌ Erreur ouverture document:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -2365,7 +2367,7 @@ function showDocumentModal(doc) {
     const canEdit = isOwner || currentUser?.niveau <= 1;
     const isLocked = doc.locked || false;
 
-    console.log('📊 DEBUG: Document complet pour modal:', doc);
+    Logger.debug('📊 DEBUG: Document complet pour modal:', doc);
 
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 900px;">
@@ -2420,7 +2422,7 @@ function showDocumentModal(doc) {
                         </div>
                         <div>
                             <div style="font-size: 12px; color: #666; margin-bottom: 4px;">🔒 Statut de verrouillage</div>
-                            <div style="font-weight: 600;">${isLocked ? '🔒 Verrouillé' : '🔓 Déverrouillé'}</div>
+                            <div style="font-weight: 600;">${isLocked ? `🔒 Verrouillé${doc.lockedBy ? ` par ${escapeHtml(doc.lockedBy)}` : ''}` : '🔓 Déverrouillé'}</div>
                         </div>
                         <!-- ❌ Traçage téléchargements supprimé - Disponible uniquement en version classique -->
                         ${doc.cheminFichier ? `
@@ -2489,7 +2491,7 @@ function closeDocumentModal() {
 async function viewDocument(docId) {
     try {
         const username = currentUser?.username || sessionStorage.getItem('username');
-        console.log('👁️ Visualisation document:', docId);
+        Logger.debug('👁️ Visualisation document:', docId);
 
         // Récupérer le document complet avec son contenu
         const response = await fetch(`/api/documents/${username}/${docId}`, {
@@ -2500,12 +2502,13 @@ async function viewDocument(docId) {
             throw new Error('Erreur chargement document');
         }
 
-        const doc = await response.json();
+        const responseData = await response.json();
+        const doc = responseData.document;
 
         // Afficher le document dans l'iframe de prévisualisation
         const previewDiv = document.getElementById('documentPreview');
         if (!previewDiv) {
-            console.error('❌ Element documentPreview non trouvé');
+            Logger.error('❌ Element documentPreview non trouvé');
             return;
         }
 
@@ -2555,10 +2558,10 @@ async function viewDocument(docId) {
             `;
         }
 
-        console.log('✅ Document affiché dans la prévisualisation');
+        Logger.debug('✅ Document affiché dans la prévisualisation');
 
     } catch (error) {
-        console.error('❌ Erreur visualisation document:', error);
+        Logger.error('❌ Erreur visualisation document:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -2566,10 +2569,11 @@ async function viewDocument(docId) {
 async function downloadDocument(docId) {
     try {
         const username = currentUser?.username || sessionStorage.getItem('username');
-        console.log('⬇️ Téléchargement document:', docId);
+        Logger.debug('⬇️ Téléchargement JSON document:', docId);
 
-        const response = await fetch(`/api/documents/${username}/${docId}/download`, {
-            method: 'POST',
+        // Télécharger le JSON du document
+        const response = await fetch(`/api/documents/${username}/${docId}/download-json`, {
+            method: 'GET',
             credentials: 'include'
         });
 
@@ -2577,15 +2581,21 @@ async function downloadDocument(docId) {
             throw new Error('Erreur téléchargement');
         }
 
-        // Récupérer le blob
-        const blob = await response.blob();
+        // Récupérer le JSON
+        const documentJson = await response.json();
 
-        // Extraire le nom du fichier depuis les headers
+        // Convertir le JSON en Blob
+        const jsonString = JSON.stringify(documentJson, null, 2); // Formater avec indentation
+        const blob = new Blob([jsonString], { type: 'application/json' });
+
+        // Extraire le nom du fichier depuis les headers ou utiliser le nom du document
         const contentDisposition = response.headers.get('Content-Disposition');
-        let filename = 'document';
+        let filename = 'document.json';
         if (contentDisposition) {
             const match = contentDisposition.match(/filename="?(.+)"?/);
             if (match) filename = match[1];
+        } else if (documentJson.nomFichier) {
+            filename = `${documentJson.nomFichier.replace(/\.[^/.]+$/, '')}.json`;
         }
 
         // Créer un lien de téléchargement
@@ -2598,10 +2608,16 @@ async function downloadDocument(docId) {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
 
-        console.log('✅ Document téléchargé');
+        Logger.debug('✅ JSON document téléchargé:', filename);
+
+        // Enregistrer le téléchargement dans les logs
+        await fetch(`/api/documents/${username}/${docId}/download`, {
+            method: 'POST',
+            credentials: 'include'
+        });
 
     } catch (error) {
-        console.error('❌ Erreur téléchargement:', error);
+        Logger.error('❌ Erreur téléchargement JSON:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -2636,7 +2652,7 @@ async function shareDocument(docId) {
         showNotification(` Document partagé avec ${userToShare}`);
 
     } catch (error) {
-        console.error('❌ Erreur partage:', error);
+        Logger.error('❌ Erreur partage:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -2672,7 +2688,7 @@ async function toggleLock(docId, isCurrentlyLocked) {
         await openDocument(docId);
 
     } catch (error) {
-        console.error('❌ Erreur verrouillage:', error);
+        Logger.error('❌ Erreur verrouillage:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }
@@ -2710,7 +2726,7 @@ async function confirmDeleteDocument(docId) {
         }
 
     } catch (error) {
-        console.error('❌ Erreur suppression:', error);
+        Logger.error('❌ Erreur suppression:', error);
         showNotification(` Erreur: ${error.message}`);
     }
 }

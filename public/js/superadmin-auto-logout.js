@@ -48,7 +48,7 @@
             logout();
         }, INACTIVITY_TIMEOUT);
 
-        console.log('⏱️ Timer d\'inactivité réinitialisé - Déconnexion dans 5 minutes');
+        // Log supprimé car trop verbeux (appelé à chaque mouvement de souris)
     }
 
     // Afficher l'avertissement
@@ -137,7 +137,7 @@
             }
         }, 1000);
 
-        console.log('⚠️ Avertissement d\'inactivité affiché - Déconnexion dans 30 secondes');
+        Logger.debug('⚠️ Avertissement d\'inactivité affiché - Déconnexion dans 30 secondes');
     }
 
     // Cacher l'avertissement
@@ -150,7 +150,7 @@
             }, 300);
         }
         warningShown = false;
-        console.log('✅ Avertissement masqué - Session prolongée');
+        // Log masqué car peu utile en production
     }
 
     // Continuer la session
@@ -161,7 +161,7 @@
 
     // Déconnecter l'utilisateur
     async function logout() {
-        console.log('🔴 Déconnexion automatique pour inactivité...');
+        Logger.debug('🔴 Déconnexion automatique pour inactivité...');
 
         try {
             // Appeler l'endpoint de déconnexion
@@ -174,10 +174,10 @@
             });
 
             if (response.ok) {
-                console.log('✅ Déconnexion réussie');
+                Logger.debug('✅ Déconnexion réussie');
             }
         } catch (error) {
-            console.error('❌ Erreur lors de la déconnexion:', error);
+            Logger.error('❌ Erreur lors de la déconnexion:', error);
         }
 
         // Rediriger vers la page de connexion dans tous les cas
@@ -187,7 +187,7 @@
 
     // Initialiser le système
     function init() {
-        console.log('🔐 Système de déconnexion automatique Super Admin activé (5 minutes)');
+        Logger.debug('🔐 Système de déconnexion automatique Super Admin activé (5 minutes)');
 
         // Ajouter les écouteurs d'événements
         activityEvents.forEach(event => {

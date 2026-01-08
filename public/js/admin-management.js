@@ -78,11 +78,11 @@ async function createUser() {
         });
 
         // Recharger la liste des utilisateurs
-        const users = await apiCall('/users');
-        state.allUsersForManagement = users;
+        const response = await apiCall('/users');
+        state.allUsersForManagement = response.users || [];
         render();
     } catch (error) {
-        console.error('Erreur création utilisateur:', error);
+        Logger.error('Erreur création utilisateur:', error);
     }
 }
 
@@ -101,12 +101,12 @@ async function deleteUser(username) {
     try {
         await apiCall(`/users/${username}`, 'DELETE');
         // Recharger les utilisateurs sans fermer le panneau
-        const users = await apiCall('/users');
-        state.allUsersForManagement = users;
+        const response = await apiCall('/users');
+        state.allUsersForManagement = response.users || [];
         render();
         showNotification('✅ Utilisateur supprimé');
     } catch (error) {
-        console.error('Erreur suppression utilisateur:', error);
+        Logger.error('Erreur suppression utilisateur:', error);
     }
 }
 
@@ -143,13 +143,13 @@ async function saveEditUser() {
             idDepartement: idDepartement || null
         });
         // Recharger les utilisateurs sans fermer le panneau
-        const users = await apiCall('/users');
-        state.allUsersForManagement = users;
+        const response = await apiCall('/users');
+        state.allUsersForManagement = response.users || [];
         state.editingUser = null;
         render();
         showNotification('✅ Utilisateur modifié');
     } catch (error) {
-        console.error('Erreur modification utilisateur:', error);
+        Logger.error('Erreur modification utilisateur:', error);
     }
 }
 
@@ -185,7 +185,7 @@ async function resetUserPassword(username) {
             icon: '✅'
         });
     } catch (error) {
-        console.error('Erreur réinitialisation mot de passe:', error);
+        Logger.error('Erreur réinitialisation mot de passe:', error);
     }
 }
 
@@ -209,7 +209,7 @@ async function addRole() {
         document.getElementById('new_role_niveau').value = '';
         document.getElementById('new_role_desc').value = '';
     } catch (error) {
-        console.error('Erreur création rôle:', error);
+        Logger.error('Erreur création rôle:', error);
     }
 }
 
@@ -230,7 +230,7 @@ async function deleteRole(roleId) {
         await loadRolesAndDepartements();
         showNotification('✅ Rôle supprimé');
     } catch (error) {
-        console.error('Erreur suppression rôle:', error);
+        Logger.error('Erreur suppression rôle:', error);
     }
 }
 
@@ -264,7 +264,7 @@ async function saveEditRole() {
         state.editingRole = null;
         showNotification('✅ Rôle modifié');
     } catch (error) {
-        console.error('Erreur modification rôle:', error);
+        Logger.error('Erreur modification rôle:', error);
     }
 }
 
@@ -992,7 +992,7 @@ async function addDepartement() {
         document.getElementById('new_dept_nom').value = '';
         document.getElementById('new_dept_code').value = '';
     } catch (error) {
-        console.error('Erreur création département:', error);
+        Logger.error('Erreur création département:', error);
     }
 }
 
@@ -1013,7 +1013,7 @@ async function deleteDepartement(deptId) {
         await loadRolesAndDepartements();
         showNotification('✅ Département supprimé');
     } catch (error) {
-        console.error('Erreur suppression département:', error);
+        Logger.error('Erreur suppression département:', error);
     }
 }
 
@@ -1046,7 +1046,7 @@ async function saveEditDepartement() {
         state.editingDepartement = null;
         showNotification('✅ Département modifié');
     } catch (error) {
-        console.error('Erreur modification département:', error);
+        Logger.error('Erreur modification département:', error);
     }
 }
 

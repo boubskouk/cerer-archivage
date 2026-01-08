@@ -233,7 +233,7 @@ async function openWithEditor(doc, editorId) {
     multiEditorState.currentEditor = editorId;
     multiEditorState.currentDoc = doc;
 
-    console.log(`📝 Ouverture avec ${EditorConfig[editorId].name}`);
+    Logger.info(`📝 Ouverture avec ${EditorConfig[editorId].name}`);
 
     try {
         switch (editorId) {
@@ -261,7 +261,7 @@ async function openWithEditor(doc, editorId) {
                 showNotification('Éditeur non implémenté', 'error');
         }
     } catch (error) {
-        console.error(`Erreur avec ${editorId}:`, error);
+        Logger.error(`Erreur avec ${editorId}:`, error);
         showNotification(`Erreur lors de l'ouverture avec ${EditorConfig[editorId].name}`, 'error');
     }
 }
@@ -588,27 +588,27 @@ function openEditor(doc) {
 
     // Pour Excel : Ouvrir directement l'éditeur local (le plus rapide et performant)
     if (ext === 'xlsx' || ext === 'xls') {
-        console.log('📊 Ouverture directe éditeur Excel local');
+        Logger.debug('📊 Ouverture directe éditeur Excel local');
         openLocalEditor(doc);
         return;
     }
 
     // Pour Word : Ouvrir directement le visualiseur Microsoft Office
     if (ext === 'docx' || ext === 'doc') {
-        console.log('📝 Ouverture directe visualiseur Word (Office Online)');
+        Logger.debug('📝 Ouverture directe visualiseur Word (Office Online)');
         openOffice365Editor(doc);
         return;
     }
 
     // Pour PowerPoint : Ouvrir directement le visualiseur Microsoft Office
     if (ext === 'pptx' || ext === 'ppt') {
-        console.log('📽️ Ouverture directe visualiseur PowerPoint (Office Online)');
+        Logger.debug('📽️ Ouverture directe visualiseur PowerPoint (Office Online)');
         openOffice365Editor(doc);
         return;
     }
 
     // Pour les autres formats : Afficher le menu de sélection
-    console.log('❓ Format non reconnu, affichage du menu');
+    Logger.debug('❓ Format non reconnu, affichage du menu');
     showEditorSelector(doc);
 }
 
@@ -662,7 +662,7 @@ async function handleWordDocumentUpload(event, docId) {
                 }
 
             } catch (error) {
-                console.error('Erreur lors de la mise à jour:', error);
+                Logger.error('Erreur lors de la mise à jour:', error);
                 showNotification('❌ Erreur lors de la mise à jour du document', 'error');
             }
         };
@@ -674,7 +674,7 @@ async function handleWordDocumentUpload(event, docId) {
         reader.readAsDataURL(file);
 
     } catch (error) {
-        console.error('Erreur:', error);
+        Logger.error('Erreur:', error);
         showNotification('❌ Erreur lors du rechargement du document', 'error');
     }
 }
@@ -682,5 +682,5 @@ async function handleWordDocumentUpload(event, docId) {
 // Exposer la fonction globalement
 window.handleWordDocumentUpload = handleWordDocumentUpload;
 
-console.log('✅ Gestionnaire multi-éditeurs chargé');
-console.log('📝 Éditeurs disponibles:', Object.keys(EditorConfig).join(', '));
+Logger.info('✅ Gestionnaire multi-éditeurs chargé');
+Logger.debug('📝 Éditeurs disponibles:', Object.keys(EditorConfig).join(', '));

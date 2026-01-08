@@ -47,7 +47,7 @@ function getOnlyOfficeDocType(fileName) {
 async function openOnlyOfficeEditor(doc) {
     // Vérifier si OnlyOffice est activé
     if (!OnlyOfficeConfig.enabled || !OnlyOfficeConfig.documentServerUrl) {
-        console.log('OnlyOffice désactivé - Utilisation des alternatives');
+        Logger.info('OnlyOffice désactivé - Utilisation des alternatives');
 
         // Basculer vers une alternative selon le type de fichier
         const ext = doc.nomFichier.toLowerCase().split('.').pop();
@@ -247,21 +247,21 @@ async function initOnlyOfficeEditor(doc, docType) {
 
         events: {
             onDocumentReady: () => {
-                console.log('✅ OnlyOffice: Document prêt');
+                Logger.info('✅ OnlyOffice: Document prêt');
                 showNotification('✅ Document chargé et prêt à éditer', 'success');
             },
 
             onDocumentStateChange: (event) => {
-                console.log('📝 OnlyOffice: État du document changé', event);
+                Logger.debug('📝 OnlyOffice: État du document changé', event);
             },
 
             onError: (event) => {
-                console.error('❌ OnlyOffice: Erreur', event);
+                Logger.error('❌ OnlyOffice: Erreur', event);
                 showNotification(`Erreur OnlyOffice: ${event.data}`, 'error');
             },
 
             onWarning: (event) => {
-                console.warn('⚠️ OnlyOffice: Avertissement', event);
+                Logger.warn('⚠️ OnlyOffice: Avertissement', event);
             }
         },
 
@@ -274,9 +274,9 @@ async function initOnlyOfficeEditor(doc, docType) {
 
     try {
         onlyOfficeState.editor = new DocsAPI.DocEditor('onlyoffice-editor-container', config);
-        console.log('✅ Éditeur OnlyOffice initialisé');
+        Logger.info('✅ Éditeur OnlyOffice initialisé');
     } catch (error) {
-        console.error('❌ Erreur initialisation OnlyOffice:', error);
+        Logger.error('❌ Erreur initialisation OnlyOffice:', error);
 
         // Fallback: afficher un message d'erreur avec solution
         container.innerHTML = `
@@ -347,7 +347,7 @@ function loadOnlyOfficeAPI() {
             clearTimeout(timeout);
             // Vérifier que DocsAPI est bien défini
             if (typeof DocsAPI !== 'undefined') {
-                console.log('✅ OnlyOffice API chargée');
+                Logger.info('✅ OnlyOffice API chargée');
                 resolve();
             } else {
                 reject(new Error('OnlyOffice API non initialisée'));
@@ -395,4 +395,4 @@ async function isOnlyOfficeAvailable() {
     }
 }
 
-console.log('✅ Module OnlyOffice chargé');
+Logger.info('✅ Module OnlyOffice chargé');

@@ -82,7 +82,7 @@ async function openExcelEditor(doc) {
     try {
         // Vérifier que le document est valide
         if (!doc || !doc._id) {
-            console.error('Document invalide passé à openExcelEditor:', doc);
+            Logger.error('Document invalide passé à openExcelEditor:', doc);
             showNotification('Erreur: Document invalide', 'error');
             return;
         }
@@ -177,7 +177,7 @@ async function openExcelEditor(doc) {
         document.addEventListener('keydown', handleEditorEscape);
 
     } catch (error) {
-        console.error('Erreur ouverture éditeur Excel:', error);
+        Logger.error('Erreur ouverture éditeur Excel:', error);
         showNotification('Erreur lors de l\'ouverture de l\'éditeur', 'error');
     }
 }
@@ -283,7 +283,7 @@ function updateChangesCounter() {
 async function saveExcelChanges() {
     // Vérifier que le document est bien chargé
     if (!editorState.currentDoc || !editorState.currentDoc._id) {
-        console.error('Erreur: Document non chargé dans editorState');
+        Logger.error('Erreur: Document non chargé dans editorState');
         showNotification('Erreur: Document non trouvé. Veuillez réouvrir l\'éditeur.', 'error');
         return;
     }
@@ -339,7 +339,7 @@ async function saveExcelChanges() {
         }
 
     } catch (error) {
-        console.error('Erreur enregistrement:', error);
+        Logger.error('Erreur enregistrement:', error);
         showNotification('Erreur lors de l\'enregistrement', 'error');
     }
 }
@@ -369,7 +369,7 @@ async function openWordEditor(doc) {
         await openOnlyOfficeEditor(doc);
     } else {
         // Fallback: Guide de téléchargement si OnlyOffice n'est pas chargé
-        console.warn('⚠️ OnlyOffice non disponible, affichage du guide de téléchargement');
+        Logger.warn('⚠️ OnlyOffice non disponible, affichage du guide de téléchargement');
         await openLocalWordEditor(doc);
     }
 }
@@ -618,7 +618,7 @@ async function openCSVEditor(doc) {
     try {
         // Vérifier que le document est valide
         if (!doc || !doc._id) {
-            console.error('Document invalide passé à openCSVEditor:', doc);
+            Logger.error('Document invalide passé à openCSVEditor:', doc);
             showNotification('Erreur: Document invalide', 'error');
             return;
         }
@@ -719,7 +719,7 @@ async function openCSVEditor(doc) {
         });
 
     } catch (error) {
-        console.error('Erreur ouverture éditeur CSV:', error);
+        Logger.error('Erreur ouverture éditeur CSV:', error);
         showNotification('Erreur lors de l\'ouverture de l\'éditeur CSV', 'error');
     }
 }
@@ -831,7 +831,7 @@ function getCurrentCSVGrid() {
 // Mettre à jour une cellule CSV
 function updateCSVCell(input) {
     // La valeur est déjà dans l'input, rien de plus à faire
-    console.log(`Cellule mise à jour: [${input.dataset.row}, ${input.dataset.col}] = "${input.value}"`);
+    Logger.debug(`Cellule mise à jour: [${input.dataset.row}, ${input.dataset.col}] = "${input.value}"`);
 }
 
 // Supprimer une ligne CSV
@@ -894,7 +894,7 @@ async function saveCSVDocument(docId) {
                 }, 1000);
 
             } catch (error) {
-                console.error('Erreur sauvegarde CSV:', error);
+                Logger.error('Erreur sauvegarde CSV:', error);
                 showNotification('Erreur lors de l\'enregistrement', 'error');
                 saveBtn.disabled = false;
                 saveBtn.innerHTML = `
@@ -909,7 +909,7 @@ async function saveCSVDocument(docId) {
         reader.readAsDataURL(blob);
 
     } catch (error) {
-        console.error('Erreur lors de la sauvegarde:', error);
+        Logger.error('Erreur lors de la sauvegarde:', error);
         showNotification('Erreur lors de l\'enregistrement', 'error');
     }
 }

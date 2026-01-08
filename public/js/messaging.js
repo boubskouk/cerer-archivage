@@ -141,7 +141,7 @@ async function deleteAllReceivedMessages() {
             throw new Error(data.message);
         }
     } catch (error) {
-        console.error('Erreur suppression messages reçus:', error);
+        Logger.error('Erreur suppression messages reçus:', error);
         showNotification('Erreur lors de la suppression des messages reçus', 'error');
     }
 }
@@ -175,7 +175,7 @@ async function deleteAllSentMessages() {
             throw new Error(data.message);
         }
     } catch (error) {
-        console.error('Erreur suppression messages envoyés:', error);
+        Logger.error('Erreur suppression messages envoyés:', error);
         showNotification('Erreur lors de la suppression des messages envoyés', 'error');
     }
 }
@@ -209,7 +209,7 @@ async function deleteAllSharedDocuments() {
             throw new Error(data.message);
         }
     } catch (error) {
-        console.error('Erreur suppression historique partages:', error);
+        Logger.error('Erreur suppression historique partages:', error);
         showNotification('Erreur lors de la suppression de l\'historique', 'error');
     }
 }
@@ -720,7 +720,7 @@ async function loadReceivedMessages() {
         await getReceivedMessages();
         await getUnreadCount();
     } catch (error) {
-        console.error('Erreur chargement messages reçus:', error);
+        Logger.error('Erreur chargement messages reçus:', error);
         showNotification('Erreur chargement messages', 'error');
     }
 }
@@ -730,7 +730,7 @@ async function loadSentMessages() {
     try {
         await getSentMessages();
     } catch (error) {
-        console.error('Erreur chargement messages envoyés:', error);
+        Logger.error('Erreur chargement messages envoyés:', error);
         showNotification('Erreur chargement messages', 'error');
     }
 }
@@ -740,7 +740,7 @@ async function loadSharedDocuments() {
     try {
         await getSharedDocuments();
     } catch (error) {
-        console.error('Erreur chargement documents partagés:', error);
+        Logger.error('Erreur chargement documents partagés:', error);
         showNotification('Erreur chargement documents partagés', 'error');
     }
 }
@@ -758,7 +758,7 @@ async function loadUsersList() {
             }
         }, 100);
     } catch (error) {
-        console.error('Erreur chargement utilisateurs:', error);
+        Logger.error('Erreur chargement utilisateurs:', error);
         showNotification('Erreur chargement utilisateurs', 'error');
     }
 }
@@ -781,7 +781,7 @@ async function handleSendMessage(event) {
         showNotification('✅ Message envoyé avec succès!');
         switchMessagingView('sent');
     } catch (error) {
-        console.error('Erreur envoi message:', error);
+        Logger.error('Erreur envoi message:', error);
         showNotification('Erreur envoi du message', 'error');
     }
 }
@@ -801,7 +801,7 @@ async function openMessage(messageId, type) {
             await getUnreadCount();
             render();
         } catch (error) {
-            console.error('Erreur marquage message:', error);
+            Logger.error('Erreur marquage message:', error);
         }
     }
 
@@ -859,7 +859,7 @@ async function deleteMessageAndRefresh(messageId, type) {
 
         render();
     } catch (error) {
-        console.error('Erreur suppression message:', error);
+        Logger.error('Erreur suppression message:', error);
         await customAlert({
             title: 'Erreur',
             message: 'Erreur lors de la suppression du message.',

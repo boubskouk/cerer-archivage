@@ -8,7 +8,10 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function(app, collections) {
-    const { usersCollection, rolesCollection, departementsCollection, auditLogsCollection } = collections;
+    const usersCollection = collections.users;
+    const rolesCollection = collections.roles;
+    const departementsCollection = collections.departements;
+    const auditLogsCollection = collections.auditLogs;
     const { ObjectId } = require('mongodb');
 
     // 📁 Fichier de traçabilité des changements de profil

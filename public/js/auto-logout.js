@@ -32,9 +32,9 @@
                 method: 'POST',
                 credentials: 'include'
             });
-            console.log('💓 Session maintenue active');
+            // Log supprimé car trop verbeux (appelé toutes les 5 minutes)
         } catch (error) {
-            console.warn('⚠️ Erreur keep-alive:', error);
+            Logger.warn('⚠️ Erreur keep-alive:', error);
         }
     }
 
@@ -63,7 +63,7 @@
             logout();
         }, INACTIVITY_TIMEOUT);
 
-        console.log('⏱️ Timer d\'inactivité réinitialisé - Déconnexion dans 20 minutes');
+        // Log supprimé car trop verbeux (appelé à chaque mouvement de souris)
     }
 
     // Afficher l'avertissement
@@ -156,7 +156,7 @@
             }
         }, 1000);
 
-        console.log('⚠️ Avertissement d\'inactivité affiché - Déconnexion dans 60 secondes');
+        Logger.info('⚠️ Avertissement d\'inactivité affiché - Déconnexion dans 60 secondes');
     }
 
     // Cacher l'avertissement
@@ -169,7 +169,7 @@
             }, 300);
         }
         warningShown = false;
-        console.log('✅ Avertissement masqué - Session prolongée');
+        // Log masqué car peu utile en production
     }
 
     // Continuer la session
@@ -180,7 +180,7 @@
 
     // Déconnecter l'utilisateur
     async function logout() {
-        console.log('🔴 Déconnexion automatique pour inactivité (20 minutes)...');
+        Logger.info('🔴 Déconnexion automatique pour inactivité (20 minutes)...');
 
         try {
             // Appeler l'endpoint de déconnexion
@@ -193,10 +193,10 @@
             });
 
             if (response.ok) {
-                console.log('✅ Déconnexion réussie');
+                Logger.info('✅ Déconnexion réussie');
             }
         } catch (error) {
-            console.error('❌ Erreur lors de la déconnexion:', error);
+            Logger.error('❌ Erreur lors de la déconnexion:', error);
         }
 
         // Rediriger vers la page de connexion dans tous les cas
@@ -205,7 +205,7 @@
 
     // Initialiser le système
     function init() {
-        console.log('🔐 Système de déconnexion automatique activé (20 minutes d\'inactivité)');
+        Logger.info('🔐 Système de déconnexion automatique activé (20 minutes d\'inactivité)');
 
         // Ajouter les écouteurs d'événements
         activityEvents.forEach(event => {
@@ -217,7 +217,7 @@
 
         // 💓 Démarrer le keep-alive pour maintenir la session serveur
         keepAliveInterval = setInterval(keepSessionAlive, KEEP_ALIVE_INTERVAL);
-        console.log('💓 Keep-alive activé (ping toutes les 5 minutes)');
+        Logger.info('💓 Keep-alive activé (ping toutes les 5 minutes)');
     }
 
     // Nettoyer lors du déchargement

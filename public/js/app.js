@@ -128,7 +128,7 @@ async function checkSessionValidity() {
 
             // Vérifier si c'est une déconnexion forcée
             if (data.forceLogout) {
-                console.log('⚠️ Session fermée par un administrateur');
+                Logger.debug('⚠️ Session fermée par un administrateur');
 
                 // Arrêter la vérification
                 if (sessionCheckInterval) {
@@ -183,7 +183,7 @@ async function checkSessionValidity() {
         }
     } catch (error) {
         // Erreur réseau : ignorer silencieusement
-        console.debug('Erreur vérification session:', error);
+        Logger.debug('Erreur vérification session:', error);
     }
 }
 
@@ -213,12 +213,12 @@ async function apiCall(endpoint, method = 'GET', data = null) {
         // Pas besoin de vérifier à chaque appel API pour éviter les problèmes de performance
 
         if (!response.ok) {
-            console.error(`❌ API Error [${method} ${endpoint}]:`, result.message || 'Erreur');
+            Logger.error(`❌ API Error [${method} ${endpoint}]:`, result.message || 'Erreur');
             throw new Error(result.message || 'Erreur');
         }
         return result;
     } catch (error) {
-        console.error(`❌ API Call Failed [${method} ${endpoint}]:`, error);
+        Logger.error(`❌ API Call Failed [${method} ${endpoint}]:`, error);
         showNotification(error.message, 'error');
         throw error;
     } finally {
@@ -238,7 +238,7 @@ function saveSession(username, userInfo) {
             timestamp: Date.now()
         }));
     } catch (error) {
-        console.error('Erreur sauvegarde session:', error);
+        Logger.error('Erreur sauvegarde session:', error);
     }
 }
 
@@ -283,7 +283,7 @@ async function restoreSession() {
 
                 alert(message);
 
-                console.log(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
+                Logger.debug(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
 
                 // Déconnexion et redirection
                 clearSession();
@@ -311,7 +311,7 @@ async function restoreSession() {
             return false;
         }
     } catch (error) {
-        console.error('Erreur restauration session:', error);
+        Logger.error('Erreur restauration session:', error);
         clearSession();
         state.isCheckingSession = false;
         return false;
@@ -324,7 +324,7 @@ function clearSession() {
         // ✅ CORRECTION: Effacer TOUT le sessionStorage pour éviter les conflits entre versions
         sessionStorage.clear();
     } catch (error) {
-        console.error('Erreur nettoyage session:', error);
+        Logger.error('Erreur nettoyage session:', error);
     }
 }
 
@@ -354,7 +354,7 @@ function detectSessionChange() {
             if (data && data.username) {
                 // Si l'utilisateur de la session est différent de celui stocké localement
                 if (data.username !== state.currentUser) {
-                    console.log(`🚨 SÉCURITÉ: Session changée de ${state.currentUser} à ${data.username} - Déconnexion automatique`);
+                    Logger.debug(`🚨 SÉCURITÉ: Session changée de ${state.currentUser} à ${data.username} - Déconnexion automatique`);
 
                     // Logger la violation de session côté serveur
                     try {
@@ -409,7 +409,7 @@ function resetInactivityTimer() {
     // Ne démarrer le timer que si l'utilisateur est connecté
     if (state.isAuthenticated) {
         inactivityTimer = setTimeout(() => {
-            console.log('Déconnexion automatique après inactivité');
+            Logger.debug('Déconnexion automatique après inactivité');
             logout(true); // Déconnexion automatique
         }, INACTIVITY_TIMEOUT);
     }
@@ -438,7 +438,7 @@ function startFilterResetTimer() {
 
     // Créer un nouveau timer qui se déclenche toutes les 5 minutes
     window.filterResetTimer = setInterval(() => {
-        console.log('🔄 Réinitialisation automatique des filtres après 5 minutes');
+        Logger.debug('🔄 Réinitialisation automatique des filtres après 5 minutes');
         resetFilters();
         showNotification('🔄 Filtres réinitialisés automatiquement', 'info');
     }, 5 * 60 * 1000); // 5 minutes en millisecondes
@@ -467,7 +467,7 @@ async function login(username, password) {
 
                 alert(message);
 
-                console.log(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
+                Logger.debug(`🔒 Niveau 0 bloqué: ${username} redirigé vers interface Super Admin`);
 
                 // Redirection vers interface Super Admin
                 setTimeout(() => {
@@ -590,7 +590,7 @@ async function handlePasswordChange() {
             render();
         }
     } catch (error) {
-        console.error('Erreur lors du changement de mot de passe:', error);
+        Logger.error('Erreur lors du changement de mot de passe:', error);
     }
 }
 
@@ -620,9 +620,9 @@ async function logout(isAutoLogout = false) {
     // ✅ CORRECTION: Détruire la session SERVEUR avant de nettoyer le client
     try {
         await apiCall('/logout', 'POST');
-        console.log('✅ Session serveur détruite');
+        Logger.debug('✅ Session serveur détruite');
     } catch (error) {
-        console.error('❌ Erreur destruction session serveur:', error);
+        Logger.error('❌ Erreur destruction session serveur:', error);
     }
 
     // Nettoyer la session CLIENT
@@ -681,9 +681,9 @@ async function loadData() {
     if (!state.currentUser) return;
     try {
         const docs = await apiCall(`/documents/${state.currentUser}?full=false`);
-        state.documents = docs;
+        state.documents = Array.isArray(docs) ? docs : (docs.documents || []);
         const cats = await apiCall(`/categories/${state.currentUser}`);
-        state.categories = cats;
+        state.categories = Array.isArray(cats) ? cats : (cats.categories || []);
         calculateStorageUsage();
         await updateUnreadCount(); // ✅ NOUVEAU: Charger le compteur de messages non lus
         render();
@@ -702,10 +702,10 @@ async function loadRolesAndDepartements() {
         const deptsData = await apiCall('/departements');
         state.departements = deptsData.departements || [];
 
-        console.log('✅ Rôles et départements chargés:', state.roles.length, 'rôles,', state.departements.length, 'départements');
+        Logger.debug('✅ Rôles et départements chargés:', state.roles.length, 'rôles,', state.departements.length, 'départements');
         // Note: Le render est fait après le chargement des services pour éviter le clignotement
     } catch (error) {
-        console.error('❌ Erreur chargement rôles/départements:', error);
+        Logger.error('❌ Erreur chargement rôles/départements:', error);
     }
 }
 
@@ -714,10 +714,10 @@ async function loadServices() {
     try {
         const servicesData = await apiCall('/services');
         state.services = servicesData.services || [];
-        console.log('✅ Services chargés:', state.services.length, 'services');
+        Logger.debug('✅ Services chargés:', state.services.length, 'services');
         render(); // Render final après tout le chargement
     } catch (error) {
-        console.error('❌ Erreur chargement services:', error);
+        Logger.error('❌ Erreur chargement services:', error);
         state.services = [];
     }
 }
@@ -770,14 +770,14 @@ async function toggleDocumentLock(docId) {
 
         if (result.success) {
             // Mettre à jour le document dans l'état
-            const doc = state.documents.find(d => d._id === docId);
+            const doc = state.documents.find(d => (d._id || d.id) === docId);
             if (doc) {
                 doc.locked = result.locked;
                 doc.lockedBy = result.lockedBy;
             }
 
             // Mettre à jour le document sélectionné si c'est lui
-            if (state.selectedDoc && state.selectedDoc._id === docId) {
+            if (state.selectedDoc && (state.selectedDoc._id || state.selectedDoc.id) === docId) {
                 state.selectedDoc.locked = result.locked;
                 state.selectedDoc.lockedBy = result.lockedBy;
             }
@@ -788,7 +788,7 @@ async function toggleDocumentLock(docId) {
             showNotification(result.message || 'Erreur lors du verrouillage', 'error');
         }
     } catch (error) {
-        console.error('Erreur toggleDocumentLock:', error);
+        Logger.error('Erreur toggleDocumentLock:', error);
         showNotification('Erreur lors du verrouillage', 'error');
     }
 }
@@ -805,19 +805,19 @@ async function deleteAllDocuments() {
 }
 
 async function confirmDeleteAll() {
-    console.log('🗑️ Tentative de suppression pour:', state.currentUser);
-    console.log('📊 Documents actuels:', state.documents.length);
+    Logger.debug('🗑️ Tentative de suppression pour:', state.currentUser);
+    Logger.debug('📊 Documents actuels:', state.documents.length);
 
     try {
         const result = await apiCall(`/documents/${state.currentUser}/delete-all`, 'DELETE');
-        console.log('✅ Réponse du serveur:', result);
+        Logger.debug('✅ Réponse du serveur:', result);
 
         state.showMenu = false;
         state.showDeleteConfirm = false;
         showNotification(`✅ ${result.deletedCount} document(s) supprimé(s)!`);
         await loadData();
     } catch (error) {
-        console.error('❌ Erreur lors de la suppression:', error);
+        Logger.error('❌ Erreur lors de la suppression:', error);
         showNotification('Erreur suppression', 'error');
         state.showDeleteConfirm = false;
         render();
@@ -875,7 +875,7 @@ async function deleteCategory(catId) {
         await loadData();
         showNotification('✅ Catégorie supprimée');
     } catch (error) {
-        console.error('Erreur suppression catégorie:', error);
+        Logger.error('Erreur suppression catégorie:', error);
     }
 }
 
@@ -963,7 +963,7 @@ async function deleteDepartement(deptId) {
         await loadRolesAndDepartements();
         showNotification(isNiveau1 ? '✅ Service supprimé' : '✅ Département supprimé');
     } catch (error) {
-        console.error('Erreur suppression:', error);
+        Logger.error('Erreur suppression:', error);
         showNotification('❌ ' + (error.message || 'Erreur lors de la suppression'), 'error');
     }
 }
@@ -1066,7 +1066,7 @@ function copyDocumentId(docId) {
                 showNotification(`✅ ID copié : ${docId}`, 'success');
             })
             .catch(err => {
-                console.error('Erreur copie clipboard:', err);
+                Logger.error('Erreur copie clipboard:', err);
                 // Fallback vers la méthode ancienne
                 fallbackCopyToClipboard(docId);
             });
@@ -1093,7 +1093,7 @@ function fallbackCopyToClipboard(text) {
             showNotification('Erreur lors de la copie', 'error');
         }
     } catch (err) {
-        console.error('Erreur copie fallback:', err);
+        Logger.error('Erreur copie fallback:', err);
         showNotification('Erreur lors de la copie', 'error');
     }
 
@@ -1225,11 +1225,21 @@ async function handleFileUpload(e) {
 
 async function downloadDoc(doc) {
     try {
+        // Récupérer l'ID du document (compatibilité avec différents formats)
+        const docId = doc._id || doc.id || doc.idDocument;
+
+        if (!docId) {
+            Logger.error('❌ Document sans ID dans downloadDoc:', doc);
+            showNotification('Erreur: Document invalide (ID manquant)', 'error');
+            return;
+        }
+
         // Récupérer le document complet
-        const fullDoc = await apiCall(`/documents/${state.currentUser}/${doc._id}`);
+        const response = await apiCall(`/documents/${state.currentUser}/${docId}`);
+        const fullDoc = response.document;
 
         // Enregistrer le téléchargement dans l'historique
-        await apiCall(`/documents/${state.currentUser}/${doc._id}/download`, 'POST');
+        await apiCall(`/documents/${state.currentUser}/${docId}/download`, 'POST');
 
         // Télécharger le fichier
         const link = document.createElement('a');
@@ -1242,7 +1252,7 @@ async function downloadDoc(doc) {
         // Recharger les données pour mettre à jour les informations de téléchargement
         await loadData();
     } catch (error) {
-        console.error('Erreur téléchargement:', error);
+        Logger.error('Erreur téléchargement:', error);
         showNotification('Erreur lors du téléchargement', 'error');
     }
 }
@@ -1315,7 +1325,7 @@ async function editExcelDocument(doc) {
         document.body.appendChild(container.firstElementChild);
 
     } catch (error) {
-        console.error('Erreur ouverture éditeur:', error);
+        Logger.error('Erreur ouverture éditeur:', error);
         showNotification('Erreur lors de l\'ouverture de l\'éditeur', 'error');
     }
 }
@@ -1375,7 +1385,7 @@ async function saveExcelEdits(docId) {
         }
 
     } catch (error) {
-        console.error('Erreur sauvegarde Excel:', error);
+        Logger.error('Erreur sauvegarde Excel:', error);
         showNotification('Erreur lors de la sauvegarde', 'error');
     }
 }
@@ -1438,7 +1448,7 @@ async function createExcelReport() {
         document.body.appendChild(container.firstElementChild);
 
     } catch (error) {
-        console.error('Erreur création rapport:', error);
+        Logger.error('Erreur création rapport:', error);
         showNotification('Erreur lors de l\'ouverture', 'error');
     }
 }
@@ -1511,7 +1521,7 @@ async function generateExcelReport() {
         }
 
     } catch (error) {
-        console.error('Erreur génération rapport:', error);
+        Logger.error('Erreur génération rapport:', error);
         showNotification('Erreur lors de la génération', 'error');
     }
 }
@@ -1714,13 +1724,29 @@ function getFilteredDocs() {
 
 // ===== NOUVEAU : PRÉVISUALISATION DOCUMENT =====
 async function showDocDetail(id) {
-    const doc = state.documents.find(d => d._id === id);
-    if (!doc) return;
-    
-    // Charger le contenu complet du document
-    const fullDoc = await apiCall(`/documents/${state.currentUser}/${id}`);
-    state.selectedDoc = fullDoc;
-    render();
+    try {
+        const doc = state.documents.find(d => (d._id || d.id) === id);
+        if (!doc) {
+            Logger.error('❌ Document non trouvé avec ID:', id);
+            return;
+        }
+
+        // Charger le contenu complet du document depuis l'API
+        const fullDoc = await apiCall(`/documents/${state.currentUser}/${id}`);
+
+        // Fusionner les métadonnées du document de la liste avec le contenu complet
+        // Cela garantit que toutes les métadonnées sont présentes
+        state.selectedDoc = {
+            ...doc,           // Métadonnées de la liste (categorie, service, etc.)
+            ...fullDoc,       // Contenu complet de l'API
+            _id: id           // S'assurer que l'ID est présent
+        };
+
+        render();
+    } catch (error) {
+        Logger.error('❌ Erreur lors du chargement du document:', error);
+        showNotification('Erreur lors du chargement du document', 'error');
+    }
 }
 
 // ===== ACTIONS UI =====
@@ -1778,12 +1804,12 @@ async function toggleUsersManagement() {
             }
 
             // Charger tous les utilisateurs
-            const users = await apiCall('/users');
-            state.allUsersForManagement = users;
+            const response = await apiCall('/users');
+            state.allUsersForManagement = response.users || [];
 
-            console.log('✅ Données chargées pour gestion utilisateurs');
+            Logger.debug('✅ Données chargées pour gestion utilisateurs');
         } catch (error) {
-            console.error('❌ Erreur chargement utilisateurs:', error);
+            Logger.error('❌ Erreur chargement utilisateurs:', error);
         }
     }
     state.showUploadForm = false;
@@ -1840,29 +1866,29 @@ async function toggleRegister() {
     // Charger les rôles et départements si on ouvre le formulaire d'inscription
     if (state.showRegister) {
         try {
-            console.log('📋 Chargement des rôles et départements...');
-            console.log('📋 État actuel - roles:', state.roles, 'departements:', state.departements);
+            Logger.debug('📋 Chargement des rôles et départements...');
+            Logger.debug('📋 État actuel - roles:', state.roles, 'departements:', state.departements);
 
             // Toujours charger si les données ne sont pas un tableau valide
             if (!Array.isArray(state.roles) || state.roles.length === 0) {
-                console.log('🔄 Chargement des rôles...');
+                Logger.debug('🔄 Chargement des rôles...');
                 const rolesData = await getRoles();
-                console.log('✅ Rôles reçus:', rolesData);
+                Logger.debug('✅ Rôles reçus:', rolesData);
                 state.roles = rolesData.roles || [];
-                console.log('✅ state.roles mis à jour:', state.roles);
+                Logger.debug('✅ state.roles mis à jour:', state.roles);
             }
 
             if (!Array.isArray(state.departements) || state.departements.length === 0) {
-                console.log('🔄 Chargement des départements...');
+                Logger.debug('🔄 Chargement des départements...');
                 const deptsData = await getDepartements();
-                console.log('✅ Départements reçus:', deptsData);
+                Logger.debug('✅ Départements reçus:', deptsData);
                 state.departements = deptsData.departements || [];
-                console.log('✅ state.departements mis à jour:', state.departements);
+                Logger.debug('✅ state.departements mis à jour:', state.departements);
             }
 
-            console.log('✅ Chargement terminé. Nombre de rôles:', state.roles?.length, 'Nombre de départements:', state.departements?.length);
+            Logger.debug('✅ Chargement terminé. Nombre de rôles:', state.roles?.length, 'Nombre de départements:', state.departements?.length);
         } catch (error) {
-            console.error('❌ Erreur chargement rôles/départements:', error);
+            Logger.error('❌ Erreur chargement rôles/départements:', error);
             showNotification('Erreur lors du chargement des données', 'error');
         }
     }
@@ -1874,7 +1900,8 @@ async function toggleRegister() {
 async function openShareModal(docId) {
     try {
         // Charger TOUS les utilisateurs de TOUS les départements (sauf l'utilisateur actuel)
-        const allUsers = await apiCall('/users');
+        const response = await apiCall('/users');
+        const allUsers = response.users || [];
         // Filtrer pour exclure l'utilisateur actuel
         const users = allUsers.filter(u => u.username !== state.currentUser);
 
@@ -1919,7 +1946,7 @@ async function confirmShare() {
         const result = await apiCall(
             `/documents/${state.currentUser}/${state.selectedDoc._id}/share`,
             'POST',
-            { targetUsers: state.shareSelectedUsers }
+            { usersToShare: state.shareSelectedUsers }
         );
 
         if (result.success) {
@@ -2060,7 +2087,7 @@ async function openMessages() {
         await loadMessages();
         render();
     } catch (error) {
-        console.error('Erreur ouverture messagerie:', error);
+        Logger.error('Erreur ouverture messagerie:', error);
         showNotification('Erreur lors de l\'ouverture de la messagerie', 'error');
     }
 }
@@ -2072,7 +2099,7 @@ async function loadMessages() {
         state.messages = messages;
         await updateUnreadCount();
     } catch (error) {
-        console.error('Erreur chargement messages:', error);
+        Logger.error('Erreur chargement messages:', error);
     }
 }
 
@@ -2082,7 +2109,7 @@ async function updateUnreadCount() {
         const result = await apiCall(`/messages/${state.currentUser}/unread-count`);
         state.unreadCount = result.count;
     } catch (error) {
-        console.error('Erreur comptage messages:', error);
+        Logger.error('Erreur comptage messages:', error);
     }
 }
 
@@ -2099,7 +2126,7 @@ async function markMessageAsRead(messageId) {
         await loadMessages();
         render();
     } catch (error) {
-        console.error('Erreur marquage message:', error);
+        Logger.error('Erreur marquage message:', error);
     }
 }
 
@@ -2122,7 +2149,7 @@ async function deleteMessage(messageId) {
         await loadMessages();
         render();
     } catch (error) {
-        console.error('Erreur suppression message:', error);
+        Logger.error('Erreur suppression message:', error);
         showNotification('Erreur lors de la suppression', 'error');
     }
 }
@@ -2135,7 +2162,7 @@ async function loadAllUsers() {
             state.allUsers = result.users;
         }
     } catch (error) {
-        console.error('Erreur chargement utilisateurs:', error);
+        Logger.error('Erreur chargement utilisateurs:', error);
     }
 }
 
@@ -2229,7 +2256,7 @@ async function sendNewMessage() {
             render();
         }
     } catch (error) {
-        console.error('Erreur envoi message:', error);
+        Logger.error('Erreur envoi message:', error);
         showNotification('Erreur lors de l\'envoi du message', 'error');
     }
 }
@@ -2870,7 +2897,7 @@ function render() {
 
                 <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
                     ${filteredDocs.map(doc => `
-                        <div onclick="showDocDetail('${doc._id}')"
+                        <div onclick="showDocDetail('${doc._id || doc.id}')"
                              class="doc-card p-3 rounded-xl shadow-md cursor-pointer animate-fade-in hover:shadow-xl transition-shadow ${doc.locked ? 'locked' : ''}">
                             <div class="flex justify-between items-start mb-2">
                                 <h3 class="font-bold text-gray-800 flex-1 text-base">${doc.titre}</h3>
@@ -3325,7 +3352,7 @@ function render() {
                             </div>
                             
                             <div class="bg-white rounded-xl p-4 shadow-inner">
-                                ${state.selectedDoc.type.startsWith('image/') ? `
+                                ${state.selectedDoc.type && state.selectedDoc.type.startsWith('image/') ? `
                                     <img src="${state.selectedDoc.contenu}"
                                          alt="${escapeHtml(state.selectedDoc.titre)}"
                                          class="w-full h-auto max-h-[500px] object-contain rounded-lg cursor-zoom-in"
@@ -3340,7 +3367,7 @@ function render() {
                                             💡 Faites défiler pour voir tout le document
                                         </p>
                                     </div>
-                                ` : state.selectedDoc.type.includes('word') || state.selectedDoc.type.includes('document') || state.selectedDoc.nomFichier.endsWith('.doc') || state.selectedDoc.nomFichier.endsWith('.docx') ? `
+                                ` : (state.selectedDoc.type && (state.selectedDoc.type.includes('word') || state.selectedDoc.type.includes('document'))) || (state.selectedDoc.nomFichier && (state.selectedDoc.nomFichier.endsWith('.doc') || state.selectedDoc.nomFichier.endsWith('.docx'))) ? `
                                     <div>
                                         <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-lg mb-4 border-2 border-blue-200">
                                             <div class="flex items-center justify-between mb-3">
@@ -3411,7 +3438,7 @@ function render() {
                                             </div>
                                         `}
                                     </div>
-                                ` : state.selectedDoc.type.includes('excel') || state.selectedDoc.type.includes('sheet') || state.selectedDoc.nomFichier.endsWith('.xls') || state.selectedDoc.nomFichier.endsWith('.xlsx') ? `
+                                ` : (state.selectedDoc.type && (state.selectedDoc.type.includes('excel') || state.selectedDoc.type.includes('sheet'))) || (state.selectedDoc.nomFichier && (state.selectedDoc.nomFichier.endsWith('.xls') || state.selectedDoc.nomFichier.endsWith('.xlsx'))) ? `
                                     <div>
                                         <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg mb-4 border-2 border-green-200">
                                             <div class="flex items-center justify-between mb-3">
@@ -3482,7 +3509,7 @@ function render() {
                                             </div>
                                         `}
                                     </div>
-                                ` : state.selectedDoc.type.includes('powerpoint') || state.selectedDoc.type.includes('presentation') || state.selectedDoc.nomFichier.endsWith('.ppt') || state.selectedDoc.nomFichier.endsWith('.pptx') ? `
+                                ` : (state.selectedDoc.type && (state.selectedDoc.type.includes('powerpoint') || state.selectedDoc.type.includes('presentation'))) || (state.selectedDoc.nomFichier && (state.selectedDoc.nomFichier.endsWith('.ppt') || state.selectedDoc.nomFichier.endsWith('.pptx'))) ? `
                                     <div>
                                         <div class="bg-gradient-to-br from-orange-50 to-red-50 p-4 rounded-lg mb-4 border-2 border-orange-200">
                                             <div class="flex items-center justify-between mb-3">
@@ -3628,7 +3655,7 @@ function render() {
                                         ${state.selectedDoc.archivePar.role ? `<p class="text-sm">Rôle: ${state.selectedDoc.archivePar.role} (Niveau ${state.selectedDoc.archivePar.niveau})</p>` : ''}
                                         ${state.selectedDoc.archivePar.departement ? `<p class="text-sm">Département: ${state.selectedDoc.archivePar.departement}</p>` : ''}
                                         <p class="text-sm text-gray-500">
-                                            Le ${formatDate(state.selectedDoc.archivePar.date)} à ${new Date(state.selectedDoc.archivePar.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                            Le ${formatDate(state.selectedDoc.archivePar.dateArchivage)} à ${new Date(state.selectedDoc.archivePar.dateArchivage).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                     </div>
                                 </div>
@@ -4163,10 +4190,10 @@ async function initApp() {
     try {
         if (localStorage.getItem('cerer_session')) {
             localStorage.removeItem('cerer_session');
-            console.log('✅ Migration localStorage → sessionStorage effectuée');
+            Logger.debug('✅ Migration localStorage → sessionStorage effectuée');
         }
     } catch (error) {
-        console.error('Erreur migration storage:', error);
+        Logger.error('Erreur migration storage:', error);
     }
 
     // Vérifier rapidement si une session existe
@@ -4197,7 +4224,7 @@ async function initApp() {
             await loadServices();
         }
     } catch (error) {
-        console.error('❌ Erreur initApp:', error);
+        Logger.error('❌ Erreur initApp:', error);
         // En cas d'erreur, afficher la page de connexion
         state.loading = false;
         state.isCheckingSession = false;
@@ -4229,5 +4256,5 @@ window.addEventListener('beforeunload', () => {
         clearTimeout(inactivityTimer);
         inactivityTimer = null;
     }
-    console.log('🧹 Nettoyage des intervalles avant changement de page');
+    Logger.debug('🧹 Nettoyage des intervalles avant changement de page');
 });

@@ -74,7 +74,7 @@ function dataURLToArrayBuffer(dataURL) {
         }
         return bytes.buffer;
     } catch (error) {
-        console.error('Erreur conversion dataURL:', error);
+        Logger.error('Erreur conversion dataURL:', error);
         throw new Error(`Impossible de convertir le data URL: ${error.message}`);
     }
 }
@@ -219,7 +219,7 @@ async function previewPDF(dataURL) {
         }
 
     } catch (error) {
-        console.error('Erreur lors du chargement du PDF:', error);
+        Logger.error('Erreur lors du chargement du PDF:', error);
         container.innerHTML = `
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">
@@ -270,7 +270,7 @@ async function previewWord(dataURL) {
             ` : ''}
         `;
     } catch (error) {
-        console.error('Erreur lors du chargement du document Word:', error);
+        Logger.error('Erreur lors du chargement du document Word:', error);
         container.innerHTML = `
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">
@@ -314,7 +314,7 @@ async function previewExcel(dataURL) {
 
         if (!dataURL.startsWith('data:')) {
             // Si ce n'est pas une data URL, essayer de la construire
-            console.warn('Le contenu n\'est pas au format data URL, tentative de normalisation...');
+            Logger.warn('Le contenu n\'est pas au format data URL, tentative de normalisation...');
 
             // Vérifier si c'est du base64 pur
             if (dataURL.match(/^[A-Za-z0-9+/=]+$/)) {
@@ -413,7 +413,7 @@ async function previewExcel(dataURL) {
         });
 
     } catch (error) {
-        console.error('Erreur lors du chargement du fichier Excel:', error);
+        Logger.error('Erreur lors du chargement du fichier Excel:', error);
         container.innerHTML = `
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">
@@ -462,10 +462,19 @@ async function openPreview(doc) {
     previewState.isOpen = true;
     previewState.currentDoc = doc;
 
+    // Récupérer l'ID du document (compatibilité avec différents formats)
+    const docId = doc._id || doc.id || doc.idDocument;
+
+    if (!docId) {
+        Logger.error('❌ Document sans ID:', doc);
+        showNotification('Erreur: Document invalide (ID manquant)', 'error');
+        return;
+    }
+
     // Récupérer le document complet
     let fullDoc;
     try {
-        fullDoc = await getDocument(state.currentUser, doc._id);
+        fullDoc = await getDocument(state.currentUser, docId);
     } catch (error) {
         showNotification('Erreur lors du chargement du document', 'error');
         return;
@@ -621,7 +630,7 @@ async function openPreview(doc) {
                 previewContent.innerHTML = content;
         }
     } catch (error) {
-        console.error('Erreur lors de la prévisualisation:', error);
+        Logger.error('Erreur lors de la prévisualisation:', error);
         previewContent.innerHTML = `
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">
