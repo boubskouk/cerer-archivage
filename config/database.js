@@ -85,29 +85,31 @@ async function connectDB(retryCount = 0) {
  */
 async function createIndexes() {
     try {
+        console.log('🔧 Création des index MongoDB...');
+
         // Index documents - OPTIMISÉS pour les requêtes fréquentes
+        console.log('📄 Index documents...');
+        await collections.documents.createIndex({ idDepartement: 1, deleted: 1 }); // CRITIQUE pour niveau 1,2,3
         await collections.documents.createIndex({ idUtilisateur: 1, dateAjout: -1 });
-        await collections.documents.createIndex({ idDepartement: 1, deleted: 1 }); // Optimisé pour niveau 1,2,3
-        await collections.documents.createIndex({ idService: 1, deleted: 1 }); // Optimisé pour niveau 1
+        await collections.documents.createIndex({ idService: 1, deleted: 1 }); // Pour niveau 1
         await collections.documents.createIndex({ deleted: 1 }); // Pour Super Admin
-        await collections.documents.createIndex({ sharedWith: 1, deleted: 1 }); // Pour documents partagés
+        console.log('✅ Index documents créés');
 
         // Index users
-        await collections.users.createIndex({ username: 1 }, { unique: true });
-        await collections.users.createIndex({ email: 1 }, { unique: true });
+        console.log('👤 Index users...');
+        await collections.users.createIndex({ username: 1 }, { unique: true, background: true });
         await collections.users.createIndex({ idDepartement: 1, idRole: 1 }); // Pour recherches niveau 3
+        console.log('✅ Index users créés');
 
         // Index services
+        console.log('🔧 Index services...');
         await collections.services.createIndex({ idDepartement: 1 });
+        console.log('✅ Index services créés');
 
-        // Index audit logs
-        await collections.auditLogs.createIndex({ timestamp: -1 });
-        await collections.auditLogs.createIndex({ user: 1 });
-        await collections.auditLogs.createIndex({ action: 1 });
-
-        console.log('✅ Index MongoDB créés/mis à jour');
+        console.log('✅ Tous les index MongoDB créés avec succès !');
     } catch (error) {
-        console.error('⚠️ Erreur création index:', error.message);
+        console.error('❌ Erreur création index:', error.message);
+        console.error('Stack:', error.stack);
     }
 }
 
