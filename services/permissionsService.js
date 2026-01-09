@@ -52,7 +52,9 @@ async function getAccessibleDocuments(userId) {
     // ✅ NIVEAU 0 : Super Admin - Voit TOUS les documents (lecture seule)
     if (userRole.niveau == constants.PERMISSIONS.SUPER_ADMIN) {
         const allDocs = await collections.documents.find({
-            $or: [{ deleted: false }, { deleted: { $exists: false } }]
+            deleted: false
+        }, {
+            projection: { contenu: 0 } // Exclure le contenu du fichier pour performance
         }).toArray();
         accessibleDocs = allDocs;
         console.log(`✅ NIVEAU 0 (Super Admin): Accès à TOUS les documents en LECTURE SEULE (${accessibleDocs.length})`);
@@ -86,14 +88,18 @@ async function getAccessibleDocuments(userId) {
         // Requête 1 : Documents du département (utilise index idDepartement+deleted)
         const deptDocsPromise = collections.documents.find({
             idDepartement: deptId,
-            $or: [{ deleted: false }, { deleted: { $exists: false } }]
+            deleted: false
+        }, {
+            projection: { contenu: 0 } // Exclure le contenu du fichier pour performance
         }).toArray();
 
         // Requête 2 : Documents des services (utilise index idService+deleted)
         const serviceDocsPromise = serviceIds.length > 0
             ? collections.documents.find({
                 idService: { $in: serviceIds },
-                $or: [{ deleted: false }, { deleted: { $exists: false } }]
+                deleted: false
+            }, {
+                projection: { contenu: 0 } // Exclure le contenu du fichier pour performance
             }).toArray()
             : Promise.resolve([]);
 
@@ -130,14 +136,18 @@ async function getAccessibleDocuments(userId) {
         const deptId = toObjectId(user.idDepartement);
         const deptDocs = await collections.documents.find({
             idDepartement: deptId,
-            $or: [{ deleted: false }, { deleted: { $exists: false } }]
+            deleted: false
+        }, {
+            projection: { contenu: 0 } // Exclure le contenu du fichier pour performance
         }).toArray();
 
         // + Documents partagés avec lui depuis d'autres départements
         const sharedDocs = await collections.documents.find({
             sharedWith: userId,
             idDepartement: { $ne: deptId },
-            $or: [{ deleted: false }, { deleted: { $exists: false } }]
+            deleted: false
+        }, {
+            projection: { contenu: 0 } // Exclure le contenu du fichier pour performance
         }).toArray();
 
         accessibleDocs = [...deptDocs, ...sharedDocs];
@@ -166,13 +176,17 @@ async function getAccessibleDocuments(userId) {
         const niveau3Docs = await collections.documents.find({
             idDepartement: deptId,
             idUtilisateur: { $in: niveau3Usernames },
-            $or: [{ deleted: false }, { deleted: { $exists: false } }]
+            deleted: false
+        }, {
+            projection: { contenu: 0 } // Exclure le contenu du fichier pour performance
         }).toArray();
 
         // + Documents partagés avec lui
         const sharedDocs = await collections.documents.find({
             sharedWith: userId,
-            $or: [{ deleted: false }, { deleted: { $exists: false } }]
+            deleted: false
+        }, {
+            projection: { contenu: 0 } // Exclure le contenu du fichier pour performance
         }).toArray();
 
         accessibleDocs = [...niveau3Docs, ...sharedDocs];
