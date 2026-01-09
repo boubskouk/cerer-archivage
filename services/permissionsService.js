@@ -52,7 +52,7 @@ async function getAccessibleDocuments(userId) {
     // ✅ NIVEAU 0 : Super Admin - Voit TOUS les documents (lecture seule)
     if (userRole.niveau == constants.PERMISSIONS.SUPER_ADMIN) {
         const allDocs = await collections.documents.find({
-            deleted: { $ne: true }
+            $or: [{ deleted: false }, { deleted: { $exists: false } }]
         }).toArray();
         accessibleDocs = allDocs;
         console.log(`✅ NIVEAU 0 (Super Admin): Accès à TOUS les documents en LECTURE SEULE (${accessibleDocs.length})`);
@@ -79,24 +79,39 @@ async function getAccessibleDocuments(userId) {
         console.log(`📋 Services trouvés: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
 
         // Documents du département principal + documents de tous ses services
-        console.log(`🔍 [NIVEAU 1] Recherche documents avec query:`);
-        console.log(`   deleted: { $ne: true }`);
-        console.log(`   $or: [ { idDepartement: ${deptId} }, { idService: { $in: [${serviceIds.length} ids] } } ]`);
+        console.log(`🔍 [NIVEAU 1] Recherche documents (2 requêtes optimisées):`);
 
         const startDocs = Date.now();
-        const deptDocs = await collections.documents.find({
-            deleted: { $ne: true },
-            $or: [
-                { idDepartement: deptId },
-                { idService: { $in: serviceIds } }
-            ]
+
+        // Requête 1 : Documents du département (utilise index idDepartement+deleted)
+        const deptDocsPromise = collections.documents.find({
+            idDepartement: deptId,
+            $or: [{ deleted: false }, { deleted: { $exists: false } }]
         }).toArray();
+
+        // Requête 2 : Documents des services (utilise index idService+deleted)
+        const serviceDocsPromise = serviceIds.length > 0
+            ? collections.documents.find({
+                idService: { $in: serviceIds },
+                $or: [{ deleted: false }, { deleted: { $exists: false } }]
+            }).toArray()
+            : Promise.resolve([]);
+
+        // Exécuter en parallèle
+        const [deptDocsResult, serviceDocsResult] = await Promise.all([deptDocsPromise, serviceDocsPromise]);
+
+        // Combiner et dédupliquer (au cas où un doc serait dans les deux)
+        const docsMap = new Map();
+        [...deptDocsResult, ...serviceDocsResult].forEach(doc => {
+            docsMap.set(doc._id.toString(), doc);
+        });
+        const deptDocs = Array.from(docsMap.values());
+
         const docsTime = Date.now() - startDocs;
+        console.log(`⏱️ Documents chargés en ${docsTime}ms (${deptDocsResult.length} dept + ${serviceDocsResult.length} services = ${deptDocs.length} total)`);
 
-        console.log(`⏱️ Documents chargés en ${docsTime}ms`);
-
-        if (docsTime > 5000) {
-            console.warn(`⚠️ REQUÊTE TRÈS LENTE (${docsTime}ms) - Vérifier les index!`);
+        if (docsTime > 1000) {
+            console.warn(`⚠️ REQUÊTE LENTE (${docsTime}ms) - Devrait être <500ms`);
         }
 
         accessibleDocs = deptDocs;
@@ -115,14 +130,14 @@ async function getAccessibleDocuments(userId) {
         const deptId = toObjectId(user.idDepartement);
         const deptDocs = await collections.documents.find({
             idDepartement: deptId,
-            deleted: { $ne: true }
+            $or: [{ deleted: false }, { deleted: { $exists: false } }]
         }).toArray();
 
         // + Documents partagés avec lui depuis d'autres départements
         const sharedDocs = await collections.documents.find({
             sharedWith: userId,
             idDepartement: { $ne: deptId },
-            deleted: { $ne: true }
+            $or: [{ deleted: false }, { deleted: { $exists: false } }]
         }).toArray();
 
         accessibleDocs = [...deptDocs, ...sharedDocs];
@@ -151,13 +166,13 @@ async function getAccessibleDocuments(userId) {
         const niveau3Docs = await collections.documents.find({
             idDepartement: deptId,
             idUtilisateur: { $in: niveau3Usernames },
-            deleted: { $ne: true }
+            $or: [{ deleted: false }, { deleted: { $exists: false } }]
         }).toArray();
 
         // + Documents partagés avec lui
         const sharedDocs = await collections.documents.find({
             sharedWith: userId,
-            deleted: { $ne: true }
+            $or: [{ deleted: false }, { deleted: { $exists: false } }]
         }).toArray();
 
         accessibleDocs = [...niveau3Docs, ...sharedDocs];
