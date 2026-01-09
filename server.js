@@ -237,12 +237,19 @@ app.get('/api/test-latency', async (req, res) => {
         const latency3 = Date.now() - start3;
         results.tests.push({ name: `Query documents (${docs.length} docs)`, latency: latency3 + 'ms' });
 
-        // Test 4: Info serveur
-        const serverStatus = await db.admin().serverStatus();
-        results.server = {
-            host: serverStatus.host,
-            version: serverStatus.version
-        };
+        // Test 4: Info serveur (optionnel)
+        try {
+            const serverStatus = await db.admin().serverStatus();
+            results.server = {
+                host: serverStatus.host,
+                version: serverStatus.version
+            };
+        } catch (error) {
+            results.server = {
+                note: 'ServerStatus non disponible (permissions limitées)',
+                error: error.message
+            };
+        }
 
         // Diagnostic
         const avgLatency = (latency1 + latency2 + latency3) / 3;
