@@ -68,14 +68,22 @@ async function getAccessibleDocuments(userId) {
 
         // Récupérer tous les services du département
         const deptId = toObjectId(user.idDepartement);
+        console.log(`🔍 [NIVEAU 1] Recherche services pour dept: ${deptId}`);
+        const startServices = Date.now();
         const services = await collections.services.find({
             idDepartement: deptId
         }).toArray();
+        console.log(`⏱️ Services chargés en ${Date.now() - startServices}ms`);
 
         const serviceIds = services.map(s => s._id);
-        console.log(`📋 Services trouvés pour le département: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
+        console.log(`📋 Services trouvés: ${services.map(s => s.nom).join(', ')} (${serviceIds.length})`);
 
         // Documents du département principal + documents de tous ses services
+        console.log(`🔍 [NIVEAU 1] Recherche documents avec query:`);
+        console.log(`   deleted: { $ne: true }`);
+        console.log(`   $or: [ { idDepartement: ${deptId} }, { idService: { $in: [${serviceIds.length} ids] } } ]`);
+
+        const startDocs = Date.now();
         const deptDocs = await collections.documents.find({
             deleted: { $ne: true },
             $or: [
@@ -83,6 +91,13 @@ async function getAccessibleDocuments(userId) {
                 { idService: { $in: serviceIds } }
             ]
         }).toArray();
+        const docsTime = Date.now() - startDocs;
+
+        console.log(`⏱️ Documents chargés en ${docsTime}ms`);
+
+        if (docsTime > 5000) {
+            console.warn(`⚠️ REQUÊTE TRÈS LENTE (${docsTime}ms) - Vérifier les index!`);
+        }
 
         accessibleDocs = deptDocs;
         console.log(`✅ NIVEAU 1: Accès aux documents du département + services (${accessibleDocs.length})`);
