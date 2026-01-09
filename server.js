@@ -206,6 +206,65 @@ app.post('/api/keep-alive', (req, res) => {
     res.json({ success: true });
 });
 
+// Route de test de latence MongoDB (temporaire pour debug)
+app.get('/api/test-latency', async (req, res) => {
+    try {
+        const { getDB } = require('./config/database');
+        const db = getDB();
+
+        const results = {
+            timestamp: new Date().toISOString(),
+            tests: []
+        };
+
+        // Test 1: Ping simple
+        const start1 = Date.now();
+        await db.admin().ping();
+        const latency1 = Date.now() - start1;
+        results.tests.push({ name: 'Ping', latency: latency1 + 'ms' });
+
+        // Test 2: Query simple
+        const start2 = Date.now();
+        const { getCollections } = require('./config/database');
+        const collections = getCollections();
+        await collections.users.findOne({});
+        const latency2 = Date.now() - start2;
+        results.tests.push({ name: 'Query simple (1 user)', latency: latency2 + 'ms' });
+
+        // Test 3: Query documents avec filtre
+        const start3 = Date.now();
+        const docs = await collections.documents.find({ deleted: { $ne: true } }).limit(10).toArray();
+        const latency3 = Date.now() - start3;
+        results.tests.push({ name: `Query documents (${docs.length} docs)`, latency: latency3 + 'ms' });
+
+        // Test 4: Info serveur
+        const serverStatus = await db.admin().serverStatus();
+        results.server = {
+            host: serverStatus.host,
+            version: serverStatus.version
+        };
+
+        // Diagnostic
+        const avgLatency = (latency1 + latency2 + latency3) / 3;
+        if (avgLatency > 200) {
+            results.diagnostic = '🚨 LATENCE ÉLEVÉE - MongoDB probablement dans une région différente de Render (Frankfurt)';
+            results.recommendation = 'Migrer MongoDB vers eu-central-1 (Frankfurt)';
+        } else if (avgLatency > 100) {
+            results.diagnostic = '⚠️ Latence modérée - Peut être optimisé';
+        } else {
+            results.diagnostic = '✅ Latence normale - MongoDB dans la même région';
+        }
+
+        res.json(results);
+
+    } catch (error) {
+        res.status(500).json({
+            error: error.message,
+            stack: error.stack
+        });
+    }
+});
+
 // Route pour vérifier le statut de session (utilisée par le polling client)
 app.get('/api/check-session-status', async (req, res) => {
     try {
