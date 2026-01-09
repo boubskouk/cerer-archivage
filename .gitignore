@@ -59,3 +59,18 @@ server.js.backup
 cookies.txt
 {
 
+# Documentation des comptes de test (SENSIBLE)
+COMPTES_TEST.md
+
+# Scripts de test et vérification (peuvent contenir des données sensibles)
+check-users.js
+check-deleted-field.js
+check-document-sizes.js
+test-index-usage.js
+test-final-performance.js
+test-mongo-latency.js
+fix-deleted-field.js
+
+# Scripts de migration (peuvent contenir des credentials)
+migrate-to-new-cluster.js
+

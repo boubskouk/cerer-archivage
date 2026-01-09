@@ -77,6 +77,94 @@ node scripts/test-security.js
 
 ---
 
+## 🚀 SCRIPTS DE MIGRATION ET PRÉVENTION
+
+### `pre-migration-check.js` ⭐ NOUVEAU
+
+**Objectif:** Vérifier les différences AVANT une migration
+
+**Usage:**
+```bash
+node scripts/pre-migration-check.js
+```
+
+**Ce qu'il fait:**
+- Compare Local ↔ Production (nombre de documents par collection)
+- Identifie les comptes uniquement en local (risque de perte)
+- Identifie les comptes uniquement en production
+- Vérifie les comptes critiques (jbk, boubs, test34, superadmin)
+- Fournit des recommandations
+
+**Quand l'utiliser:**
+- **TOUJOURS** avant toute migration
+- Pour identifier les données à risque
+- Avant un déploiement majeur
+
+---
+
+### `post-migration-check.js` ⭐ NOUVEAU
+
+**Objectif:** Valider qu'une migration s'est bien déroulée
+
+**Usage:**
+```bash
+node scripts/post-migration-check.js
+```
+
+**Ce qu'il vérifie:**
+- ✅ Toutes les 12 collections sont présentes
+- ✅ Nombre minimum d'utilisateurs (>5) et documents (>1)
+- ✅ Comptes critiques présents (jbk, boubs)
+- ✅ Champ "deleted" présent sur tous les documents
+- ✅ Index MongoDB créés correctement
+
+**Résultat:**
+```
+✅✅✅ MIGRATION RÉUSSIE ✅✅✅
+```
+ou
+```
+❌❌❌ PROBLÈMES DÉTECTÉS ❌❌❌
+```
+
+**Quand l'utiliser:**
+- **TOUJOURS** après toute migration
+- Pour valider l'intégrité des données
+- Avant de mettre en production
+
+---
+
+### `create-test-data.js` ⭐ NOUVEAU
+
+**Objectif:** Créer automatiquement des comptes de test
+
+**Usage:**
+```bash
+node scripts/create-test-data.js
+```
+
+**Comptes créés:**
+- `test_superadmin` - Niveau 0 (Super Admin)
+- `test_niveau1` - Niveau 1 (Chef Département)
+- `test_niveau2` - Niveau 2 (Chef Service)
+- `test_niveau3` - Niveau 3 (Agent)
+- `test34` - Niveau 1 (Compte générique)
+
+**Mot de passe:** `test123` ⚠️ À changer en production!
+
+**Ce qu'il fait:**
+- Vérifie que les rôles et départements existent
+- Crée les comptes avec bcrypt
+- Ignore les comptes déjà existants
+- Affiche tous les identifiants créés
+
+**Quand l'utiliser:**
+- Après une migration (si comptes de test perdus)
+- Pour créer un environnement de test
+- En développement local
+
+---
+
 ## 🔄 SCRIPTS DE BASE DE DONNÉES
 
 ### `sync-databases.js`
@@ -161,6 +249,39 @@ pm2 restart archivage-cerer
 
 # 4. Tester
 node scripts/test-security.js
+```
+
+### Migration vers nouveau cluster MongoDB ⭐ NOUVEAU WORKFLOW
+
+```bash
+# ÉTAPE 1: AVANT LA MIGRATION
+# Vérifier les différences local/prod
+node scripts/pre-migration-check.js
+# Lire attentivement le rapport
+
+# Noter les comptes critiques à ne pas perdre
+
+# ÉTAPE 2: MIGRATION
+# Exécuter votre script de migration
+node migrate-to-new-cluster.js
+
+# ÉTAPE 3: VALIDATION POST-MIGRATION
+# Vérifier que tout est OK
+node scripts/post-migration-check.js
+
+# Si des comptes de test manquent
+node scripts/create-test-data.js
+
+# ÉTAPE 4: MISE EN PRODUCTION
+# Mettre à jour MONGODB_URI dans Render/Heroku
+# Attendre le redéploiement
+
+# ÉTAPE 5: TEST EN PRODUCTION
+# Tester avec chaque niveau de compte:
+# - test_superadmin / test123
+# - test_niveau1 / test123
+# - test_niveau2 / test123
+# - test_niveau3 / test123
 ```
 
 ### Déploiement avec synchronisation de base de données
